@@ -77,35 +77,3 @@ func (t *TextInput) AddString(s string) {
 	t.Text += result.String()
 }
 
-// findPrevWordBoundary returns the index of the previous word boundary
-// This is used for cursor movement (not implemented yet but useful for future)
-func findPrevWordBoundary(text string) int {
-	runes := []rune(text)
-	n := len(runes)
-	if n == 0 {
-		return 0
-	}
-
-	i := n - 1
-	// Skip trailing spaces
-	for i >= 0 && unicode.IsSpace(runes[i]) {
-		i--
-	}
-
-	// Skip word characters
-	if i >= 0 {
-		if unicode.IsLetter(runes[i]) || unicode.IsDigit(runes[i]) {
-			for i >= 0 && (unicode.IsLetter(runes[i]) || unicode.IsDigit(runes[i])) {
-				i--
-			}
-		} else {
-			// Skip same punctuation
-			char := runes[i]
-			for i >= 0 && runes[i] == char && !unicode.IsSpace(runes[i]) {
-				i--
-			}
-		}
-	}
-
-	return i + 1
-}

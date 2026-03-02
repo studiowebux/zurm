@@ -230,6 +230,9 @@ func main() {
 			// Try to restore the saved layout if available
 			if td.Layout != nil {
 				t, tErr = restoreTabWithLayout(cfg, paneRect, fontR.CellW, fontR.CellH, td)
+				if tErr != nil {
+					log.Printf("session restore: failed to restore tab layout: %v", tErr)
+				}
 			}
 
 			// Fall back to creating a single pane if layout restore failed
