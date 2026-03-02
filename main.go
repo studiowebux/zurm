@@ -425,11 +425,15 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		}
 		g.focused.Term.Buf.RUnlock()
 	}
+	// Snapshot renderSeq BEFORE DrawAll so that any PTY output arriving
+	// during rendering (e.g. shell responds to resize) bumps the seq above
+	// our snapshot and triggers a redraw on the next frame.
+	g.lastPtySeq = terminal.RenderSeq()
+
 	g.renderer.DrawAll(screen, g.tabs, g.activeTab, g.focused, g.zoomed,
 		&g.menuState, &g.overlayState, &g.confirmState, &g.searchState, &g.statusBarState, &g.tabSwitcherState,
 		&g.paletteState, g.paletteEntries, &g.fileExplorerState)
 	g.screenDirty = false
-	g.lastPtySeq = terminal.RenderSeq()
 	g.lastClockSec = time.Now().Unix()
 
 	// Screenshot capture: one-shot, triggered by Cmd+Shift+S.
@@ -1958,7 +1962,8 @@ func (g *Game) handleMouse() {
 	}
 
 	// Click on an inactive pane always switches focus, regardless of PTY mouse mode.
-	if leftPressed && !leftWas {
+	// When zoomed, only the focused pane is visible — skip pane-switch hit test.
+	if leftPressed && !leftWas && !g.zoomed {
 		if clicked := g.layout.PaneAt(mx, my); clicked != nil && clicked != g.focused {
 			g.setFocus(clicked)
 			g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
@@ -2292,7 +2297,11 @@ func (g *Game) switchTab(i int) {
 	if i < 0 || i >= len(g.tabs) {
 		return
 	}
-	g.zoomed = false
+	// Restore pane rects before leaving a zoomed tab so the layout is
+	// correct when switching back later.
+	if g.zoomed {
+		g.unzoom()
+	}
 	g.activeTab = i
 	g.renderer.SetLayoutDirty()
 	g.renderer.ClearPaneCache()
@@ -2976,35 +2985,52 @@ func (g *Game) handleRenameInput() {
 
 // toggleZoom fullscreens the focused pane (Cmd+Z). Calling again restores the layout.
 func (g *Game) toggleZoom() {
+	if g.zoomed {
+		g.unzoom()
+		return
+	}
 	physW := int(float64(g.winW) * g.dpi)
 	physH := int(float64(g.winH) * g.dpi)
 	tabBarH := g.renderer.TabBarHeight()
 	statusBarH := g.renderer.StatusBarHeight()
 	fullRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
 
-	g.zoomed = !g.zoomed
+	g.zoomed = true
 	g.screenDirty = true
 	g.renderer.SetLayoutDirty()
-	g.renderer.ClearPaneCache() // force all panes to redraw after zoom in/out
-	if g.zoomed {
-		p := g.focused
-		p.Rect = fullRect
-		cols := (fullRect.Dx() - g.cfg.Window.Padding*2) / g.font.CellW
-		rows := (fullRect.Dy() - g.cfg.Window.Padding*2) / g.font.CellH
-		if cols < 1 {
-			cols = 1
-		}
-		if rows < 1 {
-			rows = 1
-		}
-		p.Cols = cols
-		p.Rows = rows
-		p.Term.Resize(cols, rows)
-	} else {
-		g.layout.ComputeRects(fullRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
-		for _, leaf := range g.layout.Leaves() {
-			leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
-		}
+	g.renderer.ClearPaneCache()
+	p := g.focused
+	p.Rect = fullRect
+	cols := (fullRect.Dx() - g.cfg.Window.Padding*2) / g.font.CellW
+	rows := (fullRect.Dy() - g.cfg.Window.Padding*2) / g.font.CellH
+	if cols < 1 {
+		cols = 1
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	p.Cols = cols
+	p.Rows = rows
+	p.Term.Resize(cols, rows)
+}
+
+// unzoom restores pane rects to the normal layout. Called by toggleZoom and
+// switchTab so the layout is always consistent when leaving zoom state.
+func (g *Game) unzoom() {
+	g.zoomed = false
+	g.screenDirty = true
+	g.renderer.SetLayoutDirty()
+	g.renderer.ClearPaneCache()
+
+	physW := int(float64(g.winW) * g.dpi)
+	physH := int(float64(g.winH) * g.dpi)
+	tabBarH := g.renderer.TabBarHeight()
+	statusBarH := g.renderer.StatusBarHeight()
+	fullRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
+
+	g.layout.ComputeRects(fullRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
+	for _, leaf := range g.layout.Leaves() {
+		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
 	}
 }
 

@@ -9,7 +9,6 @@ var Defaults = Config{
 	Window: WindowConfig{
 		Columns: 120,
 		Rows:    35,
-		Opacity: 1.0,
 		Padding: 4,
 	},
 	Colors: ColorConfig{

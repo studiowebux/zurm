@@ -22,7 +22,6 @@ size   = 15
 [window]
 columns = 120
 rows    = 35
-opacity = 1.0
 padding = 4    # pixels inside each pane edge
 
 [shell]
@@ -122,10 +121,9 @@ type FontConfig struct {
 }
 
 type WindowConfig struct {
-	Columns int     `toml:"columns"`
-	Rows    int     `toml:"rows"`
-	Opacity float64 `toml:"opacity"`
-	Padding int     `toml:"padding"`
+	Columns int `toml:"columns"`
+	Rows    int `toml:"rows"`
+	Padding int `toml:"padding"`
 }
 
 type ColorConfig struct {

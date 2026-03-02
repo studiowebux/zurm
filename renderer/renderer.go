@@ -179,7 +179,7 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 	if r.layoutDirty {
 		r.offscreen.Fill(r.borderColor)
 		r.layoutDirty = false
-	} else if layout != nil {
+	} else if layout != nil && !zoomed {
 		r.drawDividers(layout)
 	}
 
