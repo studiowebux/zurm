@@ -53,11 +53,11 @@ Discord: https://discord.gg/BG5Erm9fNv
 | **Command palette** | Cmd+P opens a searchable list of all commands and shortcuts |
 | **Help overlay** | Cmd+/ shows all keybindings grouped by category |
 | **Right-click menu** | Context menu for copy/paste, pane management, scroll, and more |
-| **Session persistence** | On quit, saves each tab's CWD, title, and pin slot. On relaunch, reopens tabs at those directories with fresh shells. Pane splits and running processes are not restored. |
+| **Session persistence** | On quit, saves each tab's CWD, title, pin slot, and complete pane layout (splits and ratios). On relaunch, restores tabs and pane structure with fresh shells. Running processes are not preserved. |
 | **Close confirmation** | Optional dialog before closing a tab or pane (configurable) |
-| **File explorer** | Cmd+E opens a sidebar tree browser with create, rename, delete, copy, and Finder reveal |
+| **File explorer** | Cmd+E opens a sidebar tree browser with `.` and `..` entries, create/rename/delete/copy operations, search filter (`/`), and Finder reveal |
 | **Command blocks** | OSC 133 prompt/output tracking; hover to copy a command's output with one click |
-| **Emoji / wide char** | Tab names support emoji and CJK characters with correct column widths |
+| **Wide character support** | CJK characters render with correct column widths. Note: Emoji displays as boxes due to Ebiten limitations (see [docs/emoji-limitations.md](docs/emoji-limitations.md)) |
 | **Config auto-bootstrap** | Writes a fully documented `~/.config/zurm/config.toml` on first launch |
 | **Configurable** | TOML config: font, colors, shell, padding, scrollback, keyboard, status bar, session |
 
@@ -131,6 +131,7 @@ left_option_as_meta = true  # left Option sends ESC sequences; right Option comp
 [session]
 enabled           = true   # save/restore session on quit/launch
 restore_on_launch = true
+auto_save         = false  # automatically save session on quit (set true to enable)
 ```
 
 Shell hooks for command blocks (OSC 133) are installed via the command palette: `Cmd+P` → "Install shell hooks".
@@ -152,12 +153,11 @@ Open an issue before starting significant work.
 
 ## Assets
 
-Fonts embedded in the binary:
+Font embedded in the binary:
 
 | Font | Source | License |
 |------|--------|---------|
 | JetBrains Mono Regular | https://github.com/JetBrains/JetBrainsMono | SIL Open Font License 1.1 |
-| Noto Emoji | https://github.com/google/fonts/tree/main/ofl/notoemoji | SIL Open Font License 1.1 |
 
 ## License
 
