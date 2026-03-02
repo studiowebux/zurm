@@ -33,13 +33,50 @@ jobs:
           CGO_ENABLED: "1"
           GOOS: darwin
           GOARCH: arm64
-        run: go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o dist/zurm-macos-arm64 .
+        run: go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o dist/zurm .
+
+      - name: Package .app bundle
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          mkdir -p dist/zurm.app/Contents/MacOS
+          cp dist/zurm dist/zurm.app/Contents/MacOS/zurm
+          cat > dist/zurm.app/Contents/Info.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>zurm</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.studiowebux.zurm</string>
+              <key>CFBundleName</key>
+              <string>zurm</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${VERSION}</string>
+              <key>CFBundleVersion</key>
+              <string>${VERSION}</string>
+              <key>LSApplicationCategoryType</key>
+              <string>public.app-category.developer-tools</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>12.0</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>NSPrincipalClass</key>
+              <string>NSApplication</string>
+          </dict>
+          </plist>
+          EOF
+          cd dist && zip -r zurm-macos-arm64.zip zurm.app
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: binaries
-          path: dist/
+          path: |
+            dist/zurm-macos-arm64.zip
+            dist/zurm
           retention-days: 7
 
   release:
@@ -63,6 +100,7 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            dist/zurm-macos-arm64
+            dist/zurm-macos-arm64.zip
+            dist/zurm
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

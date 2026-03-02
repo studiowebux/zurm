@@ -67,15 +67,22 @@ Discord: https://discord.gg/BG5Erm9fNv
 
 Download the latest release from https://github.com/studiowebux/zurm/releases
 
-The binary is not notarized yet. macOS will block it on first launch. To allow it:
+**`zurm-macos-arm64.zip`** — .app bundle, drag to `/Applications` and launch normally.
+
+**`zurm`** — raw binary, run directly from the terminal.
+
+The app is not notarized yet. On first launch macOS Gatekeeper will block it. To allow it:
 
 ```bash
-xattr -d com.apple.quarantine zurm-macos-arm64
-chmod +x zurm-macos-arm64
-./zurm-macos-arm64
+# For the .app bundle
+xattr -d com.apple.quarantine zurm.app
+
+# For the raw binary
+xattr -d com.apple.quarantine zurm
+chmod +x zurm
 ```
 
-Or: right-click the binary in Finder → Open → Open anyway.
+Or: right-click → Open → Open anyway.
 
 ### From source
 
