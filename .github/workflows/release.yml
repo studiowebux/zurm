@@ -39,13 +39,17 @@ jobs:
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           mkdir -p dist/zurm.app/Contents/MacOS
+          mkdir -p dist/zurm.app/Contents/Resources
           cp dist/zurm dist/zurm.app/Contents/MacOS/zurm
+          cp assets/icons/zurm.icns dist/zurm.app/Contents/Resources/zurm.icns
           cat > dist/zurm.app/Contents/Info.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
               <key>CFBundleExecutable</key>
+              <string>zurm</string>
+              <key>CFBundleIconFile</key>
               <string>zurm</string>
               <key>CFBundleIdentifier</key>
               <string>com.studiowebux.zurm</string>
