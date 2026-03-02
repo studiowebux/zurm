@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-03-03
+
+### Fixed
+
+- Tab stops not rebuilt on terminal resize — tabs beyond the original column count jumped to the last column, causing `ls` and other tab-using output to wrap incorrectly after resizing the window
+
 ## [0.2.0] - 2026-03-03
 
 ### Added
@@ -56,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Block timer sourced from OSC C (command enter) for accurate execution duration
 - Block background tint uses premultiplied alpha for correct Ebitengine blending
 
-[Unreleased]: https://github.com/studiowebux/zurm/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/studiowebux/zurm/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/studiowebux/zurm/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/studiowebux/zurm/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/studiowebux/zurm/releases/tag/v0.1.0

@@ -240,6 +240,7 @@ func (t *Terminal) SendClipboardResponses() {
 func (t *Terminal) Resize(cols, rows int) {
 	t.Buf.Lock()
 	t.Buf.Resize(rows, cols)
+	t.parser.resetTabStops() // rebuild tab stops for new column count
 	t.Buf.Unlock()
 	if t.pty != nil {
 		t.pty.Resize(cols, rows)
