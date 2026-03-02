@@ -1,0 +1,38 @@
+name: Checks
+
+on:
+  workflow_call:
+
+jobs:
+  checks:
+    name: Checks
+    runs-on: macos-14
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install tools
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Staticcheck
+        run: staticcheck ./...
+
+      - name: Gosec
+        run: gosec -severity medium ./...
+
+      - name: Govulncheck
+        run: govulncheck ./...
