@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-03-03
+## [0.3.0] - 2026-03-02
 
 ### Added
 
@@ -17,19 +17,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File explorer search/filter with Telescope-style filtering (press "/" to search)
 - Pane layout persistence — saves and restores complete pane tree structure with splits and ratios
 - macOS .app bundle detection — automatically uses home directory instead of bundle internals
-- Improved emoji font rendering with language hints
 - Text input utilities with continuous backspace support and proper key repeat
+- File explorer `.` (current directory) entry — pressing Enter inserts the current path
+- File explorer `..` (parent directory) entry — always visible as first item for easy navigation
 
 ### Changed
 
 - Session auto-save now defaults to false (set `session.auto_save = true` in config to enable)
 - File explorer shows only matching entries when searching (like Telescope)
 - Each pane's working directory is now saved and restored in sessions
+- File explorer search now filters current directory only (non-recursive) for better performance
+- File explorer Enter key behavior — directories navigate into them, `.` inserts current path
+- File explorer hint bar shows `../` for parent navigation instead of confusing `h/⌫`
 
 ### Fixed
 
 - Initial directory when launching from .app bundle now correctly defaults to home
-- Emoji rendering improvements for better macOS compatibility
+- File explorer search navigation and scrolling when filtering
+- File explorer search rendering now shows a flat filtered list
+- Prompt arrow and UI symbols incorrectly treated as emoji characters
+
+### Removed
+
+- Emoji font support (saves 10MB binary size) — Ebiten doesn't support color fonts (see docs/emoji-limitations.md)
 
 ## [0.2.1] - 2026-03-03
 
