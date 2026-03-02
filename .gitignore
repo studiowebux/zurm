@@ -1,0 +1,14 @@
+# Build output
+zurm
+tty
+*.exe
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Environment
+.env
