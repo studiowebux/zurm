@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-03
+
+### Added
+
+- Alt+Backspace word deletion in all text inputs (tab rename, search, palette, file explorer)
+- Manual session save with configurable auto-save (defaults to false to prevent accidental overwrites)
+- "Save Session" command in command palette for explicit session snapshots
+- File explorer search/filter with Telescope-style filtering (press "/" to search)
+- Pane layout persistence — saves and restores complete pane tree structure with splits and ratios
+- macOS .app bundle detection — automatically uses home directory instead of bundle internals
+- Improved emoji font rendering with language hints
+- Text input utilities with continuous backspace support and proper key repeat
+
+### Changed
+
+- Session auto-save now defaults to false (set `session.auto_save = true` in config to enable)
+- File explorer shows only matching entries when searching (like Telescope)
+- Each pane's working directory is now saved and restored in sessions
+
+### Fixed
+
+- Initial directory when launching from .app bundle now correctly defaults to home
+- Emoji rendering improvements for better macOS compatibility
+
 ## [0.2.1] - 2026-03-03
 
 ### Fixed

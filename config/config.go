@@ -222,6 +222,9 @@ type SessionConfig struct {
 	Enabled bool `toml:"enabled"`
 	// RestoreOnLaunch reopens saved tabs with their last CWDs and titles.
 	RestoreOnLaunch bool `toml:"restore_on_launch"`
+	// AutoSave controls whether sessions are automatically saved on exit.
+	// When false, sessions must be saved manually via command palette.
+	AutoSave bool `toml:"auto_save"`
 }
 
 type FileExplorerConfig struct {

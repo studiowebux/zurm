@@ -143,6 +143,13 @@ type Game struct {
 	paletteRepeatStart  time.Time
 	paletteRepeatLast   time.Time
 
+	// Key repeat state for tab rename text input (backspace).
+	renameRepeatKey    ebiten.Key
+	renameRepeatActive bool
+	renameRepeatStart  time.Time
+	renameRepeatLast   time.Time
+	renameRepeatAlt    bool // Remember if alt was pressed when repeat started
+
 	// Dirty-render state — screen is only redrawn when something changes.
 	screenDirty  bool
 	lastPtySeq   uint64
@@ -194,8 +201,16 @@ func main() {
 	if err != nil {
 		log.Fatalf("font load: %v", err)
 	}
-	if err := fontR.LoadEmojiFont(notoEmoji); err != nil {
-		log.Printf("emoji font load failed (emoji will render as boxes): %v", err)
+	// Check if emoji font data was embedded correctly
+	if len(notoEmoji) == 0 {
+		log.Printf("WARNING: NotoEmoji font not embedded, emoji will render as boxes")
+	} else {
+		log.Printf("NotoEmoji font embedded successfully (%d bytes)", len(notoEmoji))
+		if err := fontR.LoadEmojiFont(notoEmoji); err != nil {
+			log.Printf("emoji font load failed (emoji will render as boxes): %v", err)
+		} else {
+			log.Printf("emoji font loaded successfully")
+		}
 	}
 
 	// Compute tab bar and status bar heights first so they're included in the window size budget.
@@ -217,22 +232,37 @@ func main() {
 	var initialActive int
 	if sess, loadErr := session.Load(cfg); loadErr == nil && sess != nil && !*noRestore && len(sess.Tabs) > 0 {
 		for _, td := range sess.Tabs {
-			t, tErr := tab.New(cfg, paneRect, fontR.CellW, fontR.CellH, td.Cwd)
-			if tErr != nil {
-				log.Printf("session restore: tab new: %v", tErr)
-				continue
+			var t *tab.Tab
+			var tErr error
+
+			// Try to restore the saved layout if available
+			if td.Layout != nil {
+				t, tErr = restoreTabWithLayout(cfg, paneRect, fontR.CellW, fontR.CellH, td)
 			}
+
+			// Fall back to creating a single pane if layout restore failed
+			if t == nil {
+				// Sanitize the directory in case it's inside a .app bundle
+				sanitizedDir := sanitizeDirectory(td.Cwd)
+				t, tErr = tab.New(cfg, paneRect, fontR.CellW, fontR.CellH, sanitizedDir)
+				if tErr != nil {
+					log.Printf("session restore: tab new: %v", tErr)
+					continue
+				}
+				if leaf := t.Layout.Leaves(); len(leaf) > 0 {
+					// Pre-populate Cwd so saveSession() has a valid value before
+					// lsof/OSC 7 fires. Without this, quitting quickly overwrites
+					// the session with empty CWDs.
+					leaf[0].Pane.Term.Cwd = td.Cwd
+				}
+			}
+
 			t.Title = td.Title
 			t.UserRenamed = td.UserRenamed
 			if len(td.PinnedSlot) > 0 {
 				t.PinnedSlot = []rune(td.PinnedSlot)[0]
 			}
-			if leaf := t.Layout.Leaves(); len(leaf) > 0 {
-				// Pre-populate Cwd so saveSession() has a valid value before
-				// lsof/OSC 7 fires. Without this, quitting quickly overwrites
-				// the session with empty CWDs.
-				leaf[0].Pane.Term.Cwd = td.Cwd
-			}
+
 			initialTabs = append(initialTabs, t)
 		}
 		if len(initialTabs) > 0 {
@@ -243,9 +273,9 @@ func main() {
 		}
 	}
 	if len(initialTabs) == 0 {
-		// Default to $HOME so the first session opens in the user's home directory.
-		homeDir, _ := os.UserHomeDir()
-		firstTab, tErr := tab.New(cfg, paneRect, fontR.CellW, fontR.CellH, homeDir)
+		// Use sanitized directory (handles .app bundles correctly)
+		initialDir := getInitialDirectory("")
+		firstTab, tErr := tab.New(cfg, paneRect, fontR.CellW, fontR.CellH, initialDir)
 		if tErr != nil {
 			log.Fatalf("tab new: %v", tErr)
 		}
@@ -1170,11 +1200,14 @@ func (g *Game) handleSearchInput() {
 			case key == ebiten.KeyArrowUp:
 				g.searchPrev()
 			case key == ebiten.KeyBackspace && !meta:
-				runes := []rune(g.searchState.Query)
-				if len(runes) > 0 {
-					g.searchState.Query = string(runes[:len(runes)-1])
-					g.screenDirty = true
+				ti := &TextInput{Text: g.searchState.Query}
+				if ebiten.IsKeyPressed(ebiten.KeyAlt) {
+					ti.DeleteWord()
+				} else {
+					ti.DeleteLastChar()
 				}
+				g.searchState.Query = ti.Text
+				g.screenDirty = true
 			}
 		}
 		g.prevKeys[key] = pressed
@@ -1293,12 +1326,23 @@ func (g *Game) handleFileExplorerInput() {
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
 	shift := ebiten.IsKeyPressed(ebiten.KeyShift)
 
-	// ESC closes the panel immediately on every physical key-down event.
-	// inpututil.IsKeyJustPressed fires exactly once per press regardless of
-	// how briefly the key is held — polling-based IsKeyPressed can miss
-	// fast taps that start and end between two Update frames.
+	// ESC handling
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		g.closeFileExplorer()
+		// In search mode, ESC clears search or exits search mode
+		if st.SearchMode {
+			st.SearchMode = false
+			if st.SearchQuery == "" {
+				// If no query, close the explorer
+				g.closeFileExplorer()
+			}
+		} else if st.SearchQuery != "" {
+			// Clear search filter but stay in explorer
+			st.SearchQuery = ""
+			st.FilteredIndices = nil
+		} else {
+			// Normal close
+			g.closeFileExplorer()
+		}
 		g.prevKeys[ebiten.KeyEscape] = true
 		return
 	}
@@ -1317,6 +1361,12 @@ func (g *Game) handleFileExplorerInput() {
 	// Confirm dialog: only Enter / Y continue; ESC already handled above.
 	if st.ConfirmOpen {
 		g.handleExplorerConfirmInput()
+		return
+	}
+
+	// Search mode handling
+	if st.SearchMode {
+		g.handleExplorerSearchInput()
 		return
 	}
 
@@ -1346,7 +1396,7 @@ func (g *Game) handleFileExplorerInput() {
 		ebiten.KeyEnter,
 		ebiten.KeyN, ebiten.KeyR, ebiten.KeyD,
 		ebiten.KeyC, ebiten.KeyX, ebiten.KeyP,
-		ebiten.KeyO,
+		ebiten.KeyO, ebiten.KeySlash,
 	}
 	for _, key := range actionKeys {
 		pressed := ebiten.IsKeyPressed(key)
@@ -1474,6 +1524,13 @@ func (g *Game) handleFileExplorerInput() {
 				}
 				_ = cmd.Start()
 			}
+
+		case key == ebiten.KeySlash && !meta:
+			// Enter search mode
+			st.SearchMode = true
+			// Don't clear existing search query - allow editing it
+			g.prevKeys[ebiten.KeyEnter] = ebiten.IsKeyPressed(ebiten.KeyEnter)
+			g.prevKeys[ebiten.KeyBackspace] = ebiten.IsKeyPressed(ebiten.KeyBackspace)
 		}
 	}
 }
@@ -1541,19 +1598,63 @@ func (g *Game) updatePaletteRepeat(key ebiten.Key, now time.Time) bool {
 // explorerMoveUp moves the cursor up one entry.
 func (g *Game) explorerMoveUp() {
 	st := &g.fileExplorerState
-	if st.Cursor > 0 {
-		st.Cursor--
-		g.explorerEnsureVisible()
+
+	// If we have filtered results, navigate within them
+	if st.SearchQuery != "" && len(st.FilteredIndices) > 0 {
+		// Find current position in filtered list
+		currentFilterIdx := -1
+		for i, idx := range st.FilteredIndices {
+			if idx == st.Cursor {
+				currentFilterIdx = i
+				break
+			}
+		}
+
+		// Move to previous filtered item if possible
+		if currentFilterIdx > 0 {
+			st.Cursor = st.FilteredIndices[currentFilterIdx-1]
+		} else if currentFilterIdx == -1 && len(st.FilteredIndices) > 0 {
+			// Not on a filtered item, jump to last filtered item
+			st.Cursor = st.FilteredIndices[len(st.FilteredIndices)-1]
+		}
+	} else {
+		// Normal navigation
+		if st.Cursor > 0 {
+			st.Cursor--
+		}
 	}
+	g.explorerEnsureVisible()
 }
 
 // explorerMoveDown moves the cursor down one entry.
 func (g *Game) explorerMoveDown() {
 	st := &g.fileExplorerState
-	if st.Cursor < len(st.Entries)-1 {
-		st.Cursor++
-		g.explorerEnsureVisible()
+
+	// If we have filtered results, navigate within them
+	if st.SearchQuery != "" && len(st.FilteredIndices) > 0 {
+		// Find current position in filtered list
+		currentFilterIdx := -1
+		for i, idx := range st.FilteredIndices {
+			if idx == st.Cursor {
+				currentFilterIdx = i
+				break
+			}
+		}
+
+		// Move to next filtered item if possible
+		if currentFilterIdx >= 0 && currentFilterIdx < len(st.FilteredIndices)-1 {
+			st.Cursor = st.FilteredIndices[currentFilterIdx+1]
+		} else if currentFilterIdx == -1 && len(st.FilteredIndices) > 0 {
+			// Not on a filtered item, jump to first filtered item
+			st.Cursor = st.FilteredIndices[0]
+		}
+	} else {
+		// Normal navigation
+		if st.Cursor < len(st.Entries)-1 {
+			st.Cursor++
+		}
 	}
+	g.explorerEnsureVisible()
 }
 
 // handleExplorerConfirmInput handles Enter/Y in the confirm dialog.
@@ -1574,6 +1675,49 @@ func (g *Game) handleExplorerConfirmInput() {
 	}
 }
 
+// handleExplorerSearchInput handles text input while in search mode.
+func (g *Game) handleExplorerSearchInput() {
+	st := &g.fileExplorerState
+	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+
+	// Handle Enter to accept search and exit search mode
+	enterPressed := ebiten.IsKeyPressed(ebiten.KeyEnter)
+	enterWas := g.prevKeys[ebiten.KeyEnter]
+	g.prevKeys[ebiten.KeyEnter] = enterPressed
+	if enterPressed && !enterWas {
+		st.SearchMode = false
+		// If we have filtered results and a valid cursor, navigate to first match
+		if len(st.FilteredIndices) > 0 {
+			st.Cursor = st.FilteredIndices[0]
+			g.explorerEnsureVisible()
+		}
+		return
+	}
+
+	// Handle Backspace with alt+backspace support
+	backspacePressed := ebiten.IsKeyPressed(ebiten.KeyBackspace)
+	backspaceWas := g.prevKeys[ebiten.KeyBackspace]
+	g.prevKeys[ebiten.KeyBackspace] = backspacePressed
+	if backspacePressed && !backspaceWas && !meta {
+		ti := &TextInput{Text: st.SearchQuery}
+		if ebiten.IsKeyPressed(ebiten.KeyAlt) {
+			ti.DeleteWord()
+		} else {
+			ti.DeleteLastChar()
+		}
+		st.SearchQuery = ti.Text
+	}
+
+	// Handle text input
+	if !meta {
+		for _, r := range ebiten.AppendInputChars(nil) {
+			if r >= 0x20 && r != 0x7f {
+				st.SearchQuery += string(r)
+			}
+		}
+	}
+}
+
 // handleExplorerInputMode handles text input for rename/new-file/new-dir modes.
 // ESC is handled at the top of handleFileExplorerInput before this is called.
 func (g *Game) handleExplorerInputMode() {
@@ -1590,10 +1734,13 @@ func (g *Game) handleExplorerInputMode() {
 		switch key {
 		case ebiten.KeyBackspace:
 			if !meta {
-				runes := []rune(st.InputText)
-				if len(runes) > 0 {
-					st.InputText = string(runes[:len(runes)-1])
+				ti := &TextInput{Text: st.InputText}
+				if ebiten.IsKeyPressed(ebiten.KeyAlt) {
+					ti.DeleteWord()
+				} else {
+					ti.DeleteLastChar()
 				}
+				st.InputText = ti.Text
 			}
 		case ebiten.KeyEnter:
 			g.executeExplorerInputMode()
@@ -1656,7 +1803,20 @@ func (g *Game) explorerEnsureVisible() {
 	if st.RowH <= 0 {
 		return
 	}
-	rowTop := st.Cursor * st.RowH
+
+	// Calculate the visual row index based on filtering
+	visualIdx := st.Cursor
+	if st.SearchQuery != "" && len(st.FilteredIndices) > 0 {
+		// Find the position of the cursor in the filtered list
+		for i, idx := range st.FilteredIndices {
+			if idx == st.Cursor {
+				visualIdx = i
+				break
+			}
+		}
+	}
+
+	rowTop := visualIdx * st.RowH
 	rowBot := rowTop + st.RowH
 	if rowTop < st.ScrollOffset {
 		st.ScrollOffset = rowTop
@@ -1675,26 +1835,49 @@ func (g *Game) handleExplorerClick(mx, my int, panelRect image.Rectangle) {
 	if st.RowH <= 0 {
 		return
 	}
-	contentTop := panelRect.Min.Y + g.font.CellH + 6 // header height
+	// Adjust header height when search is shown
+	headerHeight := g.font.CellH + 6
+	if st.SearchMode || st.SearchQuery != "" {
+		headerHeight = g.font.CellH*2 + 8
+	}
+	contentTop := panelRect.Min.Y + headerHeight
 	relY := my - contentTop + st.ScrollOffset
 	if relY < 0 {
 		return
 	}
-	idx := relY / st.RowH
-	if idx < 0 || idx >= len(st.Entries) {
-		return
-	}
-	if idx == st.Cursor && st.Entries[idx].IsDir {
-		if st.Entries[idx].Expanded {
-			st.Entries = fileexplorer.CollapseAt(st.Entries, idx)
+	visualIdx := relY / st.RowH
+
+	// Convert visual index to actual index when filtering
+	actualIdx := visualIdx
+	if st.SearchQuery != "" && len(st.FilteredIndices) > 0 {
+		if visualIdx >= 0 && visualIdx < len(st.FilteredIndices) {
+			actualIdx = st.FilteredIndices[visualIdx]
 		} else {
-			entries, err := fileexplorer.ExpandAt(st.Entries, idx)
+			return // Click was outside filtered results
+		}
+	} else {
+		// No filtering, check bounds on full list
+		if actualIdx < 0 || actualIdx >= len(st.Entries) {
+			return
+		}
+	}
+
+	if actualIdx == st.Cursor && st.Entries[actualIdx].IsDir {
+		if st.Entries[actualIdx].Expanded {
+			st.Entries = fileexplorer.CollapseAt(st.Entries, actualIdx)
+		} else {
+			entries, err := fileexplorer.ExpandAt(st.Entries, actualIdx)
 			if err == nil {
 				st.Entries = entries
 			}
 		}
+		// After expand/collapse, clear search to show the new structure
+		if st.SearchQuery != "" {
+			st.SearchQuery = ""
+			st.FilteredIndices = nil
+		}
 	}
-	st.Cursor = idx
+	st.Cursor = actualIdx
 	g.screenDirty = true
 }
 
@@ -2265,6 +2448,9 @@ func (g *Game) newTab() {
 	default: // "cwd"
 		dir = g.statusBarState.Cwd
 	}
+
+	// Sanitize the directory in case it's inside a .app bundle
+	dir = sanitizeDirectory(dir)
 
 	t, err := tab.New(g.cfg, paneRect, g.font.CellW, g.font.CellH, dir)
 	if err != nil {
@@ -2923,18 +3109,66 @@ func (g *Game) renamingTabIdx() int {
 // handleRenameInput processes keyboard input while a tab rename is in progress.
 func (g *Game) handleRenameInput() {
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 
 	// inpututil.IsKeyJustPressed catches sub-frame taps that polling misses.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.cancelRename()
 		g.prevKeys[ebiten.KeyEscape] = true
+		g.renameRepeatActive = false
 		return
 	}
 
+	idx := g.renamingTabIdx()
+	if idx < 0 {
+		return
+	}
+
+	// Create TextInput wrapper for the rename text
+	ti := &TextInput{Text: g.tabs[idx].RenameText}
+
+	// Handle backspace with repeat support
+	backspacePressed := ebiten.IsKeyPressed(ebiten.KeyBackspace)
+	if backspacePressed {
+		now := time.Now()
+
+		// Check for initial press
+		if !g.renameRepeatActive || g.renameRepeatKey != ebiten.KeyBackspace {
+			g.renameRepeatActive = true
+			g.renameRepeatKey = ebiten.KeyBackspace
+			g.renameRepeatStart = now
+			g.renameRepeatLast = now
+			g.renameRepeatAlt = alt  // Store whether alt was pressed at start
+
+			// Perform first action immediately
+			if alt {
+				ti.DeleteWord()
+			} else {
+				ti.DeleteLastChar()
+			}
+			g.tabs[idx].RenameText = ti.Text
+		} else if now.Sub(g.renameRepeatStart) >= keyRepeatDelay &&
+				   now.Sub(g.renameRepeatLast) >= keyRepeatInterval {
+			// Repeat action
+			g.renameRepeatLast = now
+			if g.renameRepeatAlt {
+				ti.DeleteWord()
+			} else {
+				ti.DeleteLastChar()
+			}
+			g.tabs[idx].RenameText = ti.Text
+		}
+	} else {
+		// Reset repeat state when backspace is released
+		if g.renameRepeatKey == ebiten.KeyBackspace {
+			g.renameRepeatActive = false
+		}
+	}
+
+	// Handle other edge-triggered keys
 	edgeKeys := []ebiten.Key{
 		ebiten.KeyEnter,
 		ebiten.KeyNumpadEnter,
-		ebiten.KeyBackspace,
 		ebiten.KeyV,
 	}
 	for _, key := range edgeKeys {
@@ -2944,25 +3178,12 @@ func (g *Game) handleRenameInput() {
 			switch key {
 			case ebiten.KeyEnter, ebiten.KeyNumpadEnter:
 				g.commitRename()
-			case ebiten.KeyBackspace:
-				idx := g.renamingTabIdx()
-				if idx >= 0 {
-					runes := []rune(g.tabs[idx].RenameText)
-					if len(runes) > 0 {
-						g.tabs[idx].RenameText = string(runes[:len(runes)-1])
-					}
-				}
+				g.renameRepeatActive = false
 			case ebiten.KeyV:
 				if meta {
 					if out, err := exec.Command("pbpaste").Output(); err == nil {
-						idx := g.renamingTabIdx()
-						if idx >= 0 {
-							for _, r := range string(out) {
-								if r >= 0x20 && r != 0x7f {
-									g.tabs[idx].RenameText += string(r)
-								}
-							}
-						}
+						ti.AddString(string(out))
+						g.tabs[idx].RenameText = ti.Text
 					}
 				}
 			}
@@ -2970,16 +3191,14 @@ func (g *Game) handleRenameInput() {
 		g.prevKeys[key] = pressed
 	}
 	g.prevKeys[ebiten.KeyMeta] = meta
+	g.prevKeys[ebiten.KeyAlt] = alt
 
+	// Handle regular text input
 	if !meta {
-		idx := g.renamingTabIdx()
-		if idx >= 0 {
-			for _, r := range ebiten.AppendInputChars(nil) {
-				if r >= 0x20 && r != 0x7f {
-					g.tabs[idx].RenameText += string(r)
-				}
-			}
+		for _, r := range ebiten.AppendInputChars(nil) {
+			ti.AddChar(r)
 		}
+		g.tabs[idx].RenameText = ti.Text
 	}
 }
 
@@ -3162,6 +3381,8 @@ func (g *Game) buildPalette() {
 			}
 		},
 		g.installShellHooks,
+		// Session
+		g.manualSaveSession,
 		// Recording
 		func() { g.screenshotPending = true; g.screenDirty = true },
 		g.toggleRecording,
@@ -3219,10 +3440,15 @@ func (g *Game) handlePaletteInput() {
 			continue
 		}
 		switch {
-		case key == ebiten.KeyBackspace && !meta:
-			runes := []rune(g.paletteState.Query)
-			if len(runes) > 0 {
-				g.paletteState.Query = string(runes[:len(runes)-1])
+		case key == ebiten.KeyBackspace:
+			if !meta {
+				ti := &TextInput{Text: g.paletteState.Query}
+				if ebiten.IsKeyPressed(ebiten.KeyAlt) {
+					ti.DeleteWord()
+				} else {
+					ti.DeleteLastChar()
+				}
+				g.paletteState.Query = ti.Text
 				g.paletteState.Cursor = 0
 			}
 		case key == ebiten.KeyEnter:
@@ -3288,10 +3514,13 @@ func (g *Game) handleOverlayInput() {
 		if pressed && !wasPressed {
 			switch {
 			case key == ebiten.KeyBackspace && !meta:
-				runes := []rune(g.overlayState.SearchQuery)
-				if len(runes) > 0 {
-					g.overlayState.SearchQuery = string(runes[:len(runes)-1])
+				ti := &TextInput{Text: g.overlayState.SearchQuery}
+				if ebiten.IsKeyPressed(ebiten.KeyAlt) {
+					ti.DeleteWord()
+				} else {
+					ti.DeleteLastChar()
 				}
+				g.overlayState.SearchQuery = ti.Text
 			case key == ebiten.KeySlash && meta:
 				g.overlayState = renderer.OverlayState{}
 			case key == ebiten.KeyArrowUp:
@@ -3333,10 +3562,27 @@ func (g *Game) handleOverlayInput() {
 
 // saveSession persists the current tab state to the session file.
 // Called before every exit path. Errors are logged but do not block exit.
+// Only saves if AutoSave is enabled in config.
 func (g *Game) saveSession() {
-	if !g.cfg.Session.Enabled {
+	if !g.cfg.Session.Enabled || !g.cfg.Session.AutoSave {
 		return
 	}
+	g.doSaveSession()
+}
+
+// manualSaveSession saves the session regardless of AutoSave setting.
+// Called from command palette for explicit user saves.
+func (g *Game) manualSaveSession() {
+	if !g.cfg.Session.Enabled {
+		g.flashStatus("Session saving is disabled in config")
+		return
+	}
+	g.doSaveSession()
+	g.flashStatus("Session saved")
+}
+
+// doSaveSession performs the actual session save operation.
+func (g *Game) doSaveSession() {
 	data := &session.SessionData{
 		Version:   1,
 		ActiveTab: g.activeTab,
@@ -3346,11 +3592,13 @@ func (g *Game) saveSession() {
 		if len(leaves) == 0 {
 			continue
 		}
+		// Use first pane's CWD as fallback for tab CWD
 		term := leaves[0].Pane.Term
 		td := session.TabData{
 			Cwd:         term.Cwd,
 			Title:       t.Title,
 			UserRenamed: t.UserRenamed,
+			Layout:      serializePaneLayout(t.Layout), // Save the pane layout
 		}
 		if t.PinnedSlot != 0 {
 			td.PinnedSlot = string(t.PinnedSlot)
@@ -3359,6 +3607,113 @@ func (g *Game) saveSession() {
 	}
 	if err := session.Save(data, g.cfg); err != nil {
 		log.Printf("zurm: session save: %v", err)
+	}
+}
+
+// serializePaneLayout converts a pane.LayoutNode tree to session.PaneLayout for persistence.
+func serializePaneLayout(node *pane.LayoutNode) *session.PaneLayout {
+	if node == nil {
+		return nil
+	}
+
+	layout := &session.PaneLayout{
+		Ratio: node.Ratio,
+	}
+
+	switch node.Kind {
+	case pane.Leaf:
+		layout.Kind = "leaf"
+		if node.Pane != nil && node.Pane.Term != nil {
+			layout.Cwd = node.Pane.Term.Cwd
+		}
+	case pane.HSplit:
+		layout.Kind = "hsplit"
+		layout.Left = serializePaneLayout(node.Left)
+		layout.Right = serializePaneLayout(node.Right)
+	case pane.VSplit:
+		layout.Kind = "vsplit"
+		layout.Left = serializePaneLayout(node.Left)
+		layout.Right = serializePaneLayout(node.Right)
+	}
+
+	return layout
+}
+
+// restoreTabWithLayout creates a new tab with the saved pane layout restored.
+func restoreTabWithLayout(cfg *config.Config, rect image.Rectangle, cellW, cellH int, td session.TabData) (*tab.Tab, error) {
+	// Deserialize the layout tree
+	layout, err := deserializePaneLayout(cfg, rect, cellW, cellH, td.Layout)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create the tab with the restored layout
+	t := &tab.Tab{
+		Layout:  layout,
+		Title:   td.Title,
+		UserRenamed: td.UserRenamed,
+	}
+
+	// Find the first pane to set as focused (leftmost leaf)
+	leaves := layout.Leaves()
+	if len(leaves) > 0 {
+		t.Focused = leaves[0].Pane
+	}
+
+	// Recompute all pane rects
+	layout.ComputeRects(rect, cellW, cellH, cfg.Window.Padding, cfg.Panes.DividerWidthPixels)
+
+	return t, nil
+}
+
+// deserializePaneLayout reconstructs a pane.LayoutNode tree from saved session.PaneLayout.
+func deserializePaneLayout(cfg *config.Config, rect image.Rectangle, cellW, cellH int, layout *session.PaneLayout) (*pane.LayoutNode, error) {
+	if layout == nil {
+		return nil, fmt.Errorf("nil layout")
+	}
+
+	switch layout.Kind {
+	case "leaf":
+		// Create a new pane with the saved CWD
+		dir := sanitizeDirectory(layout.Cwd)
+		p, err := pane.New(cfg, rect, cellW, cellH, dir)
+		if err != nil {
+			return nil, err
+		}
+		return pane.NewLeaf(p), nil
+
+	case "hsplit", "vsplit":
+		// Recursively deserialize children
+		left, err := deserializePaneLayout(cfg, rect, cellW, cellH, layout.Left)
+		if err != nil {
+			return nil, err
+		}
+		right, err := deserializePaneLayout(cfg, rect, cellW, cellH, layout.Right)
+		if err != nil {
+			return nil, err
+		}
+
+		kind := pane.HSplit
+		if layout.Kind == "vsplit" {
+			kind = pane.VSplit
+		}
+
+		node := &pane.LayoutNode{
+			Kind:  kind,
+			Left:  left,
+			Right: right,
+			Ratio: layout.Ratio,
+		}
+
+		// Ensure ratio is valid
+		if node.Ratio <= 0 || node.Ratio >= 1 {
+			node.Ratio = 0.5
+		}
+
+		return node, nil
+
+	default:
+		return nil, fmt.Errorf("unknown layout kind: %s", layout.Kind)
 	}
 }
 

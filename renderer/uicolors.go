@@ -39,6 +39,9 @@ type UIColors struct {
 
 	// Dim is the secondary / muted text color for hints, arrows, and dim labels.
 	Dim color.RGBA
+
+	// SearchMatch is the highlight color for matching search results.
+	SearchMatch color.RGBA
 }
 
 // deriveUIColors computes UIColors from a Config.
@@ -55,15 +58,16 @@ type UIColors struct {
 func deriveUIColors(cfg *config.Config) UIColors {
 	bg := config.ParseHexColor(cfg.Colors.Background)
 	return UIColors{
-		PanelBg:  darken(darken(bg)),
-		HoverBg:  brighten(bg),
-		Backdrop: color.RGBA{R: bg.R * 2 / 5, G: bg.G * 2 / 5, B: bg.B * 2 / 5, A: 0xb4},
-		Border:   config.ParseHexColor(cfg.Colors.Border),
-		Accent:   config.ParseHexColor(cfg.Colors.Cursor),
-		CatHdr:   config.ParseHexColor(cfg.Colors.BrightMagenta),
-		KeyName:  config.ParseHexColor(cfg.Colors.Yellow),
-		Fg:       config.ParseHexColor(cfg.Colors.Foreground),
-		Dim:      config.ParseHexColor(cfg.Colors.BrightBlack),
+		PanelBg:     darken(darken(bg)),
+		HoverBg:     brighten(bg),
+		Backdrop:    color.RGBA{R: bg.R * 2 / 5, G: bg.G * 2 / 5, B: bg.B * 2 / 5, A: 0xb4},
+		Border:      config.ParseHexColor(cfg.Colors.Border),
+		Accent:      config.ParseHexColor(cfg.Colors.Cursor),
+		CatHdr:      config.ParseHexColor(cfg.Colors.BrightMagenta),
+		KeyName:     config.ParseHexColor(cfg.Colors.Yellow),
+		Fg:          config.ParseHexColor(cfg.Colors.Foreground),
+		Dim:         config.ParseHexColor(cfg.Colors.BrightBlack),
+		SearchMatch: config.ParseHexColor(cfg.Colors.Yellow),
 	}
 }
 

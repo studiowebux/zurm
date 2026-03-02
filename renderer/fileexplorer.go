@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"path/filepath"
+	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/studiowebux/zurm/fileexplorer"
@@ -43,6 +44,11 @@ type FileExplorerState struct {
 	StatusTimer int
 
 	Side string // "left" or "right"
+
+	// Search/filter functionality
+	SearchQuery     string
+	SearchMode      bool  // true when search input is active
+	FilteredIndices []int // indices of entries matching search
 }
 
 // FileExplorerPanelWidth returns the physical pixel width of the panel when open, 0 when closed.
@@ -116,6 +122,21 @@ func (r *Renderer) drawFileExplorer(state *FileExplorerState) {
 		root = "\u2026" + string([]rune(root)[len([]rune(root))-maxRootChars+1:])
 	}
 	r.font.DrawString(r.modalLayer, root, panelX+cw/2, panelY+3, r.ui.Accent)
+
+	// Show search query in header if searching
+	if state.SearchMode || state.SearchQuery != "" {
+		searchLabel := "Search: " + state.SearchQuery
+		if state.SearchMode {
+			searchLabel += "_"
+		}
+		// Truncate if needed
+		maxSearchChars := (panelW - 10*cw) / cw
+		if len([]rune(searchLabel)) > maxSearchChars && maxSearchChars > 3 {
+			searchLabel = string([]rune(searchLabel)[:maxSearchChars-1]) + "…"
+		}
+		r.font.DrawString(r.modalLayer, searchLabel, panelX+cw/2, panelY+3+ch, r.ui.KeyName)
+	}
+
 	escLabel := "Esc"
 	escX := panelX + panelW - len([]rune(escLabel))*cw - cw/2
 	r.font.DrawString(r.modalLayer, escLabel, escX, panelY+3, r.ui.Dim)
@@ -149,13 +170,36 @@ func (r *Renderer) drawFileExplorer(state *FileExplorerState) {
 		state.ScrollOffset = state.MaxScroll
 	}
 
+	// Apply search filter if active
+	visibleEntries := state.Entries
+	visibleIndices := make([]int, 0, len(state.Entries))
+	for i := range state.Entries {
+		visibleIndices = append(visibleIndices, i)
+	}
+
+	if state.SearchQuery != "" {
+		filtered := filterFileEntries(state.Entries, state.SearchQuery)
+		visibleEntries = make([]fileexplorer.Entry, 0, len(filtered))
+		visibleIndices = filtered
+		for _, idx := range filtered {
+			visibleEntries = append(visibleEntries, state.Entries[idx])
+		}
+		state.FilteredIndices = filtered
+	} else {
+		state.FilteredIndices = nil
+	}
+
+	// Update total height based on visible entries
+	totalH = len(visibleEntries) * rowH
+
 	// Draw entries into clipped region.
 	contentRect := image.Rect(panelX, contentTop, panelX+panelW, contentBottom)
 	contentImg := r.modalLayer.SubImage(contentRect).(*ebiten.Image)
 
 	drawY := contentTop - state.ScrollOffset
-	for i, e := range state.Entries {
-		rowTop := drawY + i*rowH
+	for visIdx, e := range visibleEntries {
+		actualIdx := visibleIndices[visIdx]
+		rowTop := drawY + visIdx*rowH
 		rowBot := rowTop + rowH
 
 		// Skip rows outside clip region (but still need to render cursor highlight).
@@ -163,7 +207,7 @@ func (r *Renderer) drawFileExplorer(state *FileExplorerState) {
 			continue
 		}
 
-		if i == state.Cursor {
+		if actualIdx == state.Cursor {
 			highlightRect := image.Rect(panelX, rowTop, panelX+panelW, rowBot)
 			r.modalLayer.SubImage(highlightRect).(*ebiten.Image).Fill(r.ui.HoverBg)
 		}
@@ -186,6 +230,11 @@ func (r *Renderer) drawFileExplorer(state *FileExplorerState) {
 		nameColor := r.ui.Fg
 		if e.IsDir {
 			nameColor = r.ui.Accent
+		}
+
+		// Highlight matching text in search results
+		if state.SearchQuery != "" && strings.Contains(strings.ToLower(e.Name), strings.ToLower(state.SearchQuery)) {
+			nameColor = r.ui.SearchMatch
 		}
 
 		label := indicator + e.Name
@@ -258,7 +307,19 @@ func buildHintBars(state *FileExplorerState, cw, panelW int) (line1, line2 strin
 		return "", ""
 	}
 
-	const actions = "c cp  x cut  p pst  d del  r ren  n fil  N dir  o fin"
+	if state.SearchMode {
+		const searchHints = "Type to search  Enter accept  Esc cancel"
+		line1 = truncHintRunes(searchHints, maxChars)
+		if state.SearchQuery != "" {
+			found := len(state.FilteredIndices)
+			line2 = truncHintRunes(fmt.Sprintf("Found %d matches", found), maxChars)
+		} else {
+			line2 = truncHintRunes("Start typing to filter files...", maxChars)
+		}
+		return
+	}
+
+	const actions = "c cp  x cut  p pst  d del  r ren  n fil  N dir  o fin  / srch"
 	const nav = "Enter open  \u2191\u2193 nav  \u2190 col  \u2192 exp  Esc close"
 
 	line1 = truncHintRunes(actions, maxChars)
@@ -271,6 +332,8 @@ func buildHintBars(state *FileExplorerState, cw, panelW int) (line1, line2 strin
 		}
 		raw := fmt.Sprintf("[%s: %s]  p pst  d del  r ren", state.Clipboard.Op, name)
 		line2 = truncHintRunes(raw, maxChars)
+	} else if state.SearchQuery != "" {
+		line2 = truncHintRunes(fmt.Sprintf("Filter: %s (/ to edit, Esc to clear)", state.SearchQuery), maxChars)
 	} else {
 		line2 = truncHintRunes(nav, maxChars)
 	}
@@ -283,6 +346,32 @@ func truncHintRunes(s string, max int) string {
 		return s
 	}
 	return string(runes[:max])
+}
+
+// filterFileEntries returns indices of entries that match the search query.
+// Matches are case-insensitive and check both file name and full path.
+func filterFileEntries(entries []fileexplorer.Entry, query string) []int {
+	if query == "" {
+		return nil
+	}
+
+	query = strings.ToLower(query)
+	var matches []int
+
+	for i, e := range entries {
+		// Match against name
+		if strings.Contains(strings.ToLower(e.Name), query) {
+			matches = append(matches, i)
+			continue
+		}
+
+		// Also match against full path for deeper searches
+		if strings.Contains(strings.ToLower(e.Path), query) {
+			matches = append(matches, i)
+		}
+	}
+
+	return matches
 }
 
 // drawExplorerConfirm renders a small confirm dialog centered over panelRect.

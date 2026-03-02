@@ -8,13 +8,22 @@ import (
 	"github.com/studiowebux/zurm/config"
 )
 
+// PaneLayout represents a single pane or split in the layout tree.
+type PaneLayout struct {
+	Kind  string      `json:"kind"`            // "leaf", "hsplit", or "vsplit"
+	Ratio float64     `json:"ratio,omitempty"` // split ratio (0.0-1.0)
+	Cwd   string      `json:"cwd,omitempty"`   // working directory for leaf panes
+	Left  *PaneLayout `json:"left,omitempty"`  // left/top child for splits
+	Right *PaneLayout `json:"right,omitempty"` // right/bottom child for splits
+}
 
 // TabData holds the persisted state of a single tab.
 type TabData struct {
-	Cwd         string `json:"cwd"`
-	Title       string `json:"title"`
-	UserRenamed bool   `json:"user_renamed"`
-	PinnedSlot  string `json:"pinned_slot"` // single rune as string, or ""
+	Cwd         string      `json:"cwd"`
+	Title       string      `json:"title"`
+	UserRenamed bool        `json:"user_renamed"`
+	PinnedSlot  string      `json:"pinned_slot"`      // single rune as string, or ""
+	Layout      *PaneLayout `json:"layout,omitempty"` // pane layout tree
 }
 
 // SessionData is the root of the session file.

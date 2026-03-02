@@ -77,6 +77,7 @@ var Defaults = Config{
 	Session: SessionConfig{
 		Enabled:         true,
 		RestoreOnLaunch: true,
+		AutoSave:        false,  // Default to false to prevent accidental session loss
 	},
 	FileExplorer: FileExplorerConfig{
 		Enabled:  true,

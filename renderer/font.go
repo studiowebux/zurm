@@ -7,6 +7,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
+	"golang.org/x/text/language"
 	"golang.org/x/text/width"
 )
 
@@ -151,8 +152,15 @@ func (f *FontRenderer) LoadEmojiFont(ttfData []byte) error {
 	f.emojiFace = &text.GoTextFace{
 		Source: src,
 		Size:   f.size,
+		// Add language hint for better emoji rendering on macOS
+		Language: language.English,
 	}
 	return nil
+}
+
+// HasEmojiSupport returns true if emoji font is loaded and ready.
+func (f *FontRenderer) HasEmojiSupport() bool {
+	return f.emojiFace != nil
 }
 
 // faceFor returns the emoji face when r is in an emoji/wide-char range and
