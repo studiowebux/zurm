@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-03
+
+### Added
+
+- One-shot screenshot capture to PNG (Cmd+Shift+S) — saves to ~/Pictures/zurm-screenshots/
+- Screen recording via FFMPEG pipe to MP4 (Cmd+Shift+.) — saves to ~/Movies/zurm-recordings/
+- Recording status bar indicator with blinking dot, elapsed time, and output file size
+- Quit confirmation dialog on Cmd+Q
+- Makefile with build, bundle, install, and clean targets
+- macOS .app bundle packaging (Info.plist, icon, install to /Applications)
+- New tab defaults to $HOME on first launch
+
 ## [0.1.0] - 2026-03-02
 
 ### Added
@@ -44,5 +56,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Block timer sourced from OSC C (command enter) for accurate execution duration
 - Block background tint uses premultiplied alpha for correct Ebitengine blending
 
-[Unreleased]: https://github.com/studiowebux/zurm/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/studiowebux/zurm/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/studiowebux/zurm/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/studiowebux/zurm/releases/tag/v0.1.0

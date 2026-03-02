@@ -16,14 +16,18 @@ import (
 type StatusBarState struct {
 	Cwd             string
 	GitBranch       string
-	ForegroundProc  string         // foreground process name, "" when shell is foreground
-	ScrollOffset    int            // buf.ViewOffset of the focused pane; 0 = live output
-	Zoomed          bool           // true when a pane is fullscreened via Cmd+Z
+	ForegroundProc  string          // foreground process name, "" when shell is foreground
+	ScrollOffset    int             // buf.ViewOffset of the focused pane; 0 = live output
+	Zoomed          bool            // true when a pane is fullscreened via Cmd+Z
 	PinMode         bool            // true while waiting for a pin slot keypress
 	HelpBtnRect     image.Rectangle // set during draw; used by main.go for click detection
 	FlashMessage    string          // transient message shown in place of cwd; cleared by Game.Update
 	BlocksEnabled   bool            // show block indicator when true
 	BlockCount      int             // number of completed blocks in focused pane
+	Recording         bool          // true while a screen recording is in progress
+	RecordingDuration time.Duration // elapsed recording time
+	RecordingBytes    int64         // output MP4 file size on disk
+	RecordingMode     string        // "MP4"
 }
 
 // StatusBarHeight returns the physical pixel height of the status bar,
@@ -87,6 +91,18 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 	if state.BlocksEnabled {
 		blockInd := fmt.Sprintf("[B:%d]", state.BlockCount)
 		rightSegs = append(rightSegs, seg{blockInd, r.ui.Accent})
+	}
+	if state.Recording {
+		// Blink the dot each second to make the recording indicator visually distinct.
+		dot := "●"
+		if time.Now().Second()%2 == 0 {
+			dot = "○"
+		}
+		recText := fmt.Sprintf("%s [%s] %s", dot, state.RecordingMode, fmtRecDuration(state.RecordingDuration))
+		if state.RecordingBytes > 0 {
+			recText += " " + fmtFileSize(state.RecordingBytes)
+		}
+		rightSegs = append(rightSegs, seg{recText, color.RGBA{R: 220, G: 60, B: 60, A: 255}})
 	}
 
 	// Right column budget (margin + ? button + segments + separators between them).
@@ -212,4 +228,24 @@ func abbreviatePath(path string, maxCols int) string {
 		return "…/" + string(lr[len(lr)-(maxCols-2):])
 	}
 	return string([]rune(path)[:maxCols])
+}
+
+// fmtRecDuration formats a recording duration as MM:SS.
+func fmtRecDuration(d time.Duration) string {
+	s := int(d.Seconds())
+	return fmt.Sprintf("%02d:%02d", s/60, s%60)
+}
+
+// fmtFileSize formats a byte count as a human-readable size (e.g. "2.3MB").
+func fmtFileSize(b int64) string {
+	const kb = 1024.0
+	const mb = 1024.0 * kb
+	switch {
+	case float64(b) >= mb:
+		return fmt.Sprintf("%.1fMB", float64(b)/mb)
+	case float64(b) >= kb:
+		return fmt.Sprintf("%.1fKB", float64(b)/kb)
+	default:
+		return fmt.Sprintf("%dB", b)
+	}
 }

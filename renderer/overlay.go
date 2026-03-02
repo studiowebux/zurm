@@ -83,7 +83,7 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 
 	// Two column groups.
 	leftCats := []string{"Navigation", "Panes", "File Explorer"}
-	rightCats := []string{"Pins", "Scroll", "Copy / Paste", "Search", "Blocks", "Help", "App"}
+	rightCats := []string{"Pins", "Scroll", "Copy / Paste", "Search", "Blocks", "Recording", "Help", "App"}
 
 	leftH := r.columnHeight(leftCats, rowH, headerH)
 	rightH := r.columnHeight(rightCats, rowH, headerH)

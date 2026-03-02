@@ -19,6 +19,7 @@ import (
 	"github.com/studiowebux/zurm/fileexplorer"
 	"github.com/studiowebux/zurm/help"
 	"github.com/studiowebux/zurm/pane"
+	"github.com/studiowebux/zurm/recorder"
 	"github.com/studiowebux/zurm/renderer"
 	"github.com/studiowebux/zurm/session"
 	"github.com/studiowebux/zurm/tab"
@@ -151,6 +152,16 @@ type Game struct {
 	// Initialized from cfg.Blocks.Enabled; toggled via command palette.
 	blocksEnabled bool
 
+	// screenshotPending is set by Cmd+Shift+S; consumed by Draw() to capture a PNG.
+	screenshotPending bool
+
+	// Screen recording state (FFMPEG pipe → MP4).
+	recorder        *recorder.Recorder
+	recDone         chan string // receives flash message when background Stop() completes
+	recBuf          []byte     // reusable pixel buffer for frame capture (avoids per-frame alloc)
+	recLastFrame    time.Time  // last frame capture time (throttle to 30fps)
+	recLastStatusSec int64    // unix second of last status bar update (throttle os.Stat + blink)
+
 	// flashExpiry is when statusBarState.FlashMessage should be cleared.
 	flashExpiry time.Time
 }
@@ -232,7 +243,9 @@ func main() {
 		}
 	}
 	if len(initialTabs) == 0 {
-		firstTab, tErr := tab.New(cfg, paneRect, fontR.CellW, fontR.CellH, "")
+		// Default to $HOME so the first session opens in the user's home directory.
+		homeDir, _ := os.UserHomeDir()
+		firstTab, tErr := tab.New(cfg, paneRect, fontR.CellW, fontR.CellH, homeDir)
 		if tErr != nil {
 			log.Fatalf("tab new: %v", tErr)
 		}
@@ -255,6 +268,8 @@ func main() {
 		prevMouseButtons: make(map[ebiten.MouseButton]bool),
 		mouseHeldBtn:     -1,
 		blocksEnabled:    cfg.Blocks.Enabled,
+		recorder:         recorder.New(winW, winH),
+		recDone:          make(chan string, 1),
 	}
 
 	game.renderer.BlocksEnabled = game.blocksEnabled
@@ -283,19 +298,44 @@ func (g *Game) Update() error {
 
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
 	ctrl := ebiten.IsKeyPressed(ebiten.KeyControl)
-	if (meta || ctrl) && ebiten.IsKeyPressed(ebiten.KeyQ) {
-		g.saveSession()
-		for _, t := range g.tabs {
-			for _, leaf := range t.Layout.Leaves() {
-				leaf.Pane.Term.Close()
+	if (meta || ctrl) && ebiten.IsKeyPressed(ebiten.KeyQ) && !g.confirmState.Open {
+		g.showConfirm("Quit zurm? All sessions will be closed.", func() {
+			g.saveSession()
+			for _, t := range g.tabs {
+				for _, leaf := range t.Layout.Leaves() {
+					leaf.Pane.Term.Close()
+				}
 			}
-		}
-		return ebiten.Termination
+			os.Exit(0)
+		})
 	}
 
 	// Clear transient flash message once its expiry has passed.
 	if g.statusBarState.FlashMessage != "" && time.Now().After(g.flashExpiry) {
 		g.statusBarState.FlashMessage = ""
+		g.screenDirty = true
+	}
+
+	// Drain recording-done channel (background goroutine sends flash message).
+	select {
+	case msg := <-g.recDone:
+		g.flashStatus(msg)
+	default:
+	}
+
+	// Update recording status bar fields once per second (blink + file size).
+	if g.recorder.Active() {
+		g.statusBarState.Recording = true
+		g.statusBarState.RecordingMode = g.recorder.OutputMode()
+		now := time.Now()
+		if now.Unix() != g.recLastStatusSec {
+			g.recLastStatusSec = now.Unix()
+			g.statusBarState.RecordingDuration = now.Sub(g.recorder.StartTime())
+			g.statusBarState.RecordingBytes = g.recorder.OutputSize()
+			g.screenDirty = true
+		}
+	} else if g.statusBarState.Recording {
+		g.statusBarState.Recording = false
 		g.screenDirty = true
 	}
 
@@ -391,6 +431,43 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.screenDirty = false
 	g.lastPtySeq = terminal.RenderSeq()
 	g.lastClockSec = time.Now().Unix()
+
+	// Screenshot capture: one-shot, triggered by Cmd+Shift+S.
+	// ReadPixels must run on the main thread (GPU access); PNG encoding runs in background.
+	if g.screenshotPending {
+		g.screenshotPending = false
+		bounds := screen.Bounds()
+		raw := make([]byte, bounds.Dx()*bounds.Dy()*4)
+		screen.ReadPixels(raw)
+		go func() {
+			path, err := recorder.SavePNG(raw, bounds)
+			if err != nil {
+				g.flashStatus("Screenshot failed: " + err.Error())
+			} else {
+				g.flashStatus("Screenshot: " + filepath.Base(path))
+			}
+			g.screenDirty = true
+		}()
+	}
+
+	// Recording: capture frame for FFMPEG pipe when active.
+	// Throttled to 30fps and reuses a single pixel buffer to avoid GC pressure.
+	if g.recorder.Active() {
+		now := time.Now()
+		if now.Sub(g.recLastFrame) >= 33*time.Millisecond {
+			g.recLastFrame = now
+			needed := screen.Bounds().Dx() * screen.Bounds().Dy() * 4
+			if len(g.recBuf) != needed {
+				g.recBuf = make([]byte, needed)
+			}
+			screen.ReadPixels(g.recBuf)
+			// Copy into a separate slice for the goroutine since recBuf
+			// will be overwritten on the next frame.
+			frame := make([]byte, needed)
+			copy(frame, g.recBuf)
+			go g.recorder.AddFrame(frame)
+		}
+	}
 }
 
 // Layout returns the physical screen size for HiDPI rendering.
@@ -635,6 +712,14 @@ func (g *Game) handleInput() {
 				} else if g.cfg.FileExplorer.Enabled {
 					g.openFileExplorer()
 				}
+
+			case meta && shift && key == ebiten.KeyS:
+				// Cmd+Shift+S — take screenshot.
+				g.screenshotPending = true
+
+			case meta && shift && key == ebiten.KeyPeriod:
+				// Cmd+Shift+. — toggle screen recording.
+				g.toggleRecording()
 
 			// Tab management.
 			case meta && shift && key == ebiten.KeyT:
@@ -3051,6 +3136,9 @@ func (g *Game) buildPalette() {
 			}
 		},
 		g.installShellHooks,
+		// Recording
+		func() { g.screenshotPending = true; g.screenDirty = true },
+		g.toggleRecording,
 		// Help
 		g.toggleOverlay,
 		g.openPalette,
@@ -3253,6 +3341,36 @@ func (g *Game) flashStatus(msg string) {
 	g.statusBarState.FlashMessage = msg
 	g.flashExpiry = time.Now().Add(3 * time.Second)
 	g.screenDirty = true
+}
+
+// toggleRecording starts or stops a screen recording (FFMPEG → MP4).
+// Stop runs in a background goroutine because ffmpeg finalization can block
+// for several seconds. Completion is communicated via g.recDone.
+func (g *Game) toggleRecording() {
+	if g.recorder.Active() {
+		g.flashStatus("Saving recording…")
+		go func() {
+			path, err := g.recorder.Stop()
+			var msg string
+			if err != nil {
+				msg = "Recording failed: " + err.Error()
+			} else {
+				msg = "Saved: " + filepath.Base(path)
+			}
+			// Non-blocking send: if a previous message hasn't been drained
+			// yet, this goroutine still exits cleanly (no leak).
+			select {
+			case g.recDone <- msg:
+			default:
+			}
+		}()
+		return
+	}
+	if err := g.recorder.Start(); err != nil {
+		g.flashStatus("Record error: " + err.Error())
+		return
+	}
+	g.flashStatus("Recording (" + g.recorder.OutputMode() + ") — Cmd+Shift+. to stop")
 }
 
 // installShellHooks appends OSC 133 shell integration hooks to ~/.zshrc or

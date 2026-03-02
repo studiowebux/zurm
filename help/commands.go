@@ -46,6 +46,9 @@ func AllCommands() []Command {
 		// Blocks
 		{Name: "Toggle Command Blocks", Shortcut: "Cmd+B"},
 		{Name: "Install Shell Hooks", Shortcut: ""},
+		// Recording
+		{Name: "Take Screenshot", Shortcut: "Cmd+Shift+S"},
+		{Name: "Toggle Recording", Shortcut: "Cmd+Shift+."},
 		// Help
 		{Name: "Show Keybindings", Shortcut: "Cmd+/"},
 		{Name: "Command Palette", Shortcut: "Cmd+P"},
