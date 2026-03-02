@@ -7,7 +7,6 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
-	"golang.org/x/text/language"
 	"golang.org/x/text/width"
 )
 
@@ -22,10 +21,6 @@ type FontRenderer struct {
 	CellW    int // width of a single monospace cell in pixels
 	CellH    int // height of a single monospace cell in pixels
 	Baseline int // pixels from top of cell to text baseline
-
-	// emojiFace is an optional fallback face used for emoji/wide-char glyphs.
-	// When non-nil, DrawGlyph and DrawString use it for runes in emoji ranges.
-	emojiFace *text.GoTextFace
 
 	// drawOpts is reused across DrawGlyph/DrawString calls to avoid per-glyph heap allocation.
 	drawOpts text.DrawOptions
@@ -136,41 +131,14 @@ func (f *FontRenderer) DrawString(dst *ebiten.Image, s string, x, y int, clr col
 			f.drawOpts.GeoM.Translate(float64(x), float64(y))
 			f.drawOpts.ColorScale.Reset()
 			f.drawOpts.ColorScale.ScaleWithColor(clr)
-			text.Draw(dst, string(ch), f.faceFor(ch), &f.drawOpts)
+			text.Draw(dst, string(ch), f.face, &f.drawOpts)
 		}
 		x += w * f.CellW
 	}
 }
 
-// LoadEmojiFont loads a secondary font used as fallback for emoji/wide-char glyphs.
-// The face is sized to match the primary font's cell height for visual consistency.
-func (f *FontRenderer) LoadEmojiFont(ttfData []byte) error {
-	src, err := text.NewGoTextFaceSource(bytes.NewReader(ttfData))
-	if err != nil {
-		return err
-	}
-	f.emojiFace = &text.GoTextFace{
-		Source: src,
-		Size:   f.size,
-		// Add language hint for better emoji rendering on macOS
-		Language: language.English,
-	}
-	return nil
-}
-
-// HasEmojiSupport returns true if emoji font is loaded and ready.
-func (f *FontRenderer) HasEmojiSupport() bool {
-	return f.emojiFace != nil
-}
-
-// faceFor returns the emoji face when r is in an emoji/wide-char range and
-// the emoji face is loaded; otherwise returns the primary monospace face.
-func (f *FontRenderer) faceFor(r rune) *text.GoTextFace {
-	if f.emojiFace != nil && RuneDisplayWidth(r) > 1 {
-		return f.emojiFace
-	}
-	return f.face
-}
+// Emoji support removed - see docs/emoji-limitations.md
+// Ebiten doesn't support color fonts due to golang.org/x/image/font limitations
 
 // RuneDisplayWidth returns the number of terminal columns needed to display r.
 // Returns 2 for wide characters (CJK, emoji), 0 for zero-width combiners, 1 otherwise.

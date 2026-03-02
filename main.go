@@ -39,8 +39,9 @@ const (
 //go:embed assets/fonts/JetBrainsMono-Regular.ttf
 var jetbrainsMono []byte
 
-//go:embed assets/fonts/NotoEmoji-Regular.ttf
-var notoEmoji []byte
+// Emoji fonts are not supported - see docs/emoji-limitations.md
+// //go:embed assets/fonts/NotoColorEmoji.ttf
+// var notoEmoji []byte
 
 // Game implements ebiten.Game.
 // Pattern: game loop — Update handles logic, Draw handles rendering.
@@ -201,17 +202,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("font load: %v", err)
 	}
-	// Check if emoji font data was embedded correctly
-	if len(notoEmoji) == 0 {
-		log.Printf("WARNING: NotoEmoji font not embedded, emoji will render as boxes")
-	} else {
-		log.Printf("NotoEmoji font embedded successfully (%d bytes)", len(notoEmoji))
-		if err := fontR.LoadEmojiFont(notoEmoji); err != nil {
-			log.Printf("emoji font load failed (emoji will render as boxes): %v", err)
-		} else {
-			log.Printf("emoji font loaded successfully")
-		}
-	}
+	// Emoji fonts are not supported by Ebiten - see docs/emoji-limitations.md
+	// Color glyphs cannot be rendered due to golang.org/x/image/font limitations
 
 	// Compute tab bar and status bar heights first so they're included in the window size budget.
 	rend := renderer.NewRenderer(fontR, cfg)
@@ -1408,11 +1400,29 @@ func (g *Game) handleFileExplorerInput() {
 
 		switch {
 		case key == ebiten.KeyArrowRight:
-			if st.Cursor < len(st.Entries) && st.Entries[st.Cursor].IsDir && !st.Entries[st.Cursor].Expanded {
-				entries, err := fileexplorer.ExpandAt(st.Entries, st.Cursor)
-				if err == nil {
-					st.Entries = entries
-					// Do NOT advance cursor — user stays on the dir they just opened.
+			if st.Cursor < len(st.Entries) {
+				e := st.Entries[st.Cursor]
+				// Handle special entries
+				if e.Name == "." {
+					// Current directory - insert path
+					g.focused.Term.SendBytes([]byte(e.Path))
+					g.closeFileExplorer()
+					return
+				} else if e.Name == ".." {
+					// Navigate to parent
+					st.Root = e.Path
+					entries, err := fileexplorer.BuildTree(e.Path)
+					if err == nil {
+						st.Entries = entries
+						st.Cursor = 0
+						st.ScrollOffset = 0
+					}
+				} else if e.IsDir && !e.Expanded {
+					entries, err := fileexplorer.ExpandAt(st.Entries, st.Cursor)
+					if err == nil {
+						st.Entries = entries
+						// Do NOT advance cursor — user stays on the dir they just opened.
+					}
 				}
 			}
 
@@ -1422,11 +1432,71 @@ func (g *Game) handleFileExplorerInput() {
 			}
 
 		case key == ebiten.KeyEnter:
+			// Handle search results differently
+			if len(st.SearchResults) > 0 {
+				if st.Cursor >= 0 && st.Cursor < len(st.SearchResults) {
+					selected := st.SearchResults[st.Cursor]
+
+					// Special handling for . and ..
+					if selected.Name == "." {
+						// Insert current directory path
+						g.focused.Term.SendBytes([]byte(selected.Path))
+						g.closeFileExplorer()
+						return
+					} else if selected.Name == ".." {
+						// Navigate to parent directory
+						st.Root = selected.Path
+						entries, err := fileexplorer.BuildTree(selected.Path)
+						if err == nil {
+							st.Entries = entries
+							st.SearchResults = nil
+							st.SearchQuery = ""
+							st.Cursor = 0
+							st.ScrollOffset = 0
+						}
+					} else if selected.IsDir {
+						// Navigate into the directory
+						st.Root = selected.Path
+						entries, err := fileexplorer.BuildTree(selected.Path)
+						if err == nil {
+							st.Entries = entries
+							st.SearchResults = nil
+							st.SearchQuery = ""
+							st.Cursor = 0
+							st.ScrollOffset = 0
+						}
+					} else {
+						// File - insert path
+						g.focused.Term.SendBytes([]byte(selected.Path))
+						g.closeFileExplorer()
+						return
+					}
+				}
+				break
+			}
+
+			// Normal mode (not searching)
 			if st.Cursor >= len(st.Entries) {
 				break
 			}
 			e := st.Entries[st.Cursor]
-			if e.IsDir {
+
+			// Handle special entries
+			if e.Name == "." {
+				// Insert current directory path
+				g.focused.Term.SendBytes([]byte(e.Path))
+				g.closeFileExplorer()
+				return
+			} else if e.Name == ".." {
+				// Navigate to parent directory
+				st.Root = e.Path
+				entries, err := fileexplorer.BuildTree(e.Path)
+				if err == nil {
+					st.Entries = entries
+					st.Cursor = 0
+					st.ScrollOffset = 0
+				}
+			} else if e.IsDir {
 				if e.Expanded {
 					st.Entries = fileexplorer.CollapseAt(st.Entries, st.Cursor)
 				} else {
@@ -1436,7 +1506,7 @@ func (g *Game) handleFileExplorerInput() {
 					}
 				}
 			} else {
-				// Insert path into focused PTY.
+				// Insert file path into focused PTY.
 				g.focused.Term.SendBytes([]byte(e.Path))
 				g.closeFileExplorer()
 				return
@@ -1599,8 +1669,13 @@ func (g *Game) updatePaletteRepeat(key ebiten.Key, now time.Time) bool {
 func (g *Game) explorerMoveUp() {
 	st := &g.fileExplorerState
 
-	// If we have filtered results, navigate within them
-	if st.SearchQuery != "" && len(st.FilteredIndices) > 0 {
+	// If we have search results, navigate within them
+	if len(st.SearchResults) > 0 {
+		if st.Cursor > 0 {
+			st.Cursor--
+		}
+	} else if st.SearchQuery != "" && len(st.FilteredIndices) > 0 {
+		// Legacy filtering support
 		// Find current position in filtered list
 		currentFilterIdx := -1
 		for i, idx := range st.FilteredIndices {
@@ -1630,8 +1705,13 @@ func (g *Game) explorerMoveUp() {
 func (g *Game) explorerMoveDown() {
 	st := &g.fileExplorerState
 
-	// If we have filtered results, navigate within them
-	if st.SearchQuery != "" && len(st.FilteredIndices) > 0 {
+	// If we have search results, navigate within them
+	if len(st.SearchResults) > 0 {
+		if st.Cursor < len(st.SearchResults)-1 {
+			st.Cursor++
+		}
+	} else if st.SearchQuery != "" && len(st.FilteredIndices) > 0 {
+		// Legacy filtering support
 		// Find current position in filtered list
 		currentFilterIdx := -1
 		for i, idx := range st.FilteredIndices {
@@ -1679,6 +1759,7 @@ func (g *Game) handleExplorerConfirmInput() {
 func (g *Game) handleExplorerSearchInput() {
 	st := &g.fileExplorerState
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	prevQuery := st.SearchQuery
 
 	// Handle Enter to accept search and exit search mode
 	enterPressed := ebiten.IsKeyPressed(ebiten.KeyEnter)
@@ -1686,10 +1767,11 @@ func (g *Game) handleExplorerSearchInput() {
 	g.prevKeys[ebiten.KeyEnter] = enterPressed
 	if enterPressed && !enterWas {
 		st.SearchMode = false
-		// If we have filtered results and a valid cursor, navigate to first match
-		if len(st.FilteredIndices) > 0 {
-			st.Cursor = st.FilteredIndices[0]
-			g.explorerEnsureVisible()
+		// If we have search results and selected one, insert its path
+		if len(st.SearchResults) > 0 && st.Cursor >= 0 && st.Cursor < len(st.SearchResults) {
+			selected := st.SearchResults[st.Cursor]
+			g.focused.Term.SendBytes([]byte(selected.Path))
+			g.closeFileExplorer()
 		}
 		return
 	}
@@ -1715,6 +1797,19 @@ func (g *Game) handleExplorerSearchInput() {
 				st.SearchQuery += string(r)
 			}
 		}
+	}
+
+	// If query changed, perform search of current directory only
+	if st.SearchQuery != prevQuery {
+		if st.SearchQuery == "" {
+			st.SearchResults = nil
+			st.Cursor = 0
+		} else {
+			// Search only current directory level (fast and safe)
+			st.SearchResults = fileexplorer.SearchCurrentLevel(st.Root, st.SearchQuery)
+			st.Cursor = 0
+		}
+		st.ScrollOffset = 0
 	}
 }
 
@@ -1806,7 +1901,11 @@ func (g *Game) explorerEnsureVisible() {
 
 	// Calculate the visual row index based on filtering
 	visualIdx := st.Cursor
-	if st.SearchQuery != "" && len(st.FilteredIndices) > 0 {
+	if len(st.SearchResults) > 0 {
+		// When showing search results, cursor is already the visual index
+		visualIdx = st.Cursor
+	} else if st.SearchQuery != "" && len(st.FilteredIndices) > 0 {
+		// Legacy filtering support
 		// Find the position of the cursor in the filtered list
 		for i, idx := range st.FilteredIndices {
 			if idx == st.Cursor {

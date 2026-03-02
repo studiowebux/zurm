@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Entry represents a single node in the file explorer tree.
@@ -61,8 +62,36 @@ func LoadChildren(root string, depth int) ([]Entry, error) {
 }
 
 // BuildTree returns the top-level entries for root at depth 0.
+// Prepends "./" for current directory and "../" for parent (if not at root).
 func BuildTree(root string) ([]Entry, error) {
-	return LoadChildren(root, 0)
+	children, err := LoadChildren(root, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	var specialEntries []Entry
+
+	// Always add current directory entry first
+	currentEntry := Entry{
+		Path:  root,
+		Name:  ".",
+		IsDir: true,
+		Depth: 0,
+	}
+	specialEntries = append(specialEntries, currentEntry)
+
+	// Add parent directory entry if not at root
+	if root != "/" && root != "" {
+		parentEntry := Entry{
+			Path:  filepath.Dir(root),
+			Name:  "..",
+			IsDir: true,
+			Depth: 0,
+		}
+		specialEntries = append(specialEntries, parentEntry)
+	}
+
+	return append(specialEntries, children...), nil
 }
 
 // ExpandAt inserts the children of entries[idx] immediately after idx.
@@ -227,4 +256,30 @@ func FindIdx(entries []Entry, path string) int {
 		}
 	}
 	return -1
+}
+
+// SearchCurrentLevel performs a simple non-recursive search of the current directory only.
+// This is fast and safe, filtering only the visible items.
+func SearchCurrentLevel(root string, query string) []Entry {
+	if query == "" {
+		return nil
+	}
+
+	// Get all entries in the current directory (including the .. parent if present)
+	entries, err := BuildTree(root)
+	if err != nil {
+		return nil
+	}
+
+	var results []Entry
+	queryLower := strings.ToLower(query)
+
+	for _, e := range entries {
+		// Match against the name
+		if strings.Contains(strings.ToLower(e.Name), queryLower) {
+			results = append(results, e)
+		}
+	}
+
+	return results
 }
