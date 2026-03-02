@@ -34,7 +34,7 @@ jobs:
           CGO_ENABLED: "1"
           GOOS: darwin
           GOARCH: arm64
-        run: go build -trimpath -ldflags="-s -w" -o zurm ./...
+        run: go build -trimpath -ldflags="-s -w" -o zurm .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
