@@ -37,6 +37,9 @@ func New(cfg *config.Config, rect image.Rectangle, cellW, cellH int, dir string)
 	}
 	layout := pane.NewLeaf(p)
 	layout.ComputeRects(rect, cellW, cellH, cfg.Window.Padding, cfg.Panes.DividerWidthPixels)
+	for _, leaf := range layout.Leaves() {
+		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
+	}
 	return &Tab{
 		Layout:  layout,
 		Focused: p,
