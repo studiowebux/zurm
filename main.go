@@ -672,8 +672,8 @@ func (g *Game) handleInput() {
 				}
 				g.focused.Term.Buf.ClearSelection()
 				g.focused.Term.Buf.Unlock()
+				scrolled = true
 			}
-			scrolled = true
 		}
 	}
 
@@ -993,9 +993,21 @@ func altPrintableSeq(key ebiten.Key) []byte {
 }
 
 // handleFocus sends mode-1004 focus events when the window focus state changes.
+// On focus regain, resets input state so stale prevKeys don't swallow the first keystrokes.
 func (g *Game) handleFocus() {
 	focused := ebiten.IsFocused()
 	if focused != g.prevFocused {
+		if focused {
+			// Reset edge-detection state: snapshot current physical key state so the
+			// next frame sees correct "was pressed" values. Without this, keys held
+			// during the blur (e.g. Cmd from Cmd+Tab) appear as stale presses and
+			// swallow the first real keystroke after focus returns.
+			for k := ebiten.Key(0); k <= ebiten.KeyMax; k++ {
+				g.prevKeys[k] = ebiten.IsKeyPressed(k)
+			}
+			g.repeatActive = false
+			g.scrollAccum = 0
+		}
 		g.prevFocused = focused
 		g.focused.Term.SendFocusEvent(focused)
 	}
@@ -3300,7 +3312,7 @@ func (g *Game) handleRenameInput() {
 			case ebiten.KeyV:
 				if meta {
 					if out, err := exec.Command("pbpaste").Output(); err == nil {
-						ti.AddString(string(out))
+						ti.AddString(strings.ToValidUTF8(string(out), ""))
 						g.tabs[idx].RenameText = ti.Text
 					}
 				}
