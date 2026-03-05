@@ -51,6 +51,8 @@ divider_width_pixels = 1   # pixel width of the border between panes
 [keyboard]
 left_option_as_meta = true   # left Option sends ESC-prefix (word delete, etc.)
                               # right Option still composes macOS characters
+repeat_delay_ms     = 500    # ms before key repeat starts
+repeat_interval_ms  = 50     # ms between repeated key events (~20/sec)
 
 [status_bar]
 enabled       = true
@@ -174,6 +176,10 @@ type KeyboardConfig struct {
 	// Right Option continues to produce composed macOS characters (ð, ™, etc.).
 	// Set to false to treat both Option keys as standard macOS Option.
 	LeftOptionAsMeta bool `toml:"left_option_as_meta"`
+	// RepeatDelayMs is the initial delay before key repeat begins (milliseconds).
+	RepeatDelayMs int `toml:"repeat_delay_ms"`
+	// RepeatIntervalMs is the interval between repeated key events (milliseconds).
+	RepeatIntervalMs int `toml:"repeat_interval_ms"`
 }
 
 type HelpConfig struct {

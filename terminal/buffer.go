@@ -94,6 +94,7 @@ type ScreenBuffer struct {
 	// Alternate screen support.
 	altActive      bool
 	altCells       [][]Cell
+	altWrapped     []bool
 	altCursorRow   int
 	altCursorCol   int
 	savedCursorRow int
@@ -105,6 +106,11 @@ type ScreenBuffer struct {
 	// Dirty tracking: which rows changed since last render.
 	dirty []bool
 
+	// Wrapped tracks whether each row was produced by soft-wrap (AutoWrap).
+	// true = this row continues from the previous row (no hard newline).
+	// Used by copySelection to avoid inserting spurious \n on copy.
+	wrapped []bool
+
 	// renderGen is incremented by the PTY goroutine after each output batch.
 	// The renderer reads this atomically to detect per-pane changes without
 	// needing to scan the dirty array.
@@ -112,8 +118,9 @@ type ScreenBuffer struct {
 
 	// Scrollback ring buffer — lines evicted from the top of the primary screen.
 	// Index 0 is oldest, len-1 is most recent.
-	scrollback    [][]Cell
-	maxScrollback int
+	scrollback        [][]Cell
+	scrollbackWrapped []bool
+	maxScrollback     int
 
 	// ViewOffset > 0 means the user has scrolled back.
 	// 0 = live view, N = viewing N rows above the current live top.
@@ -184,6 +191,7 @@ func NewScreenBuffer(rows, cols, maxScrollback int, fg, bg color.RGBA, palette [
 	sb.SGR.BG = bg
 	sb.Cells = makeCells(rows, cols, fg, bg)
 	sb.dirty = make([]bool, rows)
+	sb.wrapped = make([]bool, rows)
 	for i := range sb.dirty {
 		sb.dirty[i] = true
 	}
@@ -243,6 +251,8 @@ func (sb *ScreenBuffer) PutChar(ch rune) {
 		} else {
 			sb.CursorCol = 0
 			sb.LineFeed()
+			// Mark the new row as a soft-wrap continuation.
+			sb.wrapped[sb.CursorRow] = true
 		}
 	}
 	sb.SetCell(sb.CursorRow, sb.CursorCol, sb.SGR.toCell(ch))
@@ -257,6 +267,8 @@ func (sb *ScreenBuffer) LineFeed() {
 	} else if sb.CursorRow < sb.Rows-1 {
 		sb.CursorRow++
 	}
+	// Clear wrapped on the new row — PutChar re-sets it for soft wraps.
+	sb.wrapped[sb.CursorRow] = false
 }
 
 // ScrollUp scrolls the scroll region up by n lines, adding blank lines at the bottom.
@@ -273,16 +285,28 @@ func (sb *ScreenBuffer) ScrollUp(n int) {
 			evicted := make([]Cell, sb.Cols)
 			copy(evicted, cells[top])
 			sb.scrollback = append(sb.scrollback, evicted)
+			sb.scrollbackWrapped = append(sb.scrollbackWrapped, sb.wrapped[top])
+			// Keep the user's view pinned when scrolled up.
+			if sb.ViewOffset > 0 {
+				sb.ViewOffset++
+			}
 			if len(sb.scrollback) > sb.maxScrollback {
 				// Drop oldest line — zero it first (SEC-002).
 				for j := range sb.scrollback[0] {
 					sb.scrollback[0][j] = Cell{}
 				}
 				sb.scrollback = sb.scrollback[1:]
+				sb.scrollbackWrapped = sb.scrollbackWrapped[1:]
+				// Adjust ViewOffset for the dropped line.
+				if sb.ViewOffset > 0 {
+					sb.ViewOffset--
+				}
 			}
 		}
 		copy(cells[top:bot], cells[top+1:bot+1])
+		copy(sb.wrapped[top:bot], sb.wrapped[top+1:bot+1])
 		cells[bot] = blankRow(sb.Cols, sb.DefaultFG, sb.DefaultBG)
+		sb.wrapped[bot] = false
 	}
 	for r := top; r <= bot; r++ {
 		sb.dirty[r] = true
@@ -297,7 +321,9 @@ func (sb *ScreenBuffer) ScrollDown(n int) {
 	bot := sb.ScrollBottom
 	for i := 0; i < n; i++ {
 		copy(cells[top+1:bot+1], cells[top:bot])
+		copy(sb.wrapped[top+1:bot+1], sb.wrapped[top:bot])
 		cells[top] = blankRow(sb.Cols, sb.DefaultFG, sb.DefaultBG)
+		sb.wrapped[top] = false
 	}
 	for r := top; r <= bot; r++ {
 		sb.dirty[r] = true
@@ -325,11 +351,13 @@ func (sb *ScreenBuffer) EraseInDisplay(mode int) {
 		for r := sb.CursorRow + 1; r < sb.Rows; r++ {
 			cells[r] = blankRow(sb.Cols, fg, bg)
 			sb.dirty[r] = true
+			sb.wrapped[r] = false
 		}
 	case 1: // erase from start of screen to cursor
 		for r := 0; r < sb.CursorRow; r++ {
 			cells[r] = blankRow(sb.Cols, fg, bg)
 			sb.dirty[r] = true
+			sb.wrapped[r] = false
 		}
 		clearRowTo(cells[sb.CursorRow], 0, sb.CursorCol+1, fg, bg)
 		sb.dirty[sb.CursorRow] = true
@@ -337,6 +365,7 @@ func (sb *ScreenBuffer) EraseInDisplay(mode int) {
 		for r := 0; r < sb.Rows; r++ {
 			cells[r] = blankRow(sb.Cols, fg, bg)
 			sb.dirty[r] = true
+			sb.wrapped[r] = false
 		}
 	}
 }
@@ -354,6 +383,7 @@ func (sb *ScreenBuffer) EraseInLine(mode int) {
 		clearRowTo(cells[sb.CursorRow], 0, sb.CursorCol+1, fg, bg)
 	case 2: // erase entire line
 		cells[sb.CursorRow] = blankRow(sb.Cols, fg, bg)
+		sb.wrapped[sb.CursorRow] = false
 	}
 	sb.dirty[sb.CursorRow] = true
 }
@@ -480,6 +510,8 @@ func (sb *ScreenBuffer) EnableAltScreen() {
 	sb.savedCursorRow = sb.CursorRow
 	sb.savedCursorCol = sb.CursorCol
 	sb.altCells = makeCells(sb.Rows, sb.Cols, sb.DefaultFG, sb.DefaultBG)
+	sb.altWrapped = sb.wrapped
+	sb.wrapped = make([]bool, sb.Rows)
 	sb.altCursorRow = 0
 	sb.altCursorCol = 0
 	sb.altActive = true
@@ -502,6 +534,8 @@ func (sb *ScreenBuffer) DisableAltScreen() {
 		return
 	}
 	sb.altActive = false
+	sb.wrapped = sb.altWrapped
+	sb.altWrapped = nil
 	sb.CursorRow = sb.savedCursorRow
 	sb.CursorCol = sb.savedCursorCol
 	sb.ScrollTop = 0
@@ -548,6 +582,11 @@ func (sb *ScreenBuffer) Resize(rows, cols int) {
 	sb.ScrollTop = 0
 	sb.ScrollBottom = rows - 1
 	sb.dirty = make([]bool, rows)
+	oldWrapped := sb.wrapped
+	sb.wrapped = make([]bool, rows)
+	for r := 0; r < copyRows; r++ {
+		sb.wrapped[r] = oldWrapped[r]
+	}
 	for r := range sb.dirty {
 		sb.dirty[r] = true
 	}
@@ -612,6 +651,24 @@ func (sb *ScreenBuffer) GetDisplayCell(row, col int) Cell {
 		return Cell{Char: ' ', FG: sb.DefaultFG, BG: sb.DefaultBG}
 	}
 	return sb.scrollback[sbIdx][col]
+}
+
+// IsDisplayRowWrapped reports whether the given display row is a soft-wrap
+// continuation of the previous row. Accounts for ViewOffset and scrollback.
+// Caller must hold at least a read lock.
+func (sb *ScreenBuffer) IsDisplayRowWrapped(row int) bool {
+	primaryRow := row - sb.ViewOffset
+	if primaryRow >= 0 {
+		if primaryRow < len(sb.wrapped) {
+			return sb.wrapped[primaryRow]
+		}
+		return false
+	}
+	sbIdx := len(sb.scrollback) - sb.ViewOffset + row
+	if sbIdx < 0 || sbIdx >= len(sb.scrollbackWrapped) {
+		return false
+	}
+	return sb.scrollbackWrapped[sbIdx]
 }
 
 // ScrollViewUp scrolls the viewport n rows toward scrollback history.
@@ -725,6 +782,7 @@ func (sb *ScreenBuffer) ClearScrollback() {
 		}
 	}
 	sb.scrollback = sb.scrollback[:0]
+	sb.scrollbackWrapped = sb.scrollbackWrapped[:0]
 	sb.ViewOffset = 0
 	sb.MarkAllDirty()
 }
