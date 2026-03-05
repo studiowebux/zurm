@@ -3790,8 +3790,11 @@ func restoreTabWithLayout(cfg *config.Config, rect image.Rectangle, cellW, cellH
 		t.Focused = leaves[0].Pane
 	}
 
-	// Recompute all pane rects
+	// Recompute all pane rects and sync terminal/PTY dimensions.
 	layout.ComputeRects(rect, cellW, cellH, cfg.Window.Padding, cfg.Panes.DividerWidthPixels)
+	for _, leaf := range layout.Leaves() {
+		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
+	}
 
 	return t, nil
 }
