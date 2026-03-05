@@ -41,37 +41,9 @@ jobs:
           mkdir -p dist/zurm.app/Contents/MacOS
           mkdir -p dist/zurm.app/Contents/Resources
           cp dist/zurm dist/zurm.app/Contents/MacOS/zurm
+          cp macos/Info.plist dist/zurm.app/Contents/Info.plist
           cp assets/icons/zurm.icns dist/zurm.app/Contents/Resources/zurm.icns
-          cat > dist/zurm.app/Contents/Info.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleExecutable</key>
-              <string>zurm</string>
-              <key>CFBundleIconFile</key>
-              <string>zurm</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.studiowebux.zurm</string>
-              <key>CFBundleName</key>
-              <string>zurm</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>CFBundleShortVersionString</key>
-              <string>${VERSION}</string>
-              <key>CFBundleVersion</key>
-              <string>${VERSION}</string>
-              <key>LSApplicationCategoryType</key>
-              <string>public.app-category.developer-tools</string>
-              <key>LSMinimumSystemVersion</key>
-              <string>12.0</string>
-              <key>NSHighResolutionCapable</key>
-              <true/>
-              <key>NSPrincipalClass</key>
-              <string>NSApplication</string>
-          </dict>
-          </plist>
-          EOF
+          sed -i '' "s/<string>0.3.2</<string>${VERSION}</" dist/zurm.app/Contents/Info.plist
           cd dist && zip -r zurm-macos-arm64.zip zurm.app
 
       - name: Upload artifacts

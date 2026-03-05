@@ -2,27 +2,72 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- Identity -->
     <key>CFBundleName</key>
     <string>zurm</string>
     <key>CFBundleDisplayName</key>
     <string>zurm</string>
     <key>CFBundleIdentifier</key>
-    <string>io.studiowebux.zurm</string>
+    <string>com.studiowebux.zurm</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.2.0</string>
+    <string>0.3.2</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
     <string>zurm</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+
+    <!-- Icon -->
     <key>CFBundleIconFile</key>
     <string>zurm</string>
+    <key>CFBundleIconName</key>
+    <string>zurm</string>
+
+    <!-- Display -->
     <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+
+    <!-- macOS version -->
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
+
+    <!-- Category -->
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.developer-tools</string>
+
+    <!-- Architecture -->
+    <key>LSArchitecturePriority</key>
+    <array>
+        <string>arm64</string>
+    </array>
+
+    <!-- Appearance -->
+    <key>NSAppearance</key>
+    <string>NSAppearanceNameDarkAqua</string>
+    <key>NSRequiresAquaSystemAppearance</key>
+    <false/>
+
+    <!-- Dock & window behavior -->
+    <key>LSUIElement</key>
+    <false/>
+    <key>NSSupportsSuddenTermination</key>
+    <false/>
+
+    <!-- Privacy descriptions (required for App Store / notarization) -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>zurm needs to send Apple Events to open URLs in your default browser.</string>
+
+    <!-- Copyright -->
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 Studio Webux. MIT License.</string>
 </dict>
 </plist>

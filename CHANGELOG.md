@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-03-05
+
+### Fixed
+
+- Typing after trackpad scroll not registering — sub-pixel momentum deltas blocked keyboard input
+- First keystrokes lost after Cmd+Tab — stale prevKeys from blur caused missed edge detection
+- Long line overflow overlapping at beginning of line — terminal/PTY not resized after ComputeRects in tab creation and session restore
+- Non-ASCII paste in tab rename — added UTF-8 validation for clipboard data
+
+### Changed
+
+- Info.plist updated with full macOS app metadata (category, dark mode, architecture, copyright)
+
+## [0.3.1] - 2026-03-05
+
+### Fixed
+
+- Cmd+D / Cmd+Shift+D keybinding ordering — shift-specific case now listed first
+- Selection persists as white box after scrolling — cleared on all scroll paths
+- Backspace key repeat speed too fast — configurable via `repeat_delay_ms` and `repeat_interval_ms`
+- Scrolling up jumps to bottom on new output — viewport pinned when scrolled back
+- Multiline copy adds unwanted newlines — soft-wrap tracking prevents spurious line breaks
+
+### Added
+
+- Configurable key repeat: `[keyboard]` section with `repeat_delay_ms` (default 500) and `repeat_interval_ms` (default 50)
+
 ## [0.3.0] - 2026-03-02
 
 ### Added
@@ -96,7 +123,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Block timer sourced from OSC C (command enter) for accurate execution duration
 - Block background tint uses premultiplied alpha for correct Ebitengine blending
 
-[Unreleased]: https://github.com/studiowebux/zurm/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/studiowebux/zurm/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/studiowebux/zurm/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/studiowebux/zurm/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/studiowebux/zurm/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/studiowebux/zurm/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/studiowebux/zurm/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/studiowebux/zurm/releases/tag/v0.1.0
