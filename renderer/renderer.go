@@ -327,6 +327,10 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int) {
 		return
 	}
 
+	// Clear the entire tab bar area to prevent artifacts on reorder/close.
+	tabBarRect := image.Rect(0, 0, physW, tabBarH)
+	r.offscreen.SubImage(tabBarRect).(*ebiten.Image).Fill(r.borderColor)
+
 	// Each tab gets equal width, capped at configured max.
 	maxTabW := r.cfg.Tabs.MaxWidthChars * r.font.CellW
 	tabW := physW / numTabs
