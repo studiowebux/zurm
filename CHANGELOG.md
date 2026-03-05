@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-05
+
+### Added
+
+- Reorder tabs with Cmd+Shift+Left/Right
+- Focus history navigation with Cmd+; — jump back to previously viewed tab or pane (stack of 50 entries)
+- Tab activity indicator — purple dot on background tabs with unseen PTY output
+- Window close button (red X) now shows quit confirmation modal, matching Cmd+Q behavior
+
+### Fixed
+
+- Tab bar artifacts when reordering tabs — full clear before redraw
+- Tabs losing displayed name after reorder — stable default title assigned at creation
+- Initial tab now seeded into focus history on startup
+
 ## [0.3.2] - 2026-03-05
 
 ### Fixed
@@ -123,7 +138,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Block timer sourced from OSC C (command enter) for accurate execution duration
 - Block background tint uses premultiplied alpha for correct Ebitengine blending
 
-[Unreleased]: https://github.com/studiowebux/zurm/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/studiowebux/zurm/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/studiowebux/zurm/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/studiowebux/zurm/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/studiowebux/zurm/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/studiowebux/zurm/compare/v0.2.1...v0.3.0
