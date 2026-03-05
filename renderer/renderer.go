@@ -327,6 +327,10 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int) {
 		return
 	}
 
+	// Clear the entire tab bar area to prevent artifacts on reorder/close.
+	tabBarRect := image.Rect(0, 0, physW, tabBarH)
+	r.offscreen.SubImage(tabBarRect).(*ebiten.Image).Fill(r.borderColor)
+
 	// Each tab gets equal width, capped at configured max.
 	maxTabW := r.cfg.Tabs.MaxWidthChars * r.font.CellW
 	tabW := physW / numTabs
@@ -397,6 +401,18 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int) {
 		// Vertically center text in the tab bar.
 		textY := (tabBarH - r.font.CellH) / 2
 		r.font.DrawString(r.offscreen, title, x+r.font.CellW/2, textY, fg)
+
+		// Activity dot for background tabs with unseen output.
+		if i != activeTab && t.HasActivity {
+			dotSize := r.font.CellH / 4
+			if dotSize < 3 {
+				dotSize = 3
+			}
+			dotX := x + tabW - r.font.CellW/2 - dotSize
+			dotY := (tabBarH - dotSize) / 2
+			dotRect := image.Rect(dotX, dotY, dotX+dotSize, dotY+dotSize)
+			r.offscreen.SubImage(dotRect).(*ebiten.Image).Fill(r.cursorColor)
+		}
 	}
 }
 
