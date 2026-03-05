@@ -264,6 +264,9 @@ func main() {
 			}
 
 			t.Title = td.Title
+			if t.Title == "" {
+				t.Title = fmt.Sprintf("tab %d", len(initialTabs)+1)
+			}
 			t.UserRenamed = td.UserRenamed
 			if len(td.PinnedSlot) > 0 {
 				t.PinnedSlot = []rune(td.PinnedSlot)[0]
@@ -285,6 +288,7 @@ func main() {
 		if tErr != nil {
 			log.Fatalf("tab new: %v", tErr)
 		}
+		firstTab.Title = "tab 1"
 		initialTabs = []*tab.Tab{firstTab}
 		initialActive = 0
 	}
@@ -2614,6 +2618,7 @@ func (g *Game) newTab() {
 	if err != nil {
 		return
 	}
+	t.Title = fmt.Sprintf("tab %d", len(g.tabs)+1)
 	g.tabs = append(g.tabs, t)
 	g.switchTab(len(g.tabs) - 1)
 }
