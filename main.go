@@ -311,6 +311,10 @@ func main() {
 	game.renderer.BlocksEnabled = game.blocksEnabled
 	game.buildPalette()
 
+	// Seed focus history with the initial tab so Cmd+; can return to it.
+	game.focusHistory = []focusEntry{{tabIdx: initialActive, pane: initialTabs[initialActive].Focused}}
+	initialTabs[initialActive].SnapshotGen()
+
 	ebiten.SetWindowSize(logW, logH)
 	ebiten.SetWindowTitle("zurm")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
