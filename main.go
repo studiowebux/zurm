@@ -30,10 +30,10 @@ import (
 // Defaults to "dev" for local builds.
 var version = "dev"
 
-// Key repeat parameters matching typical OS terminal behavior.
-const (
+// keyRepeatDelay and keyRepeatInterval are set from config at startup.
+var (
 	keyRepeatDelay    = 500 * time.Millisecond
-	keyRepeatInterval = 33 * time.Millisecond // ~30 repeats/sec
+	keyRepeatInterval = 50 * time.Millisecond
 )
 
 //go:embed assets/fonts/JetBrainsMono-Regular.ttf
@@ -187,6 +187,13 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Printf("config load warning: %v (using defaults)", err)
+	}
+
+	if cfg.Keyboard.RepeatDelayMs > 0 {
+		keyRepeatDelay = time.Duration(cfg.Keyboard.RepeatDelayMs) * time.Millisecond
+	}
+	if cfg.Keyboard.RepeatIntervalMs > 0 {
+		keyRepeatInterval = time.Duration(cfg.Keyboard.RepeatIntervalMs) * time.Millisecond
 	}
 
 	dpi := ebiten.Monitor().DeviceScaleFactor()
@@ -628,11 +635,13 @@ func (g *Game) handleInput() {
 		case key == ebiten.KeyPageUp:
 			g.focused.Term.Buf.Lock()
 			g.focused.Term.Buf.ScrollViewUp(halfPage)
+			g.focused.Term.Buf.ClearSelection()
 			g.focused.Term.Buf.Unlock()
 			scrolled = true
 		case key == ebiten.KeyPageDown:
 			g.focused.Term.Buf.Lock()
 			g.focused.Term.Buf.ScrollViewDown(halfPage)
+			g.focused.Term.Buf.ClearSelection()
 			g.focused.Term.Buf.Unlock()
 			scrolled = true
 		case (meta || ctrl) && key == ebiten.KeyK:
@@ -661,6 +670,7 @@ func (g *Game) handleInput() {
 				} else {
 					g.focused.Term.Buf.ScrollViewDown(-lines)
 				}
+				g.focused.Term.Buf.ClearSelection()
 				g.focused.Term.Buf.Unlock()
 			}
 			scrolled = true
@@ -787,10 +797,10 @@ func (g *Game) handleInput() {
 			// Pane management.
 			case meta && key == ebiten.KeyZ:
 				g.toggleZoom()
-			case meta && !shift && key == ebiten.KeyD:
-				g.splitH()
 			case meta && shift && key == ebiten.KeyD:
 				g.splitV()
+			case meta && key == ebiten.KeyD:
+				g.splitH()
 			case meta && key == ebiten.KeyW:
 				// Close pane if 2+ panes in tab; close tab if last pane.
 				if g.cfg.Help.CloseConfirm {
@@ -2400,6 +2410,7 @@ func (g *Game) handleMouse() {
 				} else {
 					g.focused.Term.Buf.ScrollViewDown(-lines)
 				}
+				g.focused.Term.Buf.ClearSelection()
 				g.focused.Term.Buf.Unlock()
 			}
 		} else {
@@ -2459,9 +2470,14 @@ func (g *Game) copySelection() {
 	}
 
 	norm := sel.Normalize()
-	lines := make([]string, 0, norm.EndRow-norm.StartRow+1)
+	var text strings.Builder
 
 	for r := norm.StartRow; r <= norm.EndRow && r < rows; r++ {
+		// Insert newline between rows only if this row is NOT a soft-wrap continuation.
+		if r > norm.StartRow && !g.focused.Term.Buf.IsDisplayRowWrapped(r) {
+			text.WriteByte('\n')
+		}
+
 		colStart := 0
 		colEnd := cols - 1
 		if r == norm.StartRow {
@@ -2471,25 +2487,25 @@ func (g *Game) copySelection() {
 			colEnd = norm.EndCol
 		}
 
-		var sb strings.Builder
+		var line strings.Builder
 		for c := colStart; c <= colEnd && c < cols; c++ {
 			ch := g.focused.Term.Buf.GetDisplayCell(r, c).Char
 			if ch == 0 {
 				ch = ' '
 			}
-			sb.WriteRune(ch)
+			line.WriteRune(ch)
 		}
-		lines = append(lines, strings.TrimRight(sb.String(), " "))
+		text.WriteString(strings.TrimRight(line.String(), " "))
 	}
 	g.focused.Term.Buf.RUnlock()
 
-	text := strings.Join(lines, "\n")
-	if text == "" {
+	result := text.String()
+	if result == "" {
 		return
 	}
 
 	cmd := exec.Command("pbcopy")
-	cmd.Stdin = strings.NewReader(text)
+	cmd.Stdin = strings.NewReader(result)
 	_ = cmd.Run()
 }
 

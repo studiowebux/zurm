@@ -51,6 +51,8 @@ var Defaults = Config{
 	},
 	Keyboard: KeyboardConfig{
 		LeftOptionAsMeta: true,
+		RepeatDelayMs:    500,
+		RepeatIntervalMs: 50,
 	},
 	Help: HelpConfig{
 		Enabled:      true,
