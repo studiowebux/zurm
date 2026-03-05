@@ -26,6 +26,34 @@ type Tab struct {
 	// PinnedSlot is a home-row letter ('a','s','d','f','g','h','j','k','l') if this
 	// tab is pinned to a pin slot, or 0 if not pinned.
 	PinnedSlot rune
+
+	// HasActivity is true when a background tab has received PTY output since last viewed.
+	HasActivity bool
+
+	// lastSeenGen stores the last-seen RenderGen sum for activity detection.
+	lastSeenGen uint64
+}
+
+// SnapshotGen records the current aggregate RenderGen for all panes in this tab.
+func (t *Tab) SnapshotGen() {
+	var sum uint64
+	for _, leaf := range t.Layout.Leaves() {
+		sum += leaf.Pane.Term.Buf.RenderGen()
+	}
+	t.lastSeenGen = sum
+	t.HasActivity = false
+}
+
+// CheckActivity compares the current aggregate RenderGen against the snapshot.
+// If it changed, sets HasActivity = true.
+func (t *Tab) CheckActivity() {
+	var sum uint64
+	for _, leaf := range t.Layout.Leaves() {
+		sum += leaf.Pane.Term.Buf.RenderGen()
+	}
+	if sum != t.lastSeenGen {
+		t.HasActivity = true
+	}
 }
 
 // New creates a Tab with a single pane covering rect.

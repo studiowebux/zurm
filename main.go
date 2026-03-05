@@ -129,6 +129,10 @@ type Game struct {
 	// pinMode is true after Cmd+Space, waiting for a home-row slot keypress.
 	pinMode bool
 
+	// focusHistory is a stack of (tab index, pane pointer) pairs for Cmd+` navigation.
+	// The most recent entry is at the end. Max 50 entries.
+	focusHistory []focusEntry
+
 	// File explorer sidebar state (Cmd+E).
 	fileExplorerState renderer.FileExplorerState
 
@@ -312,6 +316,7 @@ func main() {
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetScreenClearedEveryFrame(false) // we manage redraws via dirty flag
 	ebiten.SetTPS(cfg.Performance.TPS)
+	ebiten.SetWindowClosingHandled(true) // intercept red X — handled in Update
 
 	if err := ebiten.RunGame(game); err != nil && err != ebiten.Termination {
 		log.Fatalf("ebiten: %v", err)
@@ -330,7 +335,9 @@ func (g *Game) Update() error {
 
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
 	ctrl := ebiten.IsKeyPressed(ebiten.KeyControl)
-	if (meta || ctrl) && ebiten.IsKeyPressed(ebiten.KeyQ) && !g.confirmState.Open {
+	// Intercept window close button (red X) and Cmd+Q — show confirmation.
+	wantQuit := (meta || ctrl) && ebiten.IsKeyPressed(ebiten.KeyQ)
+	if (wantQuit || ebiten.IsWindowBeingClosed()) && !g.confirmState.Open {
 		g.showConfirm("Quit zurm? All sessions will be closed.", func() {
 			g.saveSession()
 			for _, t := range g.tabs {
@@ -378,6 +385,17 @@ func (g *Game) Update() error {
 			g.screenDirty = true
 			// Bump per-pane gen so the pane-skip logic redraws the cursor row.
 			leaf.Pane.Term.Buf.BumpRenderGen()
+		}
+	}
+
+	// Check background tabs for PTY activity (sets HasActivity indicator).
+	for i, t := range g.tabs {
+		if i != g.activeTab {
+			had := t.HasActivity
+			t.CheckActivity()
+			if t.HasActivity != had {
+				g.screenDirty = true
+			}
 		}
 	}
 
@@ -770,6 +788,8 @@ func (g *Game) handleInput() {
 				g.newTab()
 			case meta && shift && key == ebiten.KeyR:
 				g.startRenameTab(g.activeTab)
+			case meta && key == ebiten.KeyBackquote:
+				g.goBack()
 			case meta && shift && key == ebiten.KeyBracketLeft:
 				g.prevTab()
 			case meta && shift && key == ebiten.KeyBracketRight:
@@ -825,13 +845,17 @@ func (g *Game) handleInput() {
 				if p := g.layout.NextLeaf(g.focused); p != nil {
 					g.setFocus(p)
 				}
-			case meta && key == ebiten.KeyArrowLeft:
+			case meta && shift && key == ebiten.KeyArrowLeft:
+				g.moveTabLeft()
+			case meta && shift && key == ebiten.KeyArrowRight:
+				g.moveTabRight()
+			case meta && !shift && key == ebiten.KeyArrowLeft:
 				g.focusDir(-1, 0)
-			case meta && key == ebiten.KeyArrowRight:
+			case meta && !shift && key == ebiten.KeyArrowRight:
 				g.focusDir(1, 0)
-			case meta && key == ebiten.KeyArrowUp:
+			case meta && !shift && key == ebiten.KeyArrowUp:
 				g.focusDir(0, -1)
-			case meta && key == ebiten.KeyArrowDown:
+			case meta && !shift && key == ebiten.KeyArrowDown:
 				g.focusDir(0, 1)
 
 			// Left Option as Meta — specific sequences with repeat support.
@@ -2608,8 +2632,69 @@ func (g *Game) closeActiveTab() {
 	g.syncActive()
 }
 
-// switchTab activates the tab at index i.
+// focusEntry records a tab+pane focus state for the history stack.
+type focusEntry struct {
+	tabIdx int
+	pane   *pane.Pane
+}
+
+// pushFocus records the current focus state before changing it.
+func (g *Game) pushFocus() {
+	if len(g.tabs) == 0 || g.focused == nil {
+		return
+	}
+	e := focusEntry{tabIdx: g.activeTab, pane: g.focused}
+	// Deduplicate: skip if top of stack is the same location.
+	if n := len(g.focusHistory); n > 0 && g.focusHistory[n-1] == e {
+		return
+	}
+	g.focusHistory = append(g.focusHistory, e)
+	if len(g.focusHistory) > 50 {
+		g.focusHistory = g.focusHistory[1:]
+	}
+}
+
+// goBack pops the focus history stack and navigates to the previous location.
+func (g *Game) goBack() {
+	for len(g.focusHistory) > 0 {
+		e := g.focusHistory[len(g.focusHistory)-1]
+		g.focusHistory = g.focusHistory[:len(g.focusHistory)-1]
+		// Skip stale entries (tab removed or pane closed).
+		if e.tabIdx < 0 || e.tabIdx >= len(g.tabs) {
+			continue
+		}
+		// Verify the pane still exists in that tab.
+		found := false
+		for _, leaf := range g.tabs[e.tabIdx].Layout.Leaves() {
+			if leaf.Pane == e.pane {
+				found = true
+				break
+			}
+		}
+		if !found {
+			continue
+		}
+		// Skip if it's the current location.
+		if e.tabIdx == g.activeTab && e.pane == g.focused {
+			continue
+		}
+		if e.tabIdx != g.activeTab {
+			g.switchTabNoHistory(e.tabIdx)
+		}
+		g.setFocusNoHistory(e.pane)
+		return
+	}
+}
+
+// switchTab activates the tab at index i, recording focus history.
 func (g *Game) switchTab(i int) {
+	g.pushFocus()
+	g.switchTabNoHistory(i)
+}
+
+// switchTabNoHistory activates the tab at index i without recording history.
+// Used by goBack to avoid polluting the stack.
+func (g *Game) switchTabNoHistory(i int) {
 	if i < 0 || i >= len(g.tabs) {
 		return
 	}
@@ -2619,6 +2704,7 @@ func (g *Game) switchTab(i int) {
 		g.unzoom()
 	}
 	g.activeTab = i
+	g.tabs[i].SnapshotGen()
 	g.renderer.SetLayoutDirty()
 	g.renderer.ClearPaneCache()
 	g.syncActive()
@@ -2787,6 +2873,20 @@ func (g *Game) reorderTab(from, to int) {
 	g.screenDirty = true
 }
 
+// moveTabLeft moves the active tab one position to the left.
+func (g *Game) moveTabLeft() {
+	if g.activeTab > 0 {
+		g.reorderTab(g.activeTab, g.activeTab-1)
+	}
+}
+
+// moveTabRight moves the active tab one position to the right.
+func (g *Game) moveTabRight() {
+	if g.activeTab < len(g.tabs)-1 {
+		g.reorderTab(g.activeTab, g.activeTab+1)
+	}
+}
+
 // handleTabSwitcherInput processes keyboard events while the tab switcher is open.
 func (g *Game) handleTabSwitcherInput() {
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
@@ -2920,6 +3020,13 @@ func (g *Game) closePane(p *pane.Pane) {
 
 // setFocus updates the focused pane in both Game and the active tab.
 func (g *Game) setFocus(p *pane.Pane) {
+	g.pushFocus()
+	g.setFocusNoHistory(p)
+}
+
+// setFocusNoHistory sets focus without recording history.
+// Used by goBack to avoid polluting the stack.
+func (g *Game) setFocusNoHistory(p *pane.Pane) {
 	g.focused = p
 	g.tabs[g.activeTab].Focused = p
 	g.selDragging = false
