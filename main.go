@@ -788,7 +788,7 @@ func (g *Game) handleInput() {
 				g.newTab()
 			case meta && shift && key == ebiten.KeyR:
 				g.startRenameTab(g.activeTab)
-			case meta && key == ebiten.KeyBackquote:
+			case meta && key == ebiten.KeySemicolon:
 				g.goBack()
 			case meta && shift && key == ebiten.KeyBracketLeft:
 				g.prevTab()
