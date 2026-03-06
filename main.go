@@ -4161,6 +4161,9 @@ func (g *Game) reloadConfig() {
 }
 
 // switchTheme applies a theme by name at runtime.
+// When the user explicitly picks a theme from the palette, the theme colors
+// are applied directly — the meta-merge (user-explicit overrides) only applies
+// during reloadConfig / ApplyTheme for partial config.toml customization.
 func (g *Game) switchTheme(name string) {
 	themeColors, err := config.LoadTheme(name)
 	if err != nil {
@@ -4168,10 +4171,8 @@ func (g *Game) switchTheme(name string) {
 		return
 	}
 
-	// Re-read config meta so user-explicit colors still override the theme.
-	_, meta, _ := config.LoadWithMeta()
 	g.cfg.Theme.Name = name
-	g.cfg.Colors = config.MergeColorsWithMeta(themeColors, g.cfg.Colors, meta)
+	g.cfg.Colors = themeColors
 
 	// Propagate.
 	g.renderer.ReloadColors(g.cfg)
