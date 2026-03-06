@@ -20,6 +20,9 @@ type paneCacheEntry struct {
 	lastCursorCol  int
 	hadURLHover    bool // true if URL hover was active on last draw
 	lastProcName   string
+	lastCustomName string
+	lastRenaming   bool
+	lastRenameText string
 }
 
 // blockSnap holds a point-in-time copy of block-related buffer state.
@@ -251,7 +254,10 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 				curRow == cache.lastCursorRow &&
 				curCol == cache.lastCursorCol &&
 				hasURLHover == cache.hadURLHover &&
-				procName == cache.lastProcName
+				procName == cache.lastProcName &&
+				p.CustomName == cache.lastCustomName &&
+				p.Renaming == cache.lastRenaming &&
+				p.RenameText == cache.lastRenameText
 
 			if !unchanged {
 				var paneSearch *SearchState
@@ -261,9 +267,15 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 				r.DrawPane(p.Term.Buf, p.Term.Cursor, p.Rect, isFocused, isFocused && multiPane && !zoomed, paneSearch, p.HeaderH)
 
 				// Pane overlays: name label (multi-pane only) and scroll indicator.
-				label := procName
+				label := p.CustomName
+				if label == "" {
+					label = procName
+				}
 				if label == "" {
 					label = fmt.Sprintf("Pane %d", i+1)
+				}
+				if p.Renaming {
+					label = p.RenameText + "_"
 				}
 				r.drawPaneOverlay(p.Rect, label, multiPane, viewOff, sbLen)
 
@@ -273,6 +285,9 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 				cache.lastCursorCol = curCol
 				cache.hadURLHover = hasURLHover
 				cache.lastProcName = procName
+				cache.lastCustomName = p.CustomName
+				cache.lastRenaming = p.Renaming
+				cache.lastRenameText = p.RenameText
 			}
 			p.Term.Buf.RUnlock()
 

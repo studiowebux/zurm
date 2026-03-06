@@ -105,6 +105,38 @@ func (n *LayoutNode) PaneAt(x, y int) *Pane {
 }
 
 
+// SplitAt returns the deepest split node whose divider region contains the
+// pixel coordinate (x, y). margin expands the hit zone around the 1px divider.
+// Returns nil if no divider is hit.
+func (n *LayoutNode) SplitAt(x, y, margin int) *LayoutNode {
+	if n == nil || n.Kind == Leaf {
+		return nil
+	}
+	// Check children first (deeper splits take priority).
+	if hit := n.Left.SplitAt(x, y, margin); hit != nil {
+		return hit
+	}
+	if hit := n.Right.SplitAt(x, y, margin); hit != nil {
+		return hit
+	}
+	// Check this node's own divider.
+	switch n.Kind {
+	case HSplit:
+		divX := n.Left.Rect.Max.X
+		if x >= divX-margin && x <= n.Right.Rect.Min.X+margin &&
+			y >= n.Rect.Min.Y && y <= n.Rect.Max.Y {
+			return n
+		}
+	case VSplit:
+		divY := n.Left.Rect.Max.Y
+		if y >= divY-margin && y <= n.Right.Rect.Min.Y+margin &&
+			x >= n.Rect.Min.X && x <= n.Rect.Max.X {
+			return n
+		}
+	}
+	return nil
+}
+
 // FindParent returns the parent split node whose Left or Right child is the
 // leaf containing p. Returns (parent, isLeft) — isLeft=true if p is Left child.
 func (n *LayoutNode) FindParent(p *Pane) (*LayoutNode, bool) {

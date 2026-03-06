@@ -86,6 +86,15 @@ type Game struct {
 	// Selection drag state.
 	selDragging bool
 
+	// Divider drag state (pane resize).
+	dividerDragging bool
+	dragSplit       *pane.LayoutNode // split node being resized
+
+	// Tab drag state (mouse reorder).
+	tabDragging    bool
+	dragFromTabIdx int
+	dragTabStartX  int
+
 	// URL hover state — detected URLs in the focused pane's visible buffer.
 	hoveredURL *terminal.URLMatch // URL under the cursor, nil if none
 	urlMatches []terminal.URLMatch // cached URL matches for the focused pane
@@ -561,6 +570,13 @@ func (g *Game) updateLayout(n *pane.LayoutNode) {
 }
 
 func (g *Game) handleInput() {
+	// Pane rename mode intercepts all input (highest priority).
+	if g.renamingPane() {
+		g.screenDirty = true
+		g.handlePaneRenameInput()
+		return
+	}
+
 	// Tab rename mode intercepts all input.
 	if g.renamingTabIdx() >= 0 {
 		g.screenDirty = true
@@ -863,6 +879,17 @@ func (g *Game) handleInput() {
 				g.moveTabLeft()
 			case meta && shift && key == ebiten.KeyArrowRight:
 				g.moveTabRight()
+
+			// Cmd+Option+Arrow — resize focused pane's split.
+			case meta && ebiten.IsKeyPressed(ebiten.KeyAlt) && key == ebiten.KeyArrowLeft:
+				g.resizePane(-1, 0)
+			case meta && ebiten.IsKeyPressed(ebiten.KeyAlt) && key == ebiten.KeyArrowRight:
+				g.resizePane(1, 0)
+			case meta && ebiten.IsKeyPressed(ebiten.KeyAlt) && key == ebiten.KeyArrowUp:
+				g.resizePane(0, -1)
+			case meta && ebiten.IsKeyPressed(ebiten.KeyAlt) && key == ebiten.KeyArrowDown:
+				g.resizePane(0, 1)
+
 			case meta && !shift && key == ebiten.KeyArrowLeft:
 				g.focusDir(-1, 0)
 			case meta && !shift && key == ebiten.KeyArrowRight:
@@ -2304,32 +2331,74 @@ func (g *Game) handleMouse() {
 		return
 	}
 
-	// Click in tab bar — switch tab or rename on double-click.
+	// Click in tab bar — switch tab, rename on double-click, or drag to reorder.
 	// During selection drag, skip the tab bar handler so auto-scroll can run.
 	// tabW must match the renderer's cap (24 * CellW) so click regions align with drawn tabs.
 	if my < tabBarH && !g.selDragging {
+		physW := int(float64(g.winW) * g.dpi)
+		numTabs := len(g.tabs)
+		maxTabW := g.cfg.Tabs.MaxWidthChars * g.font.CellW
+		tabW := 0
+		if numTabs > 0 {
+			tabW = physW / numTabs
+			if tabW > maxTabW {
+				tabW = maxTabW
+			}
+		}
+
+		// Continue tab drag.
+		if g.tabDragging && leftPressed {
+			if tabW > 0 {
+				overIdx := mx / tabW
+				if overIdx < 0 {
+					overIdx = 0
+				} else if overIdx >= numTabs {
+					overIdx = numTabs - 1
+				}
+				if overIdx != g.activeTab {
+					g.reorderTab(g.activeTab, overIdx)
+					g.dragFromTabIdx = overIdx
+				}
+			}
+			g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
+			g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
+			g.screenDirty = true
+			return
+		}
+
+		// End tab drag on release.
+		if g.tabDragging && !leftPressed {
+			g.tabDragging = false
+			g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
+			g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
+			return
+		}
+
 		if leftPressed && !leftWas {
-			physW := int(float64(g.winW) * g.dpi)
-			numTabs := len(g.tabs)
-			if numTabs > 0 {
-				maxTabW := g.cfg.Tabs.MaxWidthChars * g.font.CellW
-				tabW := physW / numTabs
-				if tabW > maxTabW {
-					tabW = maxTabW
-				}
-				if tabW > 0 {
-					clicked := mx / tabW
-					if clicked >= 0 && clicked < numTabs {
-						now := time.Now()
-						if clicked == g.activeTab && now.Sub(g.lastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
-							// Double-click on the active tab → rename.
-							g.startRenameTab(clicked)
-						} else {
-							g.switchTab(clicked)
-						}
-						g.lastClickTime = now
+			if numTabs > 0 && tabW > 0 {
+				clicked := mx / tabW
+				if clicked >= 0 && clicked < numTabs {
+					now := time.Now()
+					if clicked == g.activeTab && now.Sub(g.lastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
+						// Double-click on the active tab → rename.
+						g.startRenameTab(clicked)
+					} else {
+						g.switchTab(clicked)
+						// Record drag start position.
+						g.dragFromTabIdx = clicked
+						g.dragTabStartX = mx
 					}
+					g.lastClickTime = now
 				}
+			}
+		} else if leftPressed && leftWas && !g.tabDragging {
+			// Initiate drag after 8px threshold.
+			dx := mx - g.dragTabStartX
+			if dx < 0 {
+				dx = -dx
+			}
+			if dx >= 8 {
+				g.tabDragging = true
 			}
 		} else if rightPressed && !rightWas {
 			// Right-click in tab bar → show tab context menu.
@@ -2353,6 +2422,51 @@ func (g *Game) handleMouse() {
 		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
 		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 		return
+	}
+
+	// Divider drag — resize pane splits by dragging the divider.
+	if g.dividerDragging {
+		if leftPressed {
+			// Continue drag: update ratio based on cursor position.
+			switch g.dragSplit.Kind {
+			case pane.HSplit:
+				newRatio := float64(mx-g.dragSplit.Rect.Min.X) / float64(g.dragSplit.Rect.Dx())
+				if newRatio < 0.1 {
+					newRatio = 0.1
+				} else if newRatio > 0.9 {
+					newRatio = 0.9
+				}
+				g.dragSplit.Ratio = newRatio
+			case pane.VSplit:
+				newRatio := float64(my-g.dragSplit.Rect.Min.Y) / float64(g.dragSplit.Rect.Dy())
+				if newRatio < 0.1 {
+					newRatio = 0.1
+				} else if newRatio > 0.9 {
+					newRatio = 0.9
+				}
+				g.dragSplit.Ratio = newRatio
+			}
+			g.recomputeLayout()
+			g.screenDirty = true
+		} else {
+			// Release: stop dragging.
+			g.dividerDragging = false
+			g.dragSplit = nil
+		}
+		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
+		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
+		return
+	}
+
+	// Start divider drag on click — 4px hit margin around the 1px divider.
+	if leftPressed && !leftWas && !g.zoomed {
+		if split := g.layout.SplitAt(mx, my, 4); split != nil {
+			g.dividerDragging = true
+			g.dragSplit = split
+			g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
+			g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
+			return
+		}
 	}
 
 	// Click on an inactive pane always switches focus, regardless of PTY mouse mode.
@@ -3158,6 +3272,80 @@ func (g *Game) focusDir(dx, dy int) {
 	}
 }
 
+// resizePane adjusts the split ratio of the parent split containing the focused pane.
+// dx/dy indicate direction: dx=-1 shrinks left, dx=1 grows right, etc.
+func (g *Game) resizePane(dx, dy int) {
+	if g.zoomed {
+		return
+	}
+	parent, isLeft := g.layout.FindParent(g.focused)
+	if parent == nil {
+		return
+	}
+	step := 0.05
+	switch parent.Kind {
+	case pane.HSplit:
+		if dx != 0 {
+			delta := step * float64(dx)
+			if !isLeft {
+				delta = -delta
+			}
+			parent.Ratio += delta
+		}
+	case pane.VSplit:
+		if dy != 0 {
+			delta := step * float64(dy)
+			if !isLeft {
+				delta = -delta
+			}
+			parent.Ratio += delta
+		}
+	}
+	if parent.Ratio < 0.1 {
+		parent.Ratio = 0.1
+	} else if parent.Ratio > 0.9 {
+		parent.Ratio = 0.9
+	}
+	g.recomputeLayout()
+	g.screenDirty = true
+}
+
+// startRenamePane enters inline rename mode for the focused pane.
+func (g *Game) startRenamePane() {
+	if g.focused == nil {
+		return
+	}
+	// Cancel any active tab rename first.
+	g.cancelRename()
+	g.focused.Renaming = true
+	g.focused.RenameText = g.focused.CustomName
+	g.screenDirty = true
+}
+
+// commitPaneRename applies the pane rename text.
+func (g *Game) commitPaneRename() {
+	if g.focused != nil && g.focused.Renaming {
+		g.focused.CustomName = sanitizeTitle(g.focused.RenameText)
+		g.focused.Renaming = false
+		g.focused.RenameText = ""
+		g.screenDirty = true
+	}
+}
+
+// cancelPaneRename exits pane rename mode without applying changes.
+func (g *Game) cancelPaneRename() {
+	if g.focused != nil && g.focused.Renaming {
+		g.focused.Renaming = false
+		g.focused.RenameText = ""
+		g.screenDirty = true
+	}
+}
+
+// renamingPane returns true if the focused pane is being renamed.
+func (g *Game) renamingPane() bool {
+	return g.focused != nil && g.focused.Renaming
+}
+
 // openTabContextMenu shows a small tab-specific context menu (Rename, Close).
 func (g *Game) openTabContextMenu(px, py int) {
 	if g.menuState.Open {
@@ -3200,6 +3388,7 @@ func (g *Game) buildContextMenu() []help.MenuItem {
 					g.closePane(g.focused)
 				}
 			}},
+			{Label: "Rename Pane", Action: g.startRenamePane},
 			{Separator: true},
 			{Label: "Focus Left", Shortcut: "Cmd+\u2190", Action: func() { g.focusDir(-1, 0) }},
 			{Label: "Focus Right", Shortcut: "Cmd+\u2192", Action: func() { g.focusDir(1, 0) }},
@@ -3545,6 +3734,51 @@ func (g *Game) handleRenameInput() {
 	}
 }
 
+// handlePaneRenameInput processes keyboard input while a pane rename is in progress.
+func (g *Game) handlePaneRenameInput() {
+	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.cancelPaneRename()
+		g.prevKeys[ebiten.KeyEscape] = true
+		return
+	}
+
+	ti := &TextInput{Text: g.focused.RenameText}
+
+	// Backspace
+	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) {
+		if ebiten.IsKeyPressed(ebiten.KeyAlt) {
+			ti.DeleteWord()
+		} else {
+			ti.DeleteLastChar()
+		}
+		g.focused.RenameText = ti.Text
+	}
+
+	// Enter — commit
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyNumpadEnter) {
+		g.commitPaneRename()
+		return
+	}
+
+	// Cmd+V — paste
+	if meta && inpututil.IsKeyJustPressed(ebiten.KeyV) {
+		if out, err := exec.Command("pbpaste").Output(); err == nil {
+			ti.AddString(strings.ToValidUTF8(string(out), ""))
+			g.focused.RenameText = ti.Text
+		}
+	}
+
+	// Regular text input
+	if !meta {
+		for _, r := range ebiten.AppendInputChars(nil) {
+			ti.AddChar(r)
+		}
+		g.focused.RenameText = ti.Text
+	}
+}
+
 // toggleZoom fullscreens the focused pane (Cmd+Z). Calling again restores the layout.
 func (g *Game) toggleZoom() {
 	if g.zoomed {
@@ -3574,6 +3808,24 @@ func (g *Game) toggleZoom() {
 	p.Cols = cols
 	p.Rows = rows
 	p.Term.Resize(cols, rows)
+}
+
+// recomputeLayout recalculates rects and resizes all pane terminals.
+// Call after any layout mutation (split ratio change, split/close, zoom toggle).
+func (g *Game) recomputeLayout() {
+	physW := int(float64(g.winW) * g.dpi)
+	physH := int(float64(g.winH) * g.dpi)
+	tabBarH := g.renderer.TabBarHeight()
+	statusBarH := g.renderer.StatusBarHeight()
+	fullRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
+
+	setPaneHeaders(g.layout, g.font.CellH)
+	g.layout.ComputeRects(fullRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
+	for _, leaf := range g.layout.Leaves() {
+		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
+	}
+	g.renderer.SetLayoutDirty()
+	g.renderer.ClearPaneCache()
 }
 
 // setPaneHeaders sets HeaderH on every leaf pane in the layout. When there are
@@ -3697,6 +3949,11 @@ func (g *Game) buildPalette() {
 		func() { g.focusDir(0, -1) },
 		func() { g.focusDir(0, 1) },
 		g.toggleZoom,
+		func() { g.resizePane(-1, 0) },
+		func() { g.resizePane(1, 0) },
+		func() { g.resizePane(0, -1) },
+		func() { g.resizePane(0, 1) },
+		g.startRenamePane,
 		// Scroll
 		func() {
 			g.focused.Term.Buf.Lock()
@@ -3984,6 +4241,9 @@ func serializePaneLayout(node *pane.LayoutNode) *session.PaneLayout {
 		if node.Pane != nil && node.Pane.Term != nil {
 			layout.Cwd = node.Pane.Term.Cwd
 		}
+		if node.Pane != nil {
+			layout.CustomName = node.Pane.CustomName
+		}
 	case pane.HSplit:
 		layout.Kind = "hsplit"
 		layout.Left = serializePaneLayout(node.Left)
@@ -4042,6 +4302,7 @@ func deserializePaneLayout(cfg *config.Config, rect image.Rectangle, cellW, cell
 		if err != nil {
 			return nil, err
 		}
+		p.CustomName = layout.CustomName
 		return pane.NewLeaf(p), nil
 
 	case "hsplit", "vsplit":

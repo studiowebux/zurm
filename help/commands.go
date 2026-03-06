@@ -28,6 +28,11 @@ func AllCommands() []Command {
 		{Name: "Focus Up", Shortcut: "Cmd+↑"},
 		{Name: "Focus Down", Shortcut: "Cmd+↓"},
 		{Name: "Zoom Pane", Shortcut: "Cmd+Z"},
+		{Name: "Resize Left", Shortcut: "Cmd+Opt+←"},
+		{Name: "Resize Right", Shortcut: "Cmd+Opt+→"},
+		{Name: "Resize Up", Shortcut: "Cmd+Opt+↑"},
+		{Name: "Resize Down", Shortcut: "Cmd+Opt+↓"},
+		{Name: "Rename Pane", Shortcut: ""},
 		// Scroll
 		{Name: "Scroll Up", Shortcut: "Shift+PgUp"},
 		{Name: "Scroll Down", Shortcut: "Shift+PgDn"},

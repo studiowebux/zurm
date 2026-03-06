@@ -17,6 +17,12 @@ type Pane struct {
 	Rows     int
 	ProcName string // last known foreground process name (drained from Term.ForegroundProcCh)
 	HeaderH  int    // height in pixels of the pane header bar (0 = no header)
+
+	// CustomName is set by the user via rename. Overrides ProcName in the pane label.
+	CustomName string
+	// Renaming is true while the user is typing a new pane name inline.
+	Renaming   bool
+	RenameText string
 }
 
 // New creates a Pane for the given physical pixel rect, computes grid dimensions,
