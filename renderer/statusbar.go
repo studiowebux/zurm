@@ -183,10 +183,10 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 		}
 	}
 
-	// ? help button at the far right edge.
+	// ? help button at the far right edge (below the separator line).
 	helpBtnW := r.font.CellW * 3 // " ? " — one cell padding each side
 	helpBtnX := physW - helpBtnW
-	helpBtnRect := image.Rect(helpBtnX, physH-h, physW, physH)
+	helpBtnRect := image.Rect(helpBtnX, physH-h+sepH, physW, physH)
 	r.offscreen.SubImage(helpBtnRect).(*ebiten.Image).Fill(darken(barBg))
 	r.font.DrawString(r.offscreen, "?", helpBtnX+r.font.CellW, textY, accentFg)
 	if state != nil {
