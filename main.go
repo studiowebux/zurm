@@ -313,6 +313,7 @@ func main() {
 	}
 
 	game.renderer.BlocksEnabled = game.blocksEnabled
+	game.statusBarState.Version = version
 	game.buildPalette()
 
 	// Seed focus history with the initial tab so Cmd+; can return to it.
@@ -1068,6 +1069,24 @@ func (g *Game) handleResize() {
 			leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
 		}
 	}
+
+	// When zoomed, the focused pane must fill the entire pane area.
+	// ComputeRects above set it to the normal split rect — override it.
+	if g.zoomed && g.focused != nil {
+		g.focused.Rect = paneRect
+		cols := (paneRect.Dx() - g.cfg.Window.Padding*2) / g.font.CellW
+		rows := (paneRect.Dy() - g.cfg.Window.Padding*2) / g.font.CellH
+		if cols < 1 {
+			cols = 1
+		}
+		if rows < 1 {
+			rows = 1
+		}
+		g.focused.Cols = cols
+		g.focused.Rows = rows
+		g.focused.Term.Resize(cols, rows)
+	}
+
 	g.syncActive()
 }
 
