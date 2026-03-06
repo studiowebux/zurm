@@ -1,0 +1,25 @@
+# Zurm Dark Theme — purple-accent dark palette
+
+[colors]
+background = "#0F0F18"
+foreground = "#E8E8F0"
+cursor     = "#A855F7"
+border     = "#1C1C2E"
+separator  = "#555570"
+
+black          = "#555570"
+red            = "#F87171"
+green          = "#34D399"
+yellow         = "#F59E0B"
+blue           = "#7C3AED"
+magenta        = "#C084FC"
+cyan           = "#67E8F9"
+white          = "#8888A8"
+bright_black   = "#555570"
+bright_red     = "#F87171"
+bright_green   = "#34D399"
+bright_yellow  = "#F59E0B"
+bright_blue    = "#A855F7"
+bright_magenta = "#C084FC"
+bright_cyan    = "#67E8F9"
+bright_white   = "#E8E8F0"

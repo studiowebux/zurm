@@ -131,6 +131,24 @@ func NewRenderer(font *FontRenderer, cfg *config.Config) *Renderer {
 	}
 }
 
+// ReloadColors updates the renderer's color state from a new config.
+// Re-parses cursor/border colors, re-derives UI colors, clears pane cache,
+// and marks the layout dirty so everything redraws.
+func (r *Renderer) ReloadColors(cfg *config.Config) {
+	r.cfg = cfg
+	r.cursorColor = config.ParseHexColor(cfg.Colors.Cursor)
+	r.borderColor = config.ParseHexColor(cfg.Colors.Border)
+	r.ui = deriveUIColors(cfg)
+	r.paneCache = make(map[*pane.Pane]*paneCacheEntry)
+	r.layoutDirty = true
+}
+
+// SetFont replaces the renderer's font. Call SetSize after to recompute
+// cell dimensions throughout the layout.
+func (r *Renderer) SetFont(font *FontRenderer) {
+	r.font = font
+}
+
 // SetLayoutDirty marks the renderer for a full offscreen clear on the next Draw.
 // Call whenever the pane layout or tab changes.
 func (r *Renderer) SetLayoutDirty() { r.layoutDirty = true }
@@ -599,8 +617,8 @@ func (r *Renderer) drawPaneOverlay(rect image.Rectangle, label string, multiPane
 	cellW := r.font.CellW
 	cellH := r.font.CellH
 
-	pillBg := color.RGBA{30, 30, 30, 220}
-	pillFg := color.RGBA{180, 180, 180, 255}
+	pillBg := color.RGBA{R: r.ui.PanelBg.R, G: r.ui.PanelBg.G, B: r.ui.PanelBg.B, A: 220}
+	pillFg := r.ui.Dim
 
 	pillH := cellH + 4
 	pillPad := 6

@@ -626,6 +626,53 @@ func (sb *ScreenBuffer) Resize(rows, cols int) {
 	}
 }
 
+// UpdateColors replaces the default FG/BG, palette, and SGR defaults.
+// Repaints existing cells that use the old defaults so the terminal content
+// visually updates immediately (not just new output).
+// Caller must hold write lock.
+func (sb *ScreenBuffer) UpdateColors(fg, bg color.RGBA, palette [16]color.RGBA) {
+	oldFG := sb.DefaultFG
+	oldBG := sb.DefaultBG
+	oldPalette := sb.Palette
+	sb.DefaultFG = fg
+	sb.DefaultBG = bg
+	sb.Palette = palette
+	sb.SGR.FG = fg
+	sb.SGR.BG = bg
+
+	// Build a color replacement map: old default + old palette → new values.
+	colorMap := make(map[color.RGBA]color.RGBA)
+	colorMap[oldFG] = fg
+	colorMap[oldBG] = bg
+	for i := 0; i < 16; i++ {
+		if oldPalette[i] != palette[i] {
+			colorMap[oldPalette[i]] = palette[i]
+		}
+	}
+
+	repaintRow := func(row []Cell) {
+		for i := range row {
+			if newC, ok := colorMap[row[i].FG]; ok {
+				row[i].FG = newC
+			}
+			if newC, ok := colorMap[row[i].BG]; ok {
+				row[i].BG = newC
+			}
+		}
+	}
+
+	for _, row := range sb.Cells {
+		repaintRow(row)
+	}
+	for _, row := range sb.altCells {
+		repaintRow(row)
+	}
+	for _, row := range sb.scrollback {
+		repaintRow(row)
+	}
+	sb.MarkAllDirty()
+}
+
 // MarkAllDirty marks every row as dirty.
 func (sb *ScreenBuffer) MarkAllDirty() {
 	for i := range sb.dirty {

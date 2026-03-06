@@ -66,6 +66,7 @@ func AllBindings() []KeyBinding {
 		{Category: "Help", Key: "Cmd+/", Description: "Toggle keybindings"},
 		{Category: "Help", Key: "Cmd+P", Description: "Command palette"},
 		{Category: "Help", Key: "? button", Description: "Status bar shortcut"},
+		{Category: "App", Key: "Cmd+,", Description: "Reload config"},
 		{Category: "App", Key: "Cmd+Q", Description: "Quit"},
 	}
 }

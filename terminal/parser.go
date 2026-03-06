@@ -741,7 +741,7 @@ func (p *Parser) parseExtendedColor(params []int, start int) (color.RGBA, int) {
 		if start+1 >= len(params) {
 			return p.sb.DefaultFG, 1
 		}
-		return color256(params[start+1]), 2
+		return p.color256(params[start+1]), 2
 	case 2: // 24-bit: 38;2;R;G;B
 		if start+3 >= len(params) {
 			return p.sb.DefaultFG, 1
@@ -756,15 +756,20 @@ func (p *Parser) parseExtendedColor(params []int, start int) (color.RGBA, int) {
 	return p.sb.DefaultFG, 0
 }
 
+// SetPalette replaces the parser's 16-color ANSI palette.
+// Called during config hot-reload so indices 0-15 use the new theme colors.
+func (p *Parser) SetPalette(palette [16]color.RGBA) {
+	p.palette = palette
+}
+
 // color256 maps a 256-color index to RGBA.
-func color256(n int) color.RGBA {
+// Indices 0-15 use the parser's configured palette instead of the hardcoded fallback.
+func (p *Parser) color256(n int) color.RGBA {
 	if n < 0 || n > 255 {
 		return color.RGBA{R: 255, G: 255, B: 255, A: 255}
 	}
-	// Standard 16 colors handled by the palette; here return a best-effort mapping.
 	if n < 16 {
-		// Caller should use palette instead; return fallback.
-		return xterm256[n]
+		return p.palette[n]
 	}
 	if n >= 232 { // grayscale ramp
 		v := uint8(8 + (n-232)*10) // #nosec G115 — n in [232,255], max value = 8+23*10 = 238

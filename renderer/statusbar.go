@@ -110,7 +110,7 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 		if state.RecordingBytes > 0 {
 			recText += " " + fmtFileSize(state.RecordingBytes)
 		}
-		rightSegs = append(rightSegs, seg{recText, color.RGBA{R: 220, G: 60, B: 60, A: 255}})
+		rightSegs = append(rightSegs, seg{recText, config.ParseHexColor(r.cfg.Colors.Red)})
 	}
 	if state.Version != "" {
 		rightSegs = append(rightSegs, seg{state.Version, fg})

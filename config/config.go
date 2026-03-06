@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"image/color"
 	"os"
 	"path/filepath"
@@ -93,6 +94,9 @@ success_color = "#34D399" # border color for exit code 0
 fail_color    = "#F87171" # border color for non-zero exit codes
 bg_color      = ""        # optional hex background tint (empty = none)
 bg_alpha      = 0.0       # opacity of background tint (0.0–1.0)
+
+[theme]
+name = ""   # theme file name without .toml (e.g. "dark", "light"); empty = no theme
 
 [colors]
 background = "#0F0F18"
@@ -249,6 +253,12 @@ type FileExplorerConfig struct {
 	WidthPct int `toml:"width_pct"`
 }
 
+type ThemeConfig struct {
+	// Name is the theme filename without .toml extension (e.g. "dark", "light").
+	// Empty string means no theme — uses config colors directly.
+	Name string `toml:"name"`
+}
+
 type BlocksConfig struct {
 	// Enabled controls whether OSC 133 command blocks are rendered.
 	// Requires shell hooks — run "Install Shell Hooks" from the command palette.
@@ -296,6 +306,16 @@ type Config struct {
 	Session      SessionConfig      `toml:"session"`
 	FileExplorer FileExplorerConfig `toml:"file_explorer"`
 	Blocks       BlocksConfig       `toml:"blocks"`
+	Theme        ThemeConfig        `toml:"theme"`
+}
+
+// ConfigDir returns the zurm configuration directory (~/.config/zurm).
+func ConfigDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "zurm")
 }
 
 // Load reads ~/.config/zurm/config.toml and merges with defaults.
@@ -303,13 +323,14 @@ type Config struct {
 func Load() (*Config, error) {
 	cfg := Defaults
 
-	home, err := os.UserHomeDir()
-	if err != nil {
+	dir := ConfigDir()
+	if dir == "" {
 		return &cfg, nil
 	}
 
-	dir := filepath.Join(home, ".config", "zurm")
 	path := filepath.Join(dir, "config.toml")
+
+	EnsureBuiltinThemes()
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		// First launch: write a fully documented default config so the user
@@ -320,19 +341,61 @@ func Load() (*Config, error) {
 		return &cfg, nil
 	}
 
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	meta, err := toml.DecodeFile(path, &cfg)
+	if err != nil {
 		return &cfg, err
 	}
 
-	// Resolve shell program from $SHELL if not set.
+	resolveShell(&cfg)
+	ApplyTheme(&cfg, meta)
+	return &cfg, nil
+}
+
+// Reload re-reads config.toml without writing defaults on missing file.
+// Returns nil config if the file does not exist.
+func Reload() (*Config, error) {
+	dir := ConfigDir()
+	if dir == "" {
+		return nil, fmt.Errorf("config reload: cannot resolve home directory")
+	}
+	path := filepath.Join(dir, "config.toml")
+
+	cfg := Defaults
+	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+		return nil, fmt.Errorf("config reload: %w", err)
+	}
+	resolveShell(&cfg)
+	return &cfg, nil
+}
+
+// LoadWithMeta re-reads config.toml and returns the TOML MetaData alongside
+// the config. MetaData.IsDefined tracks which keys the user explicitly set,
+// needed for theme merge (user-explicit colors override theme colors).
+func LoadWithMeta() (*Config, toml.MetaData, error) {
+	dir := ConfigDir()
+	if dir == "" {
+		cfg := Defaults
+		return &cfg, toml.MetaData{}, fmt.Errorf("config: cannot resolve home directory")
+	}
+	path := filepath.Join(dir, "config.toml")
+
+	cfg := Defaults
+	meta, err := toml.DecodeFile(path, &cfg)
+	if err != nil {
+		return &cfg, meta, fmt.Errorf("config: %w", err)
+	}
+	resolveShell(&cfg)
+	return &cfg, meta, nil
+}
+
+// resolveShell fills in Shell.Program from $SHELL if not set.
+func resolveShell(cfg *Config) {
 	if cfg.Shell.Program == "" {
 		cfg.Shell.Program = os.Getenv("SHELL")
 		if cfg.Shell.Program == "" {
 			cfg.Shell.Program = "/bin/zsh"
 		}
 	}
-
-	return &cfg, nil
 }
 
 // ParseHexColor converts a "#rrggbb" string to color.RGBA.

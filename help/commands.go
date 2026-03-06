@@ -61,6 +61,8 @@ func AllCommands() []Command {
 		// Help
 		{Name: "Show Keybindings", Shortcut: "Cmd+/"},
 		{Name: "Command Palette", Shortcut: "Cmd+P"},
+		// Config
+		{Name: "Reload Config", Shortcut: "Cmd+,"},
 		// App
 		{Name: "Quit", Shortcut: "Cmd+Q"},
 	}
