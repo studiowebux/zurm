@@ -1,6 +1,7 @@
 package recorder
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -13,14 +14,15 @@ import (
 // Recorder pipes raw RGBA frames to ffmpeg and produces an MP4 file.
 // Pattern: adapter — wraps ffmpeg subprocess behind a simple Start/Stop/AddFrame API.
 type Recorder struct {
-	mu       sync.Mutex
-	active   bool
-	cmd      *exec.Cmd
-	stdin   io.WriteCloser
-	outPath string
-	start   time.Time
-	width   int
-	height  int
+	mu        sync.Mutex
+	active    bool
+	cmd       *exec.Cmd
+	stdin     io.WriteCloser
+	stderrBuf bytes.Buffer
+	outPath   string
+	start     time.Time
+	width     int
+	height    int
 }
 
 // New creates a Recorder for the given frame dimensions.
@@ -72,8 +74,10 @@ func (r *Recorder) Start() error {
 		r.outPath,
 	)
 
-	// Discard ffmpeg stderr to avoid pipe buffer deadlock.
-	r.cmd.Stderr = io.Discard
+	// Capture stderr into a buffer for error reporting. bytes.Buffer grows
+	// as needed so it won't block ffmpeg (unlike an OS pipe buffer).
+	r.stderrBuf.Reset()
+	r.cmd.Stderr = &r.stderrBuf
 
 	var err error
 	r.stdin, err = r.cmd.StdinPipe()
@@ -107,6 +111,10 @@ func (r *Recorder) Stop() (string, error) {
 	}
 
 	if err := r.cmd.Wait(); err != nil {
+		stderr := r.stderrBuf.String()
+		if stderr != "" {
+			return "", fmt.Errorf("ffmpeg: %w\nstderr: %s", err, stderr)
+		}
 		return "", fmt.Errorf("ffmpeg: %w", err)
 	}
 
