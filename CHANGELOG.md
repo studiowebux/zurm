@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-03-06
+
+### Fixed
+
+- Screen recording plays back at extreme speed — frame capture now runs before the dirty-flag gate so idle frames are duplicated at 30fps
+- Clear command (CSI 3J) leaves residual line in scrollback — mode 3 now properly calls ClearScrollback() instead of sharing the mode 2 code path
+- App appears unresponsive after macOS sleep/lock — force full redraw on focus regain across all tabs and panes
+
+## [0.5.2] - 2026-03-06
+
+### Fixed
+
+- FFMPEG recording unplayable — dimension rounding mismatch caused all frames to be silently dropped; replaced with ffmpeg crop filter and synced dims before Start()
+- Status bar flash message overlapping git branch/process segments — flash now takes full ownership of the left side
+- Cmd+Shift+S screenshot not firing when no PTY activity — missing screenDirty flag in keyboard path
+- Panic in EraseInDisplay after zoom + TUI exit — Resize() now also resizes altWrapped; DisableAltScreen clamps restored cursor
+
+## [0.5.1] - 2026-03-06
+
+### Added
+
+- Pane name labels — each pane displays its name in the header bar
+- Scroll position indicator in pane header when scrolled back in history
+
+## [0.5.0] - 2026-03-05
+
+### Added
+
+- Clickable URLs — Cmd+click opens URLs detected in terminal output
+- Selection auto-scroll — dragging selection past viewport edges scrolls automatically
+- Absolute buffer coordinates for selection — selections survive scrolling without drifting
+
 ## [0.4.1] - 2026-03-05
 
 ### Added
@@ -149,7 +181,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Block timer sourced from OSC C (command enter) for accurate execution duration
 - Block background tint uses premultiplied alpha for correct Ebitengine blending
 
-[Unreleased]: https://github.com/studiowebux/zurm/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/studiowebux/zurm/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/studiowebux/zurm/compare/v0.5.2...v0.5.3
+[0.5.2]: https://github.com/studiowebux/zurm/compare/v0.5.1...v0.5.2
+[0.5.1]: https://github.com/studiowebux/zurm/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/studiowebux/zurm/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/studiowebux/zurm/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/studiowebux/zurm/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/studiowebux/zurm/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/studiowebux/zurm/compare/v0.3.0...v0.3.1
