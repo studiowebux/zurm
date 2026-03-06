@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"image"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -468,6 +469,7 @@ func (g *Game) Update() error {
 	if len(g.tabs) == 0 {
 		return ebiten.Termination
 	}
+	g.handleDroppedFiles()
 	g.handleResize()
 	g.handleFocus()
 	g.drainTitle()
@@ -1153,6 +1155,63 @@ func (g *Game) handleFocus() {
 		g.prevFocused = focused
 		g.focused.Term.SendFocusEvent(focused)
 	}
+}
+
+// handleDroppedFiles checks for files dropped onto the window and sends their
+// paths to the focused PTY as space-separated, shell-escaped strings.
+func (g *Game) handleDroppedFiles() {
+	dropped := ebiten.DroppedFiles()
+	if dropped == nil {
+		return
+	}
+	entries, err := fs.ReadDir(dropped, ".")
+	if err != nil || len(entries) == 0 {
+		return
+	}
+	var paths []string
+	for _, e := range entries {
+		// Open the entry to get the real *os.File with the full path.
+		// Ebitengine's VirtualFS wraps os.Open on the original absolute path.
+		f, fErr := dropped.Open(e.Name())
+		if fErr != nil {
+			continue
+		}
+		if osFile, ok := f.(*os.File); ok {
+			paths = append(paths, shellEscape(osFile.Name()))
+		} else {
+			paths = append(paths, shellEscape(e.Name()))
+		}
+		f.Close()
+	}
+	if len(paths) == 0 {
+		return
+	}
+	text := strings.Join(paths, " ")
+	g.focused.Term.SendBytes([]byte(text))
+	g.screenDirty = true
+}
+
+// shellEscape wraps a path in single quotes for safe shell insertion.
+// Interior single quotes are escaped as '\''.
+func shellEscape(s string) string {
+	if s == "" {
+		return "''"
+	}
+	// If the string has no special characters, return as-is.
+	needsQuote := false
+	for _, r := range s {
+		if r == ' ' || r == '\'' || r == '"' || r == '\\' || r == '(' || r == ')' ||
+			r == '&' || r == '|' || r == ';' || r == '$' || r == '`' || r == '!' ||
+			r == '*' || r == '?' || r == '[' || r == ']' || r == '{' || r == '}' ||
+			r == '<' || r == '>' || r == '#' || r == '~' {
+			needsQuote = true
+			break
+		}
+	}
+	if !needsQuote {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 func (g *Game) handleResize() {

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Active tab note displayed in status bar as `[note text]` segment
 - Tab notes persist across sessions via session.json
 - "Edit Tab Note" in right-click context menus (tab bar and pane)
+- File drag-and-drop: drop files from Finder to paste shell-escaped paths into the terminal
 
 ### Fixed
 
