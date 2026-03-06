@@ -30,6 +30,10 @@ type Tab struct {
 	// HasActivity is true when a background tab has received PTY output since last viewed.
 	HasActivity bool
 
+	// HasBell is true when BEL was received while this tab was in the background.
+	// Used to render the activity dot in bell color instead of cursor color.
+	HasBell bool
+
 	// lastSeenGen stores the last-seen RenderGen sum for activity detection.
 	lastSeenGen uint64
 }
@@ -42,6 +46,7 @@ func (t *Tab) SnapshotGen() {
 	}
 	t.lastSeenGen = sum
 	t.HasActivity = false
+	t.HasBell = false
 }
 
 // CheckActivity compares the current aggregate RenderGen against the snapshot.

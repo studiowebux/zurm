@@ -1249,6 +1249,7 @@ func (g *Game) drainBell() {
 			select {
 			case <-leaf.Pane.Term.BellCh:
 				t.HasActivity = true
+				t.HasBell = true
 				fired = true
 				g.screenDirty = true
 			default:

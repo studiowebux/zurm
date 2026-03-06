@@ -481,7 +481,11 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int) {
 			dotX := x + tabW - r.font.CellW/2 - dotSize
 			dotY := (tabBarH - dotSize) / 2
 			dotRect := image.Rect(dotX, dotY, dotX+dotSize, dotY+dotSize)
-			r.offscreen.SubImage(dotRect).(*ebiten.Image).Fill(r.cursorColor)
+			dotColor := r.cursorColor
+			if t.HasBell {
+				dotColor = r.bellColor
+			}
+			r.offscreen.SubImage(dotRect).(*ebiten.Image).Fill(dotColor)
 		}
 	}
 }
