@@ -4656,7 +4656,7 @@ func resolveShellPath() {
 	if shell == "" {
 		shell = "/bin/zsh"
 	}
-	out, err := exec.Command(shell, "-lc", "echo $PATH").Output() // #nosec G204 — shell from SHELL env var; -lc is fixed
+	out, err := exec.Command(shell, "-lc", "echo $PATH").Output() // #nosec G204 G702 — shell from SHELL env var; -lc is fixed
 	if err != nil {
 		return
 	}
