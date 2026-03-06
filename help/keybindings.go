@@ -24,6 +24,7 @@ func AllBindings() []KeyBinding {
 		{Category: "Navigation", Key: "Cmd+Shift+[", Description: "Previous tab"},
 		{Category: "Navigation", Key: "Cmd+Shift+]", Description: "Next tab"},
 		{Category: "Navigation", Key: "Cmd+Shift+←/→", Description: "Move tab (keyboard or drag)"},
+		{Category: "Navigation", Key: "Cmd+J", Description: "Search tabs by name"},
 		{Category: "Navigation", Key: "Cmd+E", Description: "Toggle file explorer"},
 		{Category: "File Explorer", Key: "↑ / ↓", Description: "Navigate entries"},
 		{Category: "File Explorer", Key: "Enter / →", Description: "Expand directory or open file"},

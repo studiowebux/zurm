@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Cmd+J tab search overlay with fuzzy filtering by tab name or CWD
+- Tab search accessible via command palette ("Tab Search")
+- Session config template now includes `auto_save` option for discoverability
+
 ## [0.7.0] - 2026-03-06
 
 ### Added

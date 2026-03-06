@@ -48,6 +48,8 @@ func AllCommands() []Command {
 		{Name: "Pin Mode", Shortcut: "Cmd+G"},
 		// Tab Switcher
 		{Name: "Tab Switcher", Shortcut: "Cmd+Shift+T"},
+		// Tab Search
+		{Name: "Tab Search", Shortcut: "Cmd+J"},
 		// Blocks
 		{Name: "Toggle Command Blocks", Shortcut: "Cmd+B"},
 		{Name: "Install Shell Hooks", Shortcut: ""},
