@@ -19,6 +19,7 @@ type paneCacheEntry struct {
 	lastCursorRow  int
 	lastCursorCol  int
 	hadURLHover    bool // true if URL hover was active on last draw
+	lastProcName   string
 }
 
 // blockSnap holds a point-in-time copy of block-related buffer state.
@@ -200,7 +201,7 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 		leaves := layout.Leaves()
 		multiPane := len(leaves) > 1
 
-		for _, leaf := range leaves {
+		for i, leaf := range leaves {
 			p := leaf.Pane
 			isFocused := p == focused
 			if zoomed && !isFocused {
@@ -212,6 +213,7 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 			viewOff := p.Term.Buf.ViewOffset
 			curRow := p.Term.Buf.CursorRow
 			curCol := p.Term.Buf.CursorCol
+			sbLen := p.Term.Buf.ScrollbackLen()
 
 			// Snapshot block data while the lock is held — cheap copy of small structs.
 			// drawBlocksSnap uses this after the lock is released, keeping the RLock
@@ -221,7 +223,7 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 				snap = &blockSnap{
 					blocks:    make([]terminal.BlockBoundary, len(p.Term.Buf.Blocks)),
 					rows:      p.Term.Buf.Rows,
-					sbLen:     p.Term.Buf.ScrollbackLen(),
+					sbLen:     sbLen,
 					viewOff:   p.Term.Buf.ViewOffset,
 					cursorRow: p.Term.Buf.CursorRow,
 					buf:       p.Term.Buf,
@@ -240,28 +242,37 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 				r.paneCache[p] = cache
 			}
 
-			// Cache check: only actual content changes (gen, cursor, viewOffset) trigger
-			// DrawPane. Block hover updates are handled by the blocks layer below and
-			// never require a full pane redraw. URL hover forces a redraw on the
-			// focused pane when hover state changes (appears or disappears).
+			// Cache check: only actual content changes (gen, cursor, viewOffset,
+			// process name) trigger DrawPane + overlay redraw.
 			hasURLHover := isFocused && r.HoveredURL != nil
+			procName := p.ProcName
 			unchanged := gen == cache.lastRenderGen &&
 				viewOff == cache.lastViewOffset &&
 				curRow == cache.lastCursorRow &&
 				curCol == cache.lastCursorCol &&
-				hasURLHover == cache.hadURLHover
+				hasURLHover == cache.hadURLHover &&
+				procName == cache.lastProcName
 
 			if !unchanged {
 				var paneSearch *SearchState
 				if isFocused {
 					paneSearch = search
 				}
-				r.DrawPane(p.Term.Buf, p.Term.Cursor, p.Rect, isFocused, isFocused && multiPane && !zoomed, paneSearch)
+				r.DrawPane(p.Term.Buf, p.Term.Cursor, p.Rect, isFocused, isFocused && multiPane && !zoomed, paneSearch, p.HeaderH)
+
+				// Pane overlays: name label (multi-pane only) and scroll indicator.
+				label := procName
+				if label == "" {
+					label = fmt.Sprintf("Pane %d", i+1)
+				}
+				r.drawPaneOverlay(p.Rect, label, multiPane, viewOff, sbLen)
+
 				cache.lastRenderGen = gen
 				cache.lastViewOffset = viewOff
 				cache.lastCursorRow = curRow
 				cache.lastCursorCol = curCol
 				cache.hadURLHover = hasURLHover
+				cache.lastProcName = procName
 			}
 			p.Term.Buf.RUnlock()
 
@@ -430,7 +441,7 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int) {
 // isFocused controls cursor rendering; showBorder controls the focus border (multi-pane only).
 // search, when non-nil and open, highlights matched cells in the pane.
 func (r *Renderer) DrawPane(buf *terminal.ScreenBuffer, cur *terminal.Cursor,
-	rect image.Rectangle, isFocused bool, showBorder bool, search *SearchState) {
+	rect image.Rectangle, isFocused bool, showBorder bool, search *SearchState, headerH int) {
 
 	bg := config.ParseHexColor(r.cfg.Colors.Background)
 
@@ -443,7 +454,7 @@ func (r *Renderer) DrawPane(buf *terminal.ScreenBuffer, cur *terminal.Cursor,
 	cellH := r.font.CellH
 
 	originX := rect.Min.X
-	originY := rect.Min.Y
+	originY := rect.Min.Y + headerH
 
 	// Pre-index search matches by display row for O(1) lookup during cell iteration.
 	type matchRange struct {
@@ -555,6 +566,45 @@ func (r *Renderer) DrawPane(buf *terminal.ScreenBuffer, cur *terminal.Cursor,
 
 	if showBorder {
 		r.drawBorder(rect, r.cursorColor)
+	}
+}
+
+// drawPaneOverlay renders a pane name label (top-left) and scroll position
+// indicator (top-right) as small opaque pills on the pane content.
+func (r *Renderer) drawPaneOverlay(rect image.Rectangle, label string, multiPane bool, viewOffset int, scrollbackLen int) {
+	pad := r.padding
+	cellW := r.font.CellW
+	cellH := r.font.CellH
+
+	pillBg := color.RGBA{30, 30, 30, 220}
+	pillFg := color.RGBA{180, 180, 180, 255}
+
+	pillH := cellH + 4
+	pillPad := 6
+
+	// Pane name label — top-left, only when multiple panes visible.
+	if multiPane && label != "" {
+		labelW := len([]rune(label))*cellW + 2*pillPad
+		labelRect := image.Rect(
+			rect.Min.X+pad, rect.Min.Y+pad,
+			rect.Min.X+pad+labelW, rect.Min.Y+pad+pillH,
+		)
+		sub := r.offscreen.SubImage(labelRect).(*ebiten.Image)
+		sub.Fill(pillBg)
+		r.font.DrawString(r.offscreen, label, rect.Min.X+pad+pillPad, rect.Min.Y+pad+2, pillFg)
+	}
+
+	// Scroll position indicator — top-right, always shown when scrolled.
+	if viewOffset > 0 {
+		text := fmt.Sprintf("↑ %d lines", viewOffset)
+		textW := len([]rune(text))*cellW + 2*pillPad
+		scrollRect := image.Rect(
+			rect.Max.X-pad-textW, rect.Min.Y+pad,
+			rect.Max.X-pad, rect.Min.Y+pad+pillH,
+		)
+		sub := r.offscreen.SubImage(scrollRect).(*ebiten.Image)
+		sub.Fill(pillBg)
+		r.font.DrawString(r.offscreen, text, rect.Max.X-pad-textW+pillPad, rect.Min.Y+pad+2, pillFg)
 	}
 }
 
