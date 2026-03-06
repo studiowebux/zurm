@@ -371,8 +371,8 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int) {
 	tabBarRect := image.Rect(0, 0, physW, tabBarH)
 	r.offscreen.SubImage(tabBarRect).(*ebiten.Image).Fill(tabBarBg)
 
-	// 1px separator line at the bottom of the tab bar.
-	r.offscreen.SubImage(image.Rect(0, tabBarH-1, physW, tabBarH)).(*ebiten.Image).Fill(r.borderColor)
+	// Separator line at the bottom of the tab bar.
+	r.offscreen.SubImage(image.Rect(0, tabBarH-1, physW, tabBarH)).(*ebiten.Image).Fill(r.separatorColor())
 
 	// Each tab gets equal width, capped at configured max.
 	maxTabW := r.cfg.Tabs.MaxWidthChars * r.font.CellW
@@ -384,7 +384,7 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int) {
 	activeBg := config.ParseHexColor(r.cfg.Colors.Background)
 	activeFg := config.ParseHexColor(r.cfg.Colors.Foreground)
 	inactiveFg := config.ParseHexColor(r.cfg.Colors.BrightBlack)
-	divider := brighten(r.borderColor)
+	divider := r.separatorColor()
 
 	for i, t := range tabs {
 		x := i * tabW
