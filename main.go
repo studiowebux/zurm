@@ -388,6 +388,17 @@ func (g *Game) Update() error {
 		g.screenDirty = true
 	}
 
+	// Expire visual bell flashes — keep redrawing while any pane is flashing.
+	now := time.Now()
+	for _, leaf := range g.layout.Leaves() {
+		if !leaf.Pane.BellUntil.IsZero() {
+			if now.After(leaf.Pane.BellUntil) {
+				leaf.Pane.BellUntil = time.Time{}
+			}
+			g.screenDirty = true
+		}
+	}
+
 	// Drain recording-done channel (background goroutine sends flash message).
 	select {
 	case msg := <-g.recDone:
@@ -457,6 +468,7 @@ func (g *Game) Update() error {
 	g.handleFocus()
 	g.drainTitle()
 	g.drainCwd()
+	g.drainBell()
 	g.drainGitBranch()
 	g.drainForeground()
 	g.recomputeSearch()
@@ -1200,6 +1212,36 @@ func (g *Game) drainCwd() {
 		g.screenDirty = true
 		}
 	default:
+	}
+}
+
+// drainBell reads BEL events from all visible panes and triggers visual feedback.
+func (g *Game) drainBell() {
+	if g.cfg.Bell.Style == "none" {
+		return
+	}
+	dur := time.Duration(g.cfg.Bell.DurationMs) * time.Millisecond
+	for _, leaf := range g.layout.Leaves() {
+		select {
+		case <-leaf.Pane.Term.BellCh:
+			leaf.Pane.BellUntil = time.Now().Add(dur)
+			g.screenDirty = true
+		default:
+		}
+	}
+	// Also drain background tabs — mark tab activity on bell.
+	for i, t := range g.tabs {
+		if i == g.activeTab {
+			continue
+		}
+		for _, leaf := range t.Layout.Leaves() {
+			select {
+			case <-leaf.Pane.Term.BellCh:
+				t.HasActivity = true
+				g.screenDirty = true
+			default:
+			}
+		}
 	}
 }
 

@@ -34,8 +34,9 @@ type Parser struct {
 	params     []int
 	paramStr   string
 	oscBuf  strings.Builder
-	titleCh chan<- string // optional: notified on OSC 0/2 title changes
-	cwdCh   chan<- string // optional: notified on OSC 7 CWD changes
+	titleCh chan<- string       // optional: notified on OSC 0/2 title changes
+	cwdCh   chan<- string       // optional: notified on OSC 7 CWD changes
+	bellCh  chan<- struct{}     // optional: notified on BEL (0x07) in ground state
 
 	// Tab stops (every 8 columns by default).
 	tabStops []bool
@@ -57,12 +58,13 @@ type Parser struct {
 }
 
 // NewParser creates a parser attached to the given buffer.
-func NewParser(sb *ScreenBuffer, titleCh chan<- string, cwdCh chan<- string) *Parser {
+func NewParser(sb *ScreenBuffer, titleCh chan<- string, cwdCh chan<- string, bellCh chan<- struct{}) *Parser {
 	p := &Parser{
 		sb:      sb,
 		palette: sb.Palette,
 		titleCh: titleCh,
 		cwdCh:   cwdCh,
+		bellCh:  bellCh,
 	}
 	p.resetTabStops()
 	return p
@@ -121,8 +123,14 @@ func (p *Parser) ground(b byte) {
 	case b == 0x1B:
 		p.utf8Len = 0 // discard any incomplete multi-byte sequence
 		p.state = stateEscape
-	case b == 0x07: // BEL — ignore
+	case b == 0x07: // BEL
 		p.utf8Len = 0
+		if p.bellCh != nil {
+			select {
+			case p.bellCh <- struct{}{}:
+			default:
+			}
+		}
 	case b == 0x08: // BS
 		p.utf8Len = 0
 		if p.sb.CursorCol > 0 {

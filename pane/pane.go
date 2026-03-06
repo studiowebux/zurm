@@ -3,6 +3,7 @@ package pane
 import (
 	"fmt"
 	"image"
+	"time"
 
 	"github.com/studiowebux/zurm/config"
 	"github.com/studiowebux/zurm/terminal"
@@ -17,6 +18,9 @@ type Pane struct {
 	Rows     int
 	ProcName string // last known foreground process name (drained from Term.ForegroundProcCh)
 	HeaderH  int    // height in pixels of the pane header bar (0 = no header)
+
+	// BellUntil is the time until which the visual bell flash is active.
+	BellUntil time.Time
 
 	// CustomName is set by the user via rename. Overrides ProcName in the pane label.
 	CustomName string
