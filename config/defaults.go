@@ -89,6 +89,12 @@ var Defaults = Config{
 		Side:     "left",
 		WidthPct: 35,
 	},
+	Bell: BellConfig{
+		Style:      "visual",
+		Sound:      true,
+		DurationMs: 150,
+		Color:      "#F59E0B",
+	},
 	Blocks: BlocksConfig{
 		Enabled:      false,
 		ShowDuration: true,

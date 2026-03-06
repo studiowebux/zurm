@@ -198,6 +198,9 @@ type Game struct {
 
 	// flashExpiry is when statusBarState.FlashMessage should be cleared.
 	flashExpiry time.Time
+
+	// lastBellSound debounces system sound + dock badge to avoid spamming.
+	lastBellSound time.Time
 }
 
 func main() {
@@ -388,6 +391,17 @@ func (g *Game) Update() error {
 		g.screenDirty = true
 	}
 
+	// Expire visual bell flashes — keep redrawing while any pane is flashing.
+	now := time.Now()
+	for _, leaf := range g.layout.Leaves() {
+		if !leaf.Pane.BellUntil.IsZero() {
+			if now.After(leaf.Pane.BellUntil) {
+				leaf.Pane.BellUntil = time.Time{}
+			}
+			g.screenDirty = true
+		}
+	}
+
 	// Drain recording-done channel (background goroutine sends flash message).
 	select {
 	case msg := <-g.recDone:
@@ -457,6 +471,7 @@ func (g *Game) Update() error {
 	g.handleFocus()
 	g.drainTitle()
 	g.drainCwd()
+	g.drainBell()
 	g.drainGitBranch()
 	g.drainForeground()
 	g.recomputeSearch()
@@ -1099,6 +1114,9 @@ func (g *Game) handleFocus() {
 			g.repeatActive = false
 			g.scrollAccum = 0
 
+			// Clear dock badge when window regains focus.
+			clearDockBadge()
+
 			// Force full redraw on focus regain. After macOS sleep/wake the
 			// process resumes but needsRender() returns false because no PTY
 			// output arrived yet — the screen appears frozen without this.
@@ -1200,6 +1218,63 @@ func (g *Game) drainCwd() {
 		g.screenDirty = true
 		}
 	default:
+	}
+}
+
+// drainBell reads BEL events from all panes and triggers visual/audio/dock feedback.
+func (g *Game) drainBell() {
+	dur := time.Duration(g.cfg.Bell.DurationMs) * time.Millisecond
+	now := time.Now()
+	fired := false
+
+	// Active tab panes — visual border flash.
+	for _, leaf := range g.layout.Leaves() {
+		select {
+		case <-leaf.Pane.Term.BellCh:
+			if g.cfg.Bell.Style != "none" {
+				leaf.Pane.BellUntil = now.Add(dur)
+			}
+			fired = true
+			g.screenDirty = true
+		default:
+		}
+	}
+
+	// Background tabs — mark tab activity on bell.
+	for i, t := range g.tabs {
+		if i == g.activeTab {
+			continue
+		}
+		for _, leaf := range t.Layout.Leaves() {
+			select {
+			case <-leaf.Pane.Term.BellCh:
+				t.HasActivity = true
+				t.HasBell = true
+				fired = true
+				g.screenDirty = true
+			default:
+			}
+		}
+	}
+
+	if !fired {
+		return
+	}
+
+	// Debounce sound + dock notifications (500ms).
+	if now.Sub(g.lastBellSound) < 500*time.Millisecond {
+		return
+	}
+	g.lastBellSound = now
+
+	if g.cfg.Bell.Sound {
+		go playBellSound()
+	}
+
+	// Dock badge + bounce only when the window is not focused.
+	if !ebiten.IsFocused() {
+		setDockBadge()
+		requestDockAttention()
 	}
 }
 

@@ -253,6 +253,18 @@ type FileExplorerConfig struct {
 	WidthPct int `toml:"width_pct"`
 }
 
+type BellConfig struct {
+	// Style controls how BEL (0x07) is presented to the user.
+	// "visual" = flash the pane border, "none" = ignore.
+	Style string `toml:"style"`
+	// Sound plays the macOS system alert sound on BEL.
+	Sound bool `toml:"sound"`
+	// DurationMs is how long the visual flash lasts in milliseconds.
+	DurationMs int `toml:"duration_ms"`
+	// Color is the hex color used for the visual flash.
+	Color string `toml:"color"`
+}
+
 type ThemeConfig struct {
 	// Name is the theme filename without .toml extension (e.g. "dark", "light").
 	// Empty string means no theme — uses config colors directly.
@@ -306,6 +318,7 @@ type Config struct {
 	Session      SessionConfig      `toml:"session"`
 	FileExplorer FileExplorerConfig `toml:"file_explorer"`
 	Blocks       BlocksConfig       `toml:"blocks"`
+	Bell         BellConfig         `toml:"bell"`
 	Theme        ThemeConfig        `toml:"theme"`
 }
 

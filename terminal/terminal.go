@@ -22,6 +22,7 @@ type Terminal struct {
 	cfg              *config.Config
 	TitleCh          chan string
 	CwdCh            chan string
+	BellCh           chan struct{}
 	ForegroundProcCh chan string // foreground process name, updated by pollForeground
 
 	// Cwd is the last known working directory of the shell.
@@ -42,8 +43,9 @@ func New(cfg *config.Config) *Terminal {
 
 	titleCh := make(chan string, 4)
 	cwdCh := make(chan string, 4)
+	bellCh := make(chan struct{}, 4)
 	buf := NewScreenBuffer(cfg.Window.Rows, cfg.Window.Columns, cfg.Scrollback.Lines, fg, bg, palette)
-	parser := NewParser(buf, titleCh, cwdCh)
+	parser := NewParser(buf, titleCh, cwdCh, bellCh)
 
 	cur := NewCursor()
 	if cfg.Input.CursorBlink {
@@ -57,6 +59,7 @@ func New(cfg *config.Config) *Terminal {
 		cfg:              cfg,
 		TitleCh:          titleCh,
 		CwdCh:            cwdCh,
+		BellCh:           bellCh,
 		ForegroundProcCh: make(chan string, 4),
 	}
 }

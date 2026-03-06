@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/studiowebux/zurm/config"
@@ -64,6 +65,7 @@ type Renderer struct {
 
 	cursorColor color.RGBA
 	borderColor color.RGBA
+	bellColor   color.RGBA
 
 	// paneCache enables per-pane skip: unchanged panes are not redrawn.
 	paneCache map[*pane.Pane]*paneCacheEntry
@@ -124,6 +126,7 @@ func NewRenderer(font *FontRenderer, cfg *config.Config) *Renderer {
 		padding:      cfg.Window.Padding,
 		cursorColor:  config.ParseHexColor(cfg.Colors.Cursor),
 		borderColor:  config.ParseHexColor(cfg.Colors.Border),
+		bellColor:    config.ParseHexColor(cfg.Bell.Color),
 		paneCache:    make(map[*pane.Pane]*paneCacheEntry),
 		layoutDirty:  true, // force full clear on first frame
 		blockTintImg: ebiten.NewImage(1, 1),
@@ -138,6 +141,7 @@ func (r *Renderer) ReloadColors(cfg *config.Config) {
 	r.cfg = cfg
 	r.cursorColor = config.ParseHexColor(cfg.Colors.Cursor)
 	r.borderColor = config.ParseHexColor(cfg.Colors.Border)
+	r.bellColor = config.ParseHexColor(cfg.Bell.Color)
 	r.ui = deriveUIColors(cfg)
 	r.paneCache = make(map[*pane.Pane]*paneCacheEntry)
 	r.layoutDirty = true
@@ -309,6 +313,11 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 			}
 			p.Term.Buf.RUnlock()
 
+			// Visual bell: draw a 2px border flash when BEL was received.
+			if !p.BellUntil.IsZero() && time.Now().Before(p.BellUntil) {
+				r.drawThickBorder(p.Rect, r.bellColor, 2)
+			}
+
 			if snap != nil {
 				blockSnaps = append(blockSnaps, snap)
 			}
@@ -472,7 +481,11 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int) {
 			dotX := x + tabW - r.font.CellW/2 - dotSize
 			dotY := (tabBarH - dotSize) / 2
 			dotRect := image.Rect(dotX, dotY, dotX+dotSize, dotY+dotSize)
-			r.offscreen.SubImage(dotRect).(*ebiten.Image).Fill(r.cursorColor)
+			dotColor := r.cursorColor
+			if t.HasBell {
+				dotColor = r.bellColor
+			}
+			r.offscreen.SubImage(dotRect).(*ebiten.Image).Fill(dotColor)
 		}
 	}
 }
@@ -686,4 +699,13 @@ func (r *Renderer) drawBorder(rect image.Rectangle, clr color.RGBA) {
 	img.SubImage(image.Rect(rect.Min.X, rect.Max.Y-1, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(clr)
 	img.SubImage(image.Rect(rect.Min.X, rect.Min.Y, rect.Min.X+1, rect.Max.Y)).(*ebiten.Image).Fill(clr)
 	img.SubImage(image.Rect(rect.Max.X-1, rect.Min.Y, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(clr)
+}
+
+// drawThickBorder draws a border of the given thickness just inside rect.
+func (r *Renderer) drawThickBorder(rect image.Rectangle, clr color.RGBA, thick int) {
+	img := r.offscreen
+	img.SubImage(image.Rect(rect.Min.X, rect.Min.Y, rect.Max.X, rect.Min.Y+thick)).(*ebiten.Image).Fill(clr)
+	img.SubImage(image.Rect(rect.Min.X, rect.Max.Y-thick, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(clr)
+	img.SubImage(image.Rect(rect.Min.X, rect.Min.Y, rect.Min.X+thick, rect.Max.Y)).(*ebiten.Image).Fill(clr)
+	img.SubImage(image.Rect(rect.Max.X-thick, rect.Min.Y, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(clr)
 }
