@@ -1060,6 +1060,7 @@ func (g *Game) handleResize() {
 	physH := int(float64(h) * g.dpi)
 	g.renderer.SetSize(physW, physH)
 	g.renderer.SetLayoutDirty()
+	g.recorder.Resize(physW, physH)
 
 	tabBarH := g.renderer.TabBarHeight()
 	statusBarH := g.renderer.StatusBarHeight()

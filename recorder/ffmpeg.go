@@ -24,14 +24,7 @@ type Recorder struct {
 }
 
 // New creates a Recorder for the given frame dimensions.
-// Width and height are rounded up to even numbers (x264 requirement).
 func New(width, height int) *Recorder {
-	if width%2 != 0 {
-		width++
-	}
-	if height%2 != 0 {
-		height++
-	}
 	return &Recorder{width: width, height: height}
 }
 
@@ -39,12 +32,6 @@ func New(width, height int) *Recorder {
 func (r *Recorder) Resize(width, height int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if width%2 != 0 {
-		width++
-	}
-	if height%2 != 0 {
-		height++
-	}
 	r.width = width
 	r.height = height
 }
@@ -70,6 +57,7 @@ func (r *Recorder) Start() error {
 
 	// #nosec G204 — arguments are not user-controlled; dimensions come from
 	// Ebitengine screen bounds and the output path is built from time.Now().
+	// The crop filter trims to even dimensions required by x264/yuv420p.
 	r.cmd = exec.Command("ffmpeg",
 		"-y",
 		"-f", "rawvideo",
@@ -77,6 +65,7 @@ func (r *Recorder) Start() error {
 		"-s", fmt.Sprintf("%dx%d", r.width, r.height),
 		"-r", "30",
 		"-i", "pipe:0",
+		"-vf", "crop=trunc(iw/2)*2:trunc(ih/2)*2",
 		"-c:v", "libx264",
 		"-preset", "ultrafast",
 		"-pix_fmt", "yuv420p",
