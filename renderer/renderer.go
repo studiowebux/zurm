@@ -366,8 +366,13 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int) {
 	}
 
 	// Clear the entire tab bar area to prevent artifacts on reorder/close.
+	// Use darkened background (matching status bar) so divider lines are visible.
+	tabBarBg := darken(config.ParseHexColor(r.cfg.Colors.Background))
 	tabBarRect := image.Rect(0, 0, physW, tabBarH)
-	r.offscreen.SubImage(tabBarRect).(*ebiten.Image).Fill(r.borderColor)
+	r.offscreen.SubImage(tabBarRect).(*ebiten.Image).Fill(tabBarBg)
+
+	// 1px separator line at the bottom of the tab bar.
+	r.offscreen.SubImage(image.Rect(0, tabBarH-1, physW, tabBarH)).(*ebiten.Image).Fill(r.borderColor)
 
 	// Each tab gets equal width, capped at configured max.
 	maxTabW := r.cfg.Tabs.MaxWidthChars * r.font.CellW
@@ -379,7 +384,7 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int) {
 	activeBg := config.ParseHexColor(r.cfg.Colors.Background)
 	activeFg := config.ParseHexColor(r.cfg.Colors.Foreground)
 	inactiveFg := config.ParseHexColor(r.cfg.Colors.BrightBlack)
-	divider := r.borderColor
+	divider := brighten(r.borderColor)
 
 	for i, t := range tabs {
 		x := i * tabW
