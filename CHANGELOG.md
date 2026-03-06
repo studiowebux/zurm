@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-03-06
+
+### Changed
+
+- Info.plist version management — replaced hardcoded version with `__VERSION__`/`__BUILD__` placeholders injected at build time
+- Distribution format — replaced ZIP with DMG via `hdiutil create`
+- Makefile build flags — added `-trimpath -ldflags="-s -w"` to match CI
+
+### Added
+
+- Ad-hoc code signing (`codesign --sign -`) in both Makefile and CI — Gatekeeper no longer blocks the app
+- `make dmg` target for local DMG creation
+- `LSMultipleInstancesProhibited` in Info.plist to allow `open -n zurm.app`
+
 ## [0.5.3] - 2026-03-06
 
 ### Fixed
@@ -181,7 +195,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Block timer sourced from OSC C (command enter) for accurate execution duration
 - Block background tint uses premultiplied alpha for correct Ebitengine blending
 
-[Unreleased]: https://github.com/studiowebux/zurm/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/studiowebux/zurm/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/studiowebux/zurm/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/studiowebux/zurm/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/studiowebux/zurm/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/studiowebux/zurm/compare/v0.5.0...v0.5.1
