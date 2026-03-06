@@ -1067,6 +1067,7 @@ func (g *Game) handleResize() {
 
 	// Recompute rects for every tab's layout.
 	for _, t := range g.tabs {
+		setPaneHeaders(t.Layout, g.font.CellH)
 		t.Layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
 		for _, leaf := range t.Layout.Leaves() {
 			leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
@@ -1148,18 +1149,28 @@ func (g *Game) drainGitBranch() {
 	}
 }
 
-// drainForeground reads the latest foreground process name from the focused pane.
+// drainForeground reads the latest foreground process name from all visible panes
+// and updates ProcName on each. The focused pane's name also feeds the status bar.
 func (g *Game) drainForeground() {
 	if !g.cfg.StatusBar.ShowProcess {
 		return
 	}
-	select {
-	case name := <-g.focused.Term.ForegroundProcCh:
-		if name != g.statusBarState.ForegroundProc {
-			g.statusBarState.ForegroundProc = name
-			g.screenDirty = true
+	if g.activeTab >= len(g.tabs) {
+		return
+	}
+	for _, leaf := range g.tabs[g.activeTab].Layout.Leaves() {
+		p := leaf.Pane
+		select {
+		case name := <-p.Term.ForegroundProcCh:
+			if name != p.ProcName {
+				p.ProcName = name
+				g.screenDirty = true
+				if p == g.focused {
+					g.statusBarState.ForegroundProc = name
+				}
+			}
+		default:
 		}
-	default:
 	}
 }
 
@@ -2342,7 +2353,7 @@ func (g *Game) handleMouse() {
 
 	if mouseMode == 0 {
 		col := (mx - g.focused.Rect.Min.X - pad) / g.font.CellW
-		row := (my - g.focused.Rect.Min.Y - pad) / g.font.CellH
+		row := (my - g.focused.Rect.Min.Y - pad - g.focused.HeaderH) / g.font.CellH
 
 		g.focused.Term.Buf.RLock()
 		maxRow := g.focused.Term.Buf.Rows - 1
@@ -2452,7 +2463,7 @@ func (g *Game) handleMouse() {
 
 	// PTY mouse mode.
 	col := (mx-g.focused.Rect.Min.X-pad)/g.font.CellW + 1
-	row := (my-g.focused.Rect.Min.Y-pad)/g.font.CellH + 1
+	row := (my-g.focused.Rect.Min.Y-pad-g.focused.HeaderH)/g.font.CellH + 1
 	if col < 1 {
 		col = 1
 	}
@@ -3031,6 +3042,7 @@ func (g *Game) splitH() {
 		return
 	}
 	g.updateLayout(newRoot)
+	setPaneHeaders(g.layout, g.font.CellH)
 	g.layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
 	for _, leaf := range g.layout.Leaves() {
 		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
@@ -3053,6 +3065,7 @@ func (g *Game) splitV() {
 		return
 	}
 	g.updateLayout(newRoot)
+	setPaneHeaders(g.layout, g.font.CellH)
 	g.layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
 	for _, leaf := range g.layout.Leaves() {
 		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
@@ -3080,6 +3093,7 @@ func (g *Game) closePane(p *pane.Pane) {
 		return
 	}
 	g.updateLayout(newRoot)
+	setPaneHeaders(g.layout, g.font.CellH)
 	g.layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
 	for _, leaf := range g.layout.Leaves() {
 		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
@@ -3547,6 +3561,20 @@ func (g *Game) toggleZoom() {
 	p.Term.Resize(cols, rows)
 }
 
+// setPaneHeaders sets HeaderH on every leaf pane in the layout. When there are
+// multiple panes, each gets a header bar; single-pane layouts get no header.
+// Must be called before ComputeRects so the row calculation accounts for header space.
+func setPaneHeaders(layout *pane.LayoutNode, cellH int) {
+	leaves := layout.Leaves()
+	headerH := 0
+	if len(leaves) > 1 {
+		headerH = cellH + 4
+	}
+	for _, leaf := range leaves {
+		leaf.Pane.HeaderH = headerH
+	}
+}
+
 // unzoom restores pane rects to the normal layout. Called by toggleZoom and
 // switchTab so the layout is always consistent when leaving zoom state.
 func (g *Game) unzoom() {
@@ -3561,6 +3589,7 @@ func (g *Game) unzoom() {
 	statusBarH := g.renderer.StatusBarHeight()
 	fullRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
 
+	setPaneHeaders(g.layout, g.font.CellH)
 	g.layout.ComputeRects(fullRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
 	for _, leaf := range g.layout.Leaves() {
 		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
@@ -3975,6 +4004,7 @@ func restoreTabWithLayout(cfg *config.Config, rect image.Rectangle, cellW, cellH
 	}
 
 	// Recompute all pane rects and sync terminal/PTY dimensions.
+	setPaneHeaders(layout, cellH)
 	layout.ComputeRects(rect, cellW, cellH, cfg.Window.Padding, cfg.Panes.DividerWidthPixels)
 	for _, leaf := range layout.Leaves() {
 		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
@@ -4041,7 +4071,7 @@ func (g *Game) updateURLHover(mx, my, pad int) {
 	}
 	// Convert pixel to cell coordinates within the focused pane.
 	col := (mx - g.focused.Rect.Min.X - pad) / g.font.CellW
-	row := (my - g.focused.Rect.Min.Y - pad) / g.font.CellH
+	row := (my - g.focused.Rect.Min.Y - pad - g.focused.HeaderH) / g.font.CellH
 	if col < 0 || row < 0 || col >= g.focused.Cols || row >= g.focused.Rows {
 		if g.hoveredURL != nil {
 			g.hoveredURL = nil

@@ -11,10 +11,12 @@ import (
 // Pane wraps a Terminal with a physical pixel rect.
 // Pattern: composite — Pane owns its Terminal lifecycle.
 type Pane struct {
-	Term *terminal.Terminal
-	Rect image.Rectangle // physical pixels in the window
-	Cols int
-	Rows int
+	Term     *terminal.Terminal
+	Rect     image.Rectangle // physical pixels in the window
+	Cols     int
+	Rows     int
+	ProcName string // last known foreground process name (drained from Term.ForegroundProcCh)
+	HeaderH  int    // height in pixels of the pane header bar (0 = no header)
 }
 
 // New creates a Pane for the given physical pixel rect, computes grid dimensions,
