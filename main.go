@@ -828,6 +828,14 @@ func (g *Game) handleInput() {
 					g.flashStatus("Command blocks: off")
 				}
 
+			case meta && !shift && key == ebiten.KeyEqual:
+				// Cmd+= (plus) — increase font size.
+				g.adjustFontSize(1)
+
+			case meta && !shift && key == ebiten.KeyMinus:
+				// Cmd+- — decrease font size.
+				g.adjustFontSize(-1)
+
 			case meta && key == ebiten.KeyComma:
 				// Cmd+, — reload config.
 				g.reloadConfig()
@@ -4177,6 +4185,49 @@ func (g *Game) openPalette() {
 func (g *Game) closePalette() {
 	g.paletteState = renderer.PaletteState{}
 	g.screenDirty = true
+}
+
+// adjustFontSize changes the font size by delta points and reloads the font.
+// Clamped to [6, 72]. Skipped when recording is active.
+func (g *Game) adjustFontSize(delta float64) {
+	if g.recorder != nil && g.recorder.Active() {
+		g.flashStatus("Cannot resize font while recording")
+		return
+	}
+	newSize := g.cfg.Font.Size + delta
+	if newSize < 6 {
+		newSize = 6
+	}
+	if newSize > 72 {
+		newSize = 72
+	}
+	if newSize == g.cfg.Font.Size {
+		return
+	}
+
+	fontBytes := jetbrainsMono
+	if g.cfg.Font.File != "" {
+		if data, loadErr := os.ReadFile(g.cfg.Font.File); loadErr == nil {
+			fontBytes = data
+		}
+	}
+	fontR, err := renderer.NewFontRenderer(fontBytes, newSize*g.dpi)
+	if err != nil {
+		g.flashStatus("Font resize failed: " + err.Error())
+		return
+	}
+
+	g.cfg.Font.Size = newSize
+	g.font = fontR
+	g.renderer.SetFont(fontR)
+	g.renderer.SetSize(int(float64(g.winW)*g.dpi), int(float64(g.winH)*g.dpi))
+	for _, t := range g.tabs {
+		g.layout = t.Layout
+		g.recomputeLayout()
+	}
+	g.layout = g.tabs[g.activeTab].Layout
+	g.screenDirty = true
+	g.flashStatus(fmt.Sprintf("Font size: %.0fpt", newSize))
 }
 
 // reloadConfig re-reads config.toml and propagates all changes at runtime.
