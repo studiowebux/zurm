@@ -210,6 +210,8 @@ func main() {
 		return
 	}
 
+	resolveShellPath()
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Printf("config load warning: %v (using defaults)", err)
@@ -4641,4 +4643,41 @@ PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }printf '\033]133;D;%s\007' \
 		return
 	}
 	g.flashStatus("Shell hooks installed — restart your shell")
+}
+
+// resolveShellPath augments the process PATH with the user's login shell PATH.
+// macOS .app bundles receive a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) that
+// excludes Homebrew and other user-installed tool directories. This function
+// spawns a login shell to resolve the full PATH and merges it into the process
+// environment so exec.Command("ffmpeg") and similar calls find user-installed
+// binaries. No-op if the shell probe fails.
+func resolveShellPath() {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/zsh"
+	}
+	out, err := exec.Command(shell, "-lc", "echo $PATH").Output() // #nosec G204 — shell from SHELL env var; -lc is fixed
+	if err != nil {
+		return
+	}
+	shellPath := strings.TrimSpace(string(out))
+	if shellPath == "" {
+		return
+	}
+	currentPath := os.Getenv("PATH")
+	// Build a set of directories already in PATH to avoid duplicates.
+	existing := make(map[string]bool)
+	for _, d := range strings.Split(currentPath, ":") {
+		existing[d] = true
+	}
+	var added []string
+	for _, d := range strings.Split(shellPath, ":") {
+		if d != "" && !existing[d] {
+			added = append(added, d)
+			existing[d] = true
+		}
+	}
+	if len(added) > 0 {
+		os.Setenv("PATH", currentPath+":"+strings.Join(added, ":"))
+	}
 }
