@@ -137,36 +137,43 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 
 	// --- CWD: whatever columns remain (or FlashMessage when set) ---
 	x := r.font.CellW / 2
-	cwdDrawn := false
 	if state.FlashMessage != "" {
-		r.font.DrawString(r.offscreen, state.FlashMessage, x, textY, accentFg)
-		cwdDrawn = true
-	} else if r.cfg.StatusBar.ShowCwd && state.Cwd != "" {
-		cwdSep := 0
-		if len(midSegs) > 0 {
-			cwdSep = sepCols
+		// Flash message takes priority — skip CWD and middle segments entirely.
+		maxFlashCols := totalCols - rightCols - 1
+		flash := state.FlashMessage
+		if fr := []rune(flash); len(fr) > maxFlashCols {
+			flash = string(fr[:maxFlashCols])
 		}
-		maxCwdCols := totalCols - rightCols - midCols - cwdSep - 1
-		if maxCwdCols < 4 {
-			maxCwdCols = 4
+		r.font.DrawString(r.offscreen, flash, x, textY, accentFg)
+	} else {
+		cwdDrawn := false
+		if r.cfg.StatusBar.ShowCwd && state.Cwd != "" {
+			cwdSep := 0
+			if len(midSegs) > 0 {
+				cwdSep = sepCols
+			}
+			maxCwdCols := totalCols - rightCols - midCols - cwdSep - 1
+			if maxCwdCols < 4 {
+				maxCwdCols = 4
+			}
+			cwd := abbreviatePath(state.Cwd, maxCwdCols)
+			r.font.DrawString(r.offscreen, cwd, x, textY, accentFg)
+			x += len([]rune(cwd)) * r.font.CellW
+			cwdDrawn = true
 		}
-		cwd := abbreviatePath(state.Cwd, maxCwdCols)
-		r.font.DrawString(r.offscreen, cwd, x, textY, accentFg)
-		x += len([]rune(cwd)) * r.font.CellW
-		cwdDrawn = true
-	}
 
-	// Draw middle segments with separators.
-	for i, s := range midSegs {
-		if i == 0 && cwdDrawn {
-			r.font.DrawString(r.offscreen, sep, x, textY, fg)
-			x += sepCols * r.font.CellW
-		} else if i > 0 {
-			r.font.DrawString(r.offscreen, sep, x, textY, fg)
-			x += sepCols * r.font.CellW
+		// Draw middle segments with separators.
+		for i, s := range midSegs {
+			if i == 0 && cwdDrawn {
+				r.font.DrawString(r.offscreen, sep, x, textY, fg)
+				x += sepCols * r.font.CellW
+			} else if i > 0 {
+				r.font.DrawString(r.offscreen, sep, x, textY, fg)
+				x += sepCols * r.font.CellW
+			}
+			r.font.DrawString(r.offscreen, s.text, x, textY, s.color)
+			x += len([]rune(s.text)) * r.font.CellW
 		}
-		r.font.DrawString(r.offscreen, s.text, x, textY, s.color)
-		x += len([]rune(s.text)) * r.font.CellW
 	}
 
 	// ? help button at the far right edge.

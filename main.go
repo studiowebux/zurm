@@ -785,6 +785,7 @@ func (g *Game) handleInput() {
 			case meta && shift && key == ebiten.KeyS:
 				// Cmd+Shift+S — take screenshot.
 				g.screenshotPending = true
+				g.screenDirty = true
 
 			case meta && shift && key == ebiten.KeyPeriod:
 				// Cmd+Shift+. — toggle screen recording.
@@ -1060,6 +1061,7 @@ func (g *Game) handleResize() {
 	physH := int(float64(h) * g.dpi)
 	g.renderer.SetSize(physW, physH)
 	g.renderer.SetLayoutDirty()
+	g.recorder.Resize(physW, physH)
 
 	tabBarH := g.renderer.TabBarHeight()
 	statusBarH := g.renderer.StatusBarHeight()
@@ -4123,6 +4125,12 @@ func (g *Game) toggleRecording() {
 		}()
 		return
 	}
+	// Sync recorder dimensions to match what Layout() produces — the DPI
+	// round-trip (physical→logical→physical) can lose a pixel, which would
+	// cause AddFrame's size check to silently drop every frame.
+	physW := int(float64(g.winW) * g.dpi)
+	physH := int(float64(g.winH) * g.dpi)
+	g.recorder.Resize(physW, physH)
 	if err := g.recorder.Start(); err != nil {
 		g.flashStatus("Record error: " + err.Error())
 		return
