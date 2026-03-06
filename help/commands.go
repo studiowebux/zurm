@@ -20,6 +20,7 @@ func AllCommands() []Command {
 		{Name: "Tab 1", Shortcut: "Cmd+1"},
 		{Name: "Tab 2", Shortcut: "Cmd+2"},
 		{Name: "Tab 3", Shortcut: "Cmd+3"},
+		{Name: "Edit Tab Note", Shortcut: "Cmd+Shift+N"},
 		// Panes
 		{Name: "Split Horizontal", Shortcut: "Cmd+D"},
 		{Name: "Split Vertical", Shortcut: "Cmd+Shift+D"},

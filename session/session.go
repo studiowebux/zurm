@@ -24,6 +24,7 @@ type TabData struct {
 	Title       string      `json:"title"`
 	UserRenamed bool        `json:"user_renamed"`
 	PinnedSlot  string      `json:"pinned_slot"`      // single rune as string, or ""
+	Note        string      `json:"note,omitempty"`   // user annotation for session context
 	Layout      *PaneLayout `json:"layout,omitempty"` // pane layout tree
 }
 

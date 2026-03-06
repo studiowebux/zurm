@@ -295,6 +295,7 @@ func main() {
 				t.Title = fmt.Sprintf("tab %d", len(initialTabs)+1)
 			}
 			t.UserRenamed = td.UserRenamed
+			t.Note = td.Note
 			if len(td.PinnedSlot) > 0 {
 				t.PinnedSlot = []rune(td.PinnedSlot)[0]
 			}
@@ -549,6 +550,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.lastPtySeq = terminal.RenderSeq()
 
 	g.renderer.HoveredURL = g.hoveredURL
+	if g.activeTab >= 0 && g.activeTab < len(g.tabs) {
+		g.statusBarState.TabNote = g.tabs[g.activeTab].Note
+	}
 	g.renderer.DrawAll(screen, g.tabs, g.activeTab, g.focused, g.zoomed,
 		&g.menuState, &g.overlayState, &g.confirmState, &g.searchState, &g.statusBarState, &g.tabSwitcherState,
 		&g.paletteState, g.paletteEntries, &g.fileExplorerState, &g.tabSearchState)
@@ -607,6 +611,13 @@ func (g *Game) handleInput() {
 	if g.renamingTabIdx() >= 0 {
 		g.screenDirty = true
 		g.handleRenameInput()
+		return
+	}
+
+	// Tab note edit mode intercepts all input.
+	if g.notingTabIdx() >= 0 {
+		g.screenDirty = true
+		g.handleNoteInput()
 		return
 	}
 
@@ -867,6 +878,8 @@ func (g *Game) handleInput() {
 				g.newTab()
 			case meta && shift && key == ebiten.KeyR:
 				g.startRenameTab(g.activeTab)
+			case meta && shift && key == ebiten.KeyN:
+				g.startNoteEdit(g.activeTab)
 			case meta && key == ebiten.KeySemicolon:
 				g.goBack()
 			case meta && shift && key == ebiten.KeyBracketLeft:
@@ -3611,14 +3624,34 @@ func (g *Game) renamingPane() bool {
 }
 
 // openTabContextMenu shows a small tab-specific context menu (Rename, Close).
+// Actions target the tab under the cursor, not necessarily the active tab.
 func (g *Game) openTabContextMenu(px, py int) {
 	if g.menuState.Open {
 		g.renderer.ClearPaneCache()
 	}
 	physW := int(float64(g.winW) * g.dpi)
 	physH := int(float64(g.winH) * g.dpi)
+
+	// Determine which tab was right-clicked.
+	clickedTab := g.activeTab
+	numTabs := len(g.tabs)
+	if numTabs > 0 {
+		maxTabW := g.cfg.Tabs.MaxWidthChars * g.font.CellW
+		tabW := physW / numTabs
+		if tabW > maxTabW {
+			tabW = maxTabW
+		}
+		if tabW > 0 {
+			idx := px / tabW
+			if idx >= 0 && idx < numTabs {
+				clickedTab = idx
+			}
+		}
+	}
+
 	items := []help.MenuItem{
-		{Label: "Rename Tab", Action: func() { g.startRenameTab(g.activeTab) }},
+		{Label: "Rename Tab", Action: func() { g.startRenameTab(clickedTab) }},
+		{Label: "Edit Tab Note", Shortcut: "Cmd+Shift+N", Action: func() { g.startNoteEdit(clickedTab) }},
 		{Label: "New Tab", Shortcut: "Cmd+T", Action: g.newTab},
 		{Separator: true},
 		{Label: "Close Tab", Shortcut: "Cmd+W", Action: g.closeActiveTab},
@@ -3687,6 +3720,7 @@ func (g *Game) buildContextMenu() []help.MenuItem {
 		}},
 		{Separator: true},
 		{Label: "Rename Tab", Action: func() { g.startRenameTab(g.activeTab) }},
+		{Label: "Edit Tab Note", Shortcut: "Cmd+Shift+N", Action: func() { g.startNoteEdit(g.activeTab) }},
 		{Separator: true},
 		{Label: "Pin Mode", Shortcut: "Cmd+G", Action: func() { g.pinMode = true; g.statusBarState.PinMode = true }},
 		{Label: "Show Keybindings", Shortcut: "Cmd+/", Action: g.toggleOverlay},
@@ -3900,6 +3934,140 @@ func (g *Game) renamingTabIdx() int {
 		}
 	}
 	return -1
+}
+
+// --- Tab notes ---
+
+// startNoteEdit enters inline note editing mode for tab at index idx.
+func (g *Game) startNoteEdit(idx int) {
+	if idx < 0 || idx >= len(g.tabs) {
+		return
+	}
+	g.cancelNote()
+	g.cancelRename()
+	g.tabs[idx].Noting = true
+	g.tabs[idx].NoteText = g.tabs[idx].Note
+}
+
+// commitNote applies the note text and exits note editing mode.
+func (g *Game) commitNote() {
+	for _, t := range g.tabs {
+		if t.Noting {
+			t.Note = strings.TrimSpace(t.NoteText)
+			t.Noting = false
+			t.NoteText = ""
+			break
+		}
+	}
+}
+
+// cancelNote exits note editing mode without applying changes.
+func (g *Game) cancelNote() {
+	for _, t := range g.tabs {
+		if t.Noting {
+			t.Noting = false
+			t.NoteText = ""
+			break
+		}
+	}
+}
+
+// notingTabIdx returns the index of the tab currently in note editing mode, or -1.
+func (g *Game) notingTabIdx() int {
+	for i, t := range g.tabs {
+		if t.Noting {
+			return i
+		}
+	}
+	return -1
+}
+
+// handleNoteInput processes keyboard input while a tab note edit is in progress.
+func (g *Game) handleNoteInput() {
+	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
+
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.cancelNote()
+		g.prevKeys[ebiten.KeyEscape] = true
+		g.renameRepeatActive = false
+		return
+	}
+
+	idx := g.notingTabIdx()
+	if idx < 0 {
+		return
+	}
+
+	ti := &TextInput{Text: g.tabs[idx].NoteText}
+
+	// Backspace with repeat support (reuses rename repeat state).
+	backspacePressed := ebiten.IsKeyPressed(ebiten.KeyBackspace)
+	if backspacePressed {
+		now := time.Now()
+		if !g.renameRepeatActive || g.renameRepeatKey != ebiten.KeyBackspace {
+			g.renameRepeatActive = true
+			g.renameRepeatKey = ebiten.KeyBackspace
+			g.renameRepeatStart = now
+			g.renameRepeatLast = now
+			g.renameRepeatAlt = alt
+			if alt {
+				ti.DeleteWord()
+			} else {
+				ti.DeleteLastChar()
+			}
+			g.tabs[idx].NoteText = ti.Text
+		} else if now.Sub(g.renameRepeatStart) >= keyRepeatDelay &&
+			now.Sub(g.renameRepeatLast) >= keyRepeatInterval {
+			g.renameRepeatLast = now
+			if g.renameRepeatAlt {
+				ti.DeleteWord()
+			} else {
+				ti.DeleteLastChar()
+			}
+			g.tabs[idx].NoteText = ti.Text
+		}
+	} else {
+		if g.renameRepeatKey == ebiten.KeyBackspace {
+			g.renameRepeatActive = false
+		}
+	}
+
+	// Edge-triggered keys: Enter commits, Cmd+V pastes.
+	edgeKeys := []ebiten.Key{
+		ebiten.KeyEnter,
+		ebiten.KeyNumpadEnter,
+		ebiten.KeyV,
+	}
+	for _, key := range edgeKeys {
+		pressed := ebiten.IsKeyPressed(key)
+		wasPressed := g.prevKeys[key]
+		if pressed && !wasPressed {
+			switch key {
+			case ebiten.KeyEnter, ebiten.KeyNumpadEnter:
+				g.commitNote()
+				g.renameRepeatActive = false
+			case ebiten.KeyV:
+				if meta {
+					if out, err := exec.Command("pbpaste").Output(); err == nil {
+						ti.AddString(strings.ToValidUTF8(string(out), ""))
+						g.tabs[idx].NoteText = ti.Text
+					}
+				}
+			}
+		}
+		g.prevKeys[key] = pressed
+	}
+	g.prevKeys[ebiten.KeyMeta] = meta
+	g.prevKeys[ebiten.KeyAlt] = alt
+
+	// Printable characters.
+	if !meta {
+		for _, r := range ebiten.AppendInputChars(nil) {
+			ti.AddChar(r)
+		}
+		g.tabs[idx].NoteText = ti.Text
+	}
 }
 
 // handleRenameInput processes keyboard input while a tab rename is in progress.
@@ -4336,6 +4504,7 @@ func (g *Game) buildPalette() {
 		func() { g.switchTab(0) },
 		func() { g.switchTab(1) },
 		func() { g.switchTab(2) },
+		func() { g.startNoteEdit(g.activeTab) },
 		// Panes
 		g.splitH,
 		g.splitV,
@@ -4619,6 +4788,7 @@ func (g *Game) doSaveSession() {
 			Cwd:         term.Cwd,
 			Title:       t.Title,
 			UserRenamed: t.UserRenamed,
+			Note:        t.Note,
 			Layout:      serializePaneLayout(t.Layout), // Save the pane layout
 		}
 		if t.PinnedSlot != 0 {
@@ -4673,9 +4843,10 @@ func restoreTabWithLayout(cfg *config.Config, rect image.Rectangle, cellW, cellH
 
 	// Create the tab with the restored layout
 	t := &tab.Tab{
-		Layout:  layout,
-		Title:   td.Title,
+		Layout:      layout,
+		Title:       td.Title,
 		UserRenamed: td.UserRenamed,
+		Note:        td.Note,
 	}
 
 	// Find the first pane to set as focused (leftmost leaf)

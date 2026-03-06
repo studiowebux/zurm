@@ -23,6 +23,14 @@ type Tab struct {
 	Renaming   bool
 	RenameText string
 
+	// Note is a persistent text annotation attached to this tab.
+	// Users can edit it via Cmd+Shift+N or the command palette.
+	Note string
+
+	// Noting is true while the user is editing the tab note inline.
+	Noting   bool
+	NoteText string
+
 	// PinnedSlot is a home-row letter ('a','s','d','f','g','h','j','k','l') if this
 	// tab is pinned to a pin slot, or 0 if not pinned.
 	PinnedSlot rune

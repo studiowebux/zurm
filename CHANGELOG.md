@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Tab notes/annotations: attach a persistent text note to any tab (Cmd+Shift+N or command palette)
+- Note indicator (`*`) shown on tab bar for tabs with annotations
+- Active tab note displayed in status bar as `[note text]` segment
+- Tab notes persist across sessions via session.json
+- "Edit Tab Note" in right-click context menus (tab bar and pane)
+
+### Fixed
+
+- Right-click tab context menu now targets the clicked tab, not the active tab
+
+### Changed
+
+- Go version bumped from 1.25.5 to 1.25.8 (fixes govulncheck GO-2026-4602)
+
 ## [0.8.2] - 2026-03-06
 
 ### Added

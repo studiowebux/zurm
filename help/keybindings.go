@@ -15,6 +15,7 @@ func AllBindings() []KeyBinding {
 		{Category: "Navigation", Key: "Cmd+T", Description: "New tab"},
 		{Category: "Navigation", Key: "Cmd+Shift+T", Description: "Tab switcher"},
 		{Category: "Navigation", Key: "Cmd+Shift+R", Description: "Rename tab"},
+		{Category: "Navigation", Key: "Cmd+Shift+N", Description: "Edit tab note"},
 		{Category: "Navigation", Key: "Cmd+W", Description: "Close tab / pane"},
 		{Category: "Navigation", Key: "Cmd+1\u20139", Description: "Switch to tab N"},
 		{Category: "Pins", Key: "Cmd+G", Description: "Enter pin mode"},
