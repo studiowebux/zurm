@@ -483,7 +483,8 @@ func (r *Renderer) DrawPane(buf *terminal.ScreenBuffer, cur *terminal.Cursor,
 				fg, cbg = cbg, fg
 			}
 
-			if buf.Selection.Contains(row, col) {
+			absRow := buf.DisplayToAbsRow(row)
+			if buf.Selection.Contains(absRow, col) {
 				fg, cbg = cbg, fg
 			}
 

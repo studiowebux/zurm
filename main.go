@@ -667,18 +667,17 @@ func (g *Game) handleInput() {
 		case key == ebiten.KeyPageUp:
 			g.focused.Term.Buf.Lock()
 			g.focused.Term.Buf.ScrollViewUp(halfPage)
-			g.focused.Term.Buf.ClearSelection()
 			g.focused.Term.Buf.Unlock()
 			scrolled = true
 		case key == ebiten.KeyPageDown:
 			g.focused.Term.Buf.Lock()
 			g.focused.Term.Buf.ScrollViewDown(halfPage)
-			g.focused.Term.Buf.ClearSelection()
 			g.focused.Term.Buf.Unlock()
 			scrolled = true
 		case (meta || ctrl) && key == ebiten.KeyK:
 			g.focused.Term.Buf.Lock()
 			g.focused.Term.Buf.ClearScrollback()
+			g.focused.Term.Buf.ClearSelection()
 			g.focused.Term.Buf.Unlock()
 			scrolled = true
 		}
@@ -702,7 +701,6 @@ func (g *Game) handleInput() {
 				} else {
 					g.focused.Term.Buf.ScrollViewDown(-lines)
 				}
-				g.focused.Term.Buf.ClearSelection()
 				g.focused.Term.Buf.Unlock()
 				scrolled = true
 			}
@@ -2281,8 +2279,9 @@ func (g *Game) handleMouse() {
 	}
 
 	// Click in tab bar — switch tab or rename on double-click.
+	// During selection drag, skip the tab bar handler so auto-scroll can run.
 	// tabW must match the renderer's cap (24 * CellW) so click regions align with drawn tabs.
-	if my < tabBarH {
+	if my < tabBarH && !g.selDragging {
 		if leftPressed && !leftWas {
 			physW := int(float64(g.winW) * g.dpi)
 			numTabs := len(g.tabs)
@@ -2387,13 +2386,14 @@ func (g *Game) handleMouse() {
 			g.lastClickCol = col
 
 			g.focused.Term.Buf.Lock()
+			absRow := g.focused.Term.Buf.DisplayToAbsRow(row)
 			switch g.clickCount {
 			case 1:
 				g.selDragging = true
 				g.focused.Term.Buf.Selection = terminal.Selection{
 					Active:   true,
-					StartRow: row, StartCol: col,
-					EndRow:   row, EndCol: col,
+					StartRow: absRow, StartCol: col,
+					EndRow:   absRow, EndCol: col,
 				}
 			case 2:
 				g.selDragging = false
@@ -2402,8 +2402,8 @@ func (g *Game) handleMouse() {
 				g.selDragging = false
 				g.focused.Term.Buf.Selection = terminal.Selection{
 					Active:   true,
-					StartRow: row, StartCol: 0,
-					EndRow:   row, EndCol: g.focused.Term.Buf.Cols - 1,
+					StartRow: absRow, StartCol: 0,
+					EndRow:   absRow, EndCol: g.focused.Term.Buf.Cols - 1,
 				}
 				g.clickCount = 0
 			}
@@ -2412,6 +2412,8 @@ func (g *Game) handleMouse() {
 		} else if leftPressed && leftWas && g.selDragging {
 			g.focused.Term.Buf.Lock()
 			// Auto-scroll when dragging past the pane edges.
+			// Selection uses absolute rows, so StartRow stays stable across
+			// ViewOffset changes — no adjustment needed.
 			if rawRow < 0 {
 				vo := g.focused.Term.Buf.ViewOffset + 1
 				maxVO := g.focused.Term.Buf.ScrollbackLen()
@@ -2426,7 +2428,7 @@ func (g *Game) handleMouse() {
 				}
 				g.focused.Term.Buf.SetViewOffset(vo)
 			}
-			g.focused.Term.Buf.Selection.EndRow = row
+			g.focused.Term.Buf.Selection.EndRow = g.focused.Term.Buf.DisplayToAbsRow(row)
 			g.focused.Term.Buf.Selection.EndCol = col
 			g.focused.Term.Buf.BumpRenderGen()
 			g.focused.Term.Buf.Unlock()
@@ -2512,7 +2514,6 @@ func (g *Game) handleMouse() {
 				} else {
 					g.focused.Term.Buf.ScrollViewDown(-lines)
 				}
-				g.focused.Term.Buf.ClearSelection()
 				g.focused.Term.Buf.Unlock()
 			}
 		} else {
@@ -2535,9 +2536,10 @@ func (g *Game) wordSelection(row, col int) terminal.Selection {
 				r == '_' || r == '.' || r == '/')
 	}
 
+	absRow := buf.DisplayToAbsRow(row)
 	cell := buf.GetDisplayCell(row, col)
 	if !isWordChar(cell.Char) {
-		return terminal.Selection{Active: true, StartRow: row, StartCol: col, EndRow: row, EndCol: col}
+		return terminal.Selection{Active: true, StartRow: absRow, StartCol: col, EndRow: absRow, EndCol: col}
 	}
 
 	startCol := col
@@ -2556,14 +2558,13 @@ func (g *Game) wordSelection(row, col int) terminal.Selection {
 		endCol++
 	}
 
-	return terminal.Selection{Active: true, StartRow: row, StartCol: startCol, EndRow: row, EndCol: endCol}
+	return terminal.Selection{Active: true, StartRow: absRow, StartCol: startCol, EndRow: absRow, EndCol: endCol}
 }
 
 // copySelection copies the current selection text to the clipboard via pbcopy.
 func (g *Game) copySelection() {
 	g.focused.Term.Buf.RLock()
 	sel := g.focused.Term.Buf.Selection
-	rows := g.focused.Term.Buf.Rows
 	cols := g.focused.Term.Buf.Cols
 
 	if !sel.Active {
@@ -2572,11 +2573,18 @@ func (g *Game) copySelection() {
 	}
 
 	norm := sel.Normalize()
-	var text strings.Builder
+	// Clamp to valid absolute row range.
+	maxAbsRow := g.focused.Term.Buf.ScrollbackLen() + g.focused.Term.Buf.Rows - 1
+	if norm.StartRow < 0 {
+		norm.StartRow = 0
+	}
+	if norm.EndRow > maxAbsRow {
+		norm.EndRow = maxAbsRow
+	}
 
-	for r := norm.StartRow; r <= norm.EndRow && r < rows; r++ {
-		// Insert newline between rows only if this row is NOT a soft-wrap continuation.
-		if r > norm.StartRow && !g.focused.Term.Buf.IsDisplayRowWrapped(r) {
+	var text strings.Builder
+	for r := norm.StartRow; r <= norm.EndRow; r++ {
+		if r > norm.StartRow && !g.focused.Term.Buf.IsAbsRowWrapped(r) {
 			text.WriteByte('\n')
 		}
 
@@ -2591,7 +2599,7 @@ func (g *Game) copySelection() {
 
 		var line strings.Builder
 		for c := colStart; c <= colEnd && c < cols; c++ {
-			ch := g.focused.Term.Buf.GetDisplayCell(r, c).Char
+			ch := g.focused.Term.Buf.GetAbsCell(r, c).Char
 			if ch == 0 {
 				ch = ' '
 			}

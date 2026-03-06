@@ -1,7 +1,9 @@
 package terminal
 
-// Selection represents the current mouse text selection in display coordinates
-// (0-indexed row/col as seen on screen, accounting for ViewOffset).
+// Selection represents the current mouse text selection in absolute buffer
+// coordinates. Row indices span the concatenated [scrollback | primary] space:
+// 0 = oldest scrollback line, ScrollbackLen() = primary row 0.
+// This allows the selection to survive scrolling without being cleared.
 //
 // Pattern: value type — all methods operate on copies, no pointer receiver.
 type Selection struct {
