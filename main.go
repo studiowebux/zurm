@@ -86,6 +86,10 @@ type Game struct {
 	// Selection drag state.
 	selDragging bool
 
+	// URL hover state — detected URLs in the focused pane's visible buffer.
+	hoveredURL *terminal.URLMatch // URL under the cursor, nil if none
+	urlMatches []terminal.URLMatch // cached URL matches for the focused pane
+
 	// PTY mouse motion tracking for modes 1002/1003.
 	lastMouseCol int // last col sent to PTY (1-based)
 	lastMouseRow int // last row sent to PTY (1-based)
@@ -489,6 +493,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// our snapshot and triggers a redraw on the next frame.
 	g.lastPtySeq = terminal.RenderSeq()
 
+	g.renderer.HoveredURL = g.hoveredURL
 	g.renderer.DrawAll(screen, g.tabs, g.activeTab, g.focused, g.zoomed,
 		&g.menuState, &g.overlayState, &g.confirmState, &g.searchState, &g.statusBarState, &g.tabSwitcherState,
 		&g.paletteState, g.paletteEntries, &g.fileExplorerState)
@@ -662,18 +667,17 @@ func (g *Game) handleInput() {
 		case key == ebiten.KeyPageUp:
 			g.focused.Term.Buf.Lock()
 			g.focused.Term.Buf.ScrollViewUp(halfPage)
-			g.focused.Term.Buf.ClearSelection()
 			g.focused.Term.Buf.Unlock()
 			scrolled = true
 		case key == ebiten.KeyPageDown:
 			g.focused.Term.Buf.Lock()
 			g.focused.Term.Buf.ScrollViewDown(halfPage)
-			g.focused.Term.Buf.ClearSelection()
 			g.focused.Term.Buf.Unlock()
 			scrolled = true
 		case (meta || ctrl) && key == ebiten.KeyK:
 			g.focused.Term.Buf.Lock()
 			g.focused.Term.Buf.ClearScrollback()
+			g.focused.Term.Buf.ClearSelection()
 			g.focused.Term.Buf.Unlock()
 			scrolled = true
 		}
@@ -697,7 +701,6 @@ func (g *Game) handleInput() {
 				} else {
 					g.focused.Term.Buf.ScrollViewDown(-lines)
 				}
-				g.focused.Term.Buf.ClearSelection()
 				g.focused.Term.Buf.Unlock()
 				scrolled = true
 			}
@@ -2109,6 +2112,12 @@ func (g *Game) handleMouse() {
 	if g.blocksEnabled && (mx != g.prevMX || my != g.prevMY) {
 		g.screenDirty = true
 	}
+
+	// URL hover detection — update when cursor moves over the focused pane.
+	if mx != g.prevMX || my != g.prevMY {
+		g.updateURLHover(mx, my, pad)
+	}
+
 	g.prevMX = mx
 	g.prevMY = my
 	_, scrollY := ebiten.Wheel()
@@ -2270,8 +2279,9 @@ func (g *Game) handleMouse() {
 	}
 
 	// Click in tab bar — switch tab or rename on double-click.
+	// During selection drag, skip the tab bar handler so auto-scroll can run.
 	// tabW must match the renderer's cap (24 * CellW) so click regions align with drawn tabs.
-	if my < tabBarH {
+	if my < tabBarH && !g.selDragging {
 		if leftPressed && !leftWas {
 			physW := int(float64(g.winW) * g.dpi)
 			numTabs := len(g.tabs)
@@ -2339,6 +2349,9 @@ func (g *Game) handleMouse() {
 		maxCol := g.focused.Term.Buf.Cols - 1
 		g.focused.Term.Buf.RUnlock()
 
+		// Save unclamped row for auto-scroll during selection drag.
+		rawRow := row
+
 		if col < 0 {
 			col = 0
 		} else if col > maxCol {
@@ -2348,6 +2361,16 @@ func (g *Game) handleMouse() {
 			row = 0
 		} else if row > maxRow {
 			row = maxRow
+		}
+
+		// Cmd+click opens the URL under the cursor in the default browser.
+		if leftPressed && !leftWas && ebiten.IsKeyPressed(ebiten.KeyMeta) {
+			if g.hoveredURL != nil {
+				exec.Command("open", g.hoveredURL.Text).Start() // #nosec G204 — opens user-visible URL in default browser
+				g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
+				g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
+				return
+			}
 		}
 
 		if leftPressed && !leftWas {
@@ -2363,13 +2386,14 @@ func (g *Game) handleMouse() {
 			g.lastClickCol = col
 
 			g.focused.Term.Buf.Lock()
+			absRow := g.focused.Term.Buf.DisplayToAbsRow(row)
 			switch g.clickCount {
 			case 1:
 				g.selDragging = true
 				g.focused.Term.Buf.Selection = terminal.Selection{
 					Active:   true,
-					StartRow: row, StartCol: col,
-					EndRow:   row, EndCol: col,
+					StartRow: absRow, StartCol: col,
+					EndRow:   absRow, EndCol: col,
 				}
 			case 2:
 				g.selDragging = false
@@ -2378,8 +2402,8 @@ func (g *Game) handleMouse() {
 				g.selDragging = false
 				g.focused.Term.Buf.Selection = terminal.Selection{
 					Active:   true,
-					StartRow: row, StartCol: 0,
-					EndRow:   row, EndCol: g.focused.Term.Buf.Cols - 1,
+					StartRow: absRow, StartCol: 0,
+					EndRow:   absRow, EndCol: g.focused.Term.Buf.Cols - 1,
 				}
 				g.clickCount = 0
 			}
@@ -2387,7 +2411,24 @@ func (g *Game) handleMouse() {
 			g.focused.Term.Buf.Unlock()
 		} else if leftPressed && leftWas && g.selDragging {
 			g.focused.Term.Buf.Lock()
-			g.focused.Term.Buf.Selection.EndRow = row
+			// Auto-scroll when dragging past the pane edges.
+			// Selection uses absolute rows, so StartRow stays stable across
+			// ViewOffset changes — no adjustment needed.
+			if rawRow < 0 {
+				vo := g.focused.Term.Buf.ViewOffset + 1
+				maxVO := g.focused.Term.Buf.ScrollbackLen()
+				if vo > maxVO {
+					vo = maxVO
+				}
+				g.focused.Term.Buf.SetViewOffset(vo)
+			} else if rawRow > maxRow {
+				vo := g.focused.Term.Buf.ViewOffset - 1
+				if vo < 0 {
+					vo = 0
+				}
+				g.focused.Term.Buf.SetViewOffset(vo)
+			}
+			g.focused.Term.Buf.Selection.EndRow = g.focused.Term.Buf.DisplayToAbsRow(row)
 			g.focused.Term.Buf.Selection.EndCol = col
 			g.focused.Term.Buf.BumpRenderGen()
 			g.focused.Term.Buf.Unlock()
@@ -2473,7 +2514,6 @@ func (g *Game) handleMouse() {
 				} else {
 					g.focused.Term.Buf.ScrollViewDown(-lines)
 				}
-				g.focused.Term.Buf.ClearSelection()
 				g.focused.Term.Buf.Unlock()
 			}
 		} else {
@@ -2496,9 +2536,10 @@ func (g *Game) wordSelection(row, col int) terminal.Selection {
 				r == '_' || r == '.' || r == '/')
 	}
 
+	absRow := buf.DisplayToAbsRow(row)
 	cell := buf.GetDisplayCell(row, col)
 	if !isWordChar(cell.Char) {
-		return terminal.Selection{Active: true, StartRow: row, StartCol: col, EndRow: row, EndCol: col}
+		return terminal.Selection{Active: true, StartRow: absRow, StartCol: col, EndRow: absRow, EndCol: col}
 	}
 
 	startCol := col
@@ -2517,14 +2558,13 @@ func (g *Game) wordSelection(row, col int) terminal.Selection {
 		endCol++
 	}
 
-	return terminal.Selection{Active: true, StartRow: row, StartCol: startCol, EndRow: row, EndCol: endCol}
+	return terminal.Selection{Active: true, StartRow: absRow, StartCol: startCol, EndRow: absRow, EndCol: endCol}
 }
 
 // copySelection copies the current selection text to the clipboard via pbcopy.
 func (g *Game) copySelection() {
 	g.focused.Term.Buf.RLock()
 	sel := g.focused.Term.Buf.Selection
-	rows := g.focused.Term.Buf.Rows
 	cols := g.focused.Term.Buf.Cols
 
 	if !sel.Active {
@@ -2533,11 +2573,18 @@ func (g *Game) copySelection() {
 	}
 
 	norm := sel.Normalize()
-	var text strings.Builder
+	// Clamp to valid absolute row range.
+	maxAbsRow := g.focused.Term.Buf.ScrollbackLen() + g.focused.Term.Buf.Rows - 1
+	if norm.StartRow < 0 {
+		norm.StartRow = 0
+	}
+	if norm.EndRow > maxAbsRow {
+		norm.EndRow = maxAbsRow
+	}
 
-	for r := norm.StartRow; r <= norm.EndRow && r < rows; r++ {
-		// Insert newline between rows only if this row is NOT a soft-wrap continuation.
-		if r > norm.StartRow && !g.focused.Term.Buf.IsDisplayRowWrapped(r) {
+	var text strings.Builder
+	for r := norm.StartRow; r <= norm.EndRow; r++ {
+		if r > norm.StartRow && !g.focused.Term.Buf.IsAbsRowWrapped(r) {
 			text.WriteByte('\n')
 		}
 
@@ -2552,7 +2599,7 @@ func (g *Game) copySelection() {
 
 		var line strings.Builder
 		for c := colStart; c <= colEnd && c < cols; c++ {
-			ch := g.focused.Term.Buf.GetDisplayCell(r, c).Char
+			ch := g.focused.Term.Buf.GetAbsCell(r, c).Char
 			if ch == 0 {
 				ch = ' '
 			}
@@ -3058,6 +3105,8 @@ func (g *Game) setFocusNoHistory(p *pane.Pane) {
 	g.focused = p
 	g.tabs[g.activeTab].Focused = p
 	g.selDragging = false
+	g.hoveredURL = nil
+	g.urlMatches = nil
 	g.scrollAccum = 0
 	g.mouseHeldBtn = -1
 	g.lastMouseCol = 0
@@ -3982,6 +4031,35 @@ func deserializePaneLayout(cfg *config.Config, rect image.Rectangle, cellW, cell
 
 	default:
 		return nil, fmt.Errorf("unknown layout kind: %s", layout.Kind)
+	}
+}
+
+// updateURLHover rescans URLs in the focused pane and updates hover state.
+func (g *Game) updateURLHover(mx, my, pad int) {
+	if g.focused == nil {
+		return
+	}
+	// Convert pixel to cell coordinates within the focused pane.
+	col := (mx - g.focused.Rect.Min.X - pad) / g.font.CellW
+	row := (my - g.focused.Rect.Min.Y - pad) / g.font.CellH
+	if col < 0 || row < 0 || col >= g.focused.Cols || row >= g.focused.Rows {
+		if g.hoveredURL != nil {
+			g.hoveredURL = nil
+			g.screenDirty = true
+		}
+		return
+	}
+
+	// Rescan URLs from the buffer.
+	g.focused.Term.Buf.RLock()
+	g.urlMatches = g.focused.Term.Buf.DetectURLs()
+	g.focused.Term.Buf.RUnlock()
+
+	hit := terminal.URLAt(g.urlMatches, row, col)
+	if hit != g.hoveredURL {
+		// Pointer comparison is sufficient — URLAt returns a pointer into urlMatches.
+		g.hoveredURL = hit
+		g.screenDirty = true
 	}
 }
 

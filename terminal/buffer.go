@@ -719,6 +719,50 @@ func (sb *ScreenBuffer) SetViewOffset(n int) {
 	sb.MarkAllDirty()
 }
 
+// DisplayToAbsRow converts a display row (0 = top of visible area) to an
+// absolute row in the concatenated [scrollback | primary] space.
+// Caller must hold at least RLock.
+func (sb *ScreenBuffer) DisplayToAbsRow(displayRow int) int {
+	return len(sb.scrollback) - sb.ViewOffset + displayRow
+}
+
+// AbsToDisplayRow converts an absolute row to a display row.
+// A negative result or one >= Rows means the row is off-screen.
+// Caller must hold at least RLock.
+func (sb *ScreenBuffer) AbsToDisplayRow(absRow int) int {
+	return absRow - len(sb.scrollback) + sb.ViewOffset
+}
+
+// GetAbsCell returns the cell at an absolute row and column.
+// Caller must hold at least RLock.
+func (sb *ScreenBuffer) GetAbsCell(absRow, col int) Cell {
+	sbLen := len(sb.scrollback)
+	if absRow < sbLen {
+		if absRow < 0 || col < 0 || col >= len(sb.scrollback[absRow]) {
+			return Cell{Char: ' ', FG: sb.DefaultFG, BG: sb.DefaultBG}
+		}
+		return sb.scrollback[absRow][col]
+	}
+	return sb.GetCell(absRow-sbLen, col)
+}
+
+// IsAbsRowWrapped reports whether the absolute row is a soft-wrap continuation.
+// Caller must hold at least RLock.
+func (sb *ScreenBuffer) IsAbsRowWrapped(absRow int) bool {
+	sbLen := len(sb.scrollback)
+	if absRow < sbLen {
+		if absRow < 0 || absRow >= len(sb.scrollbackWrapped) {
+			return false
+		}
+		return sb.scrollbackWrapped[absRow]
+	}
+	screenRow := absRow - sbLen
+	if screenRow < 0 || screenRow >= len(sb.wrapped) {
+		return false
+	}
+	return sb.wrapped[screenRow]
+}
+
 // SearchMatch describes one occurrence of a search query in the buffer.
 // AbsRow is the index into the concatenated [scrollback..., primary...] space:
 // AbsRow 0 = oldest scrollback line; AbsRow ScrollbackLen() = primary row 0.
