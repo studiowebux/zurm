@@ -37,6 +37,8 @@ func AllBindings() []KeyBinding {
 		{Category: "File Explorer", Key: "c", Description: "Copy path"},
 		{Category: "File Explorer", Key: "o", Description: "Open in Finder"},
 		{Category: "File Explorer", Key: "Esc", Description: "Close explorer"},
+		{Category: "Panes", Key: "palette", Description: "Detach pane to new tab"},
+		{Category: "Panes", Key: "palette", Description: "Move pane to next/prev tab"},
 		{Category: "Panes", Key: "Cmd+D", Description: "Split horizontal"},
 		{Category: "Panes", Key: "Cmd+Shift+D", Description: "Split vertical"},
 		{Category: "Panes", Key: "Cmd+Arrow", Description: "Focus adjacent pane"},

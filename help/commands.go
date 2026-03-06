@@ -21,6 +21,9 @@ func AllCommands() []Command {
 		{Name: "Tab 2", Shortcut: "Cmd+2"},
 		{Name: "Tab 3", Shortcut: "Cmd+3"},
 		{Name: "Edit Tab Note", Shortcut: "Cmd+Shift+N"},
+		{Name: "Detach Pane to Tab", Shortcut: ""},
+		{Name: "Move Pane to Next Tab", Shortcut: ""},
+		{Name: "Move Pane to Previous Tab", Shortcut: ""},
 		// Panes
 		{Name: "Split Horizontal", Shortcut: "Cmd+D"},
 		{Name: "Split Vertical", Shortcut: "Cmd+Shift+D"},

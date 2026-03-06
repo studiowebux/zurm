@@ -249,6 +249,26 @@ func removePane(n *LayoutNode, p *Pane) *LayoutNode {
 	return n
 }
 
+// Detach removes the leaf containing p from the tree WITHOUT closing p.Term.
+// Returns the new root. If p is the only pane, returns nil.
+func (n *LayoutNode) Detach(p *Pane) *LayoutNode {
+	return removePane(n, p)
+}
+
+// AttachH inserts an existing pane as a horizontal split (left | right) beside
+// the target pane. Returns the new tree root.
+func (n *LayoutNode) AttachH(target, incoming *Pane) *LayoutNode {
+	oldLeaf := NewLeaf(target)
+	newLeaf := NewLeaf(incoming)
+	split := &LayoutNode{
+		Kind:  HSplit,
+		Left:  oldLeaf,
+		Right: newLeaf,
+		Ratio: 0.5,
+	}
+	return replaceLeaf(n, target, split)
+}
+
 // NextLeaf returns the pane after p in DFS order (wraps around).
 func (n *LayoutNode) NextLeaf(p *Pane) *Pane {
 	leaves := n.Leaves()

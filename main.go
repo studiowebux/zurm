@@ -3572,6 +3572,129 @@ func (g *Game) closePane(p *pane.Pane) {
 	}
 }
 
+// detachPaneToTab extracts the focused pane into a new tab.
+// Only works when the current tab has multiple panes.
+func (g *Game) detachPaneToTab() {
+	leaves := g.layout.Leaves()
+	if len(leaves) <= 1 {
+		g.flashStatus("Only one pane — nothing to detach")
+		return
+	}
+	g.zoomed = false
+
+	// Remember the pane to detach.
+	p := g.focused
+
+	// Focus the next pane before detaching.
+	nextFocus := g.layout.NextLeaf(p)
+
+	// Detach from the current layout (does NOT close the terminal).
+	newRoot := g.layout.Detach(p)
+	if newRoot == nil {
+		return
+	}
+	g.updateLayout(newRoot)
+	if nextFocus != nil && nextFocus != p {
+		g.setFocusNoHistory(nextFocus)
+	} else if len(g.layout.Leaves()) > 0 {
+		g.setFocusNoHistory(g.layout.Leaves()[0].Pane)
+	}
+	g.recomputeLayout()
+
+	// Create a new tab with the detached pane.
+	newTab := &tab.Tab{
+		Layout:  pane.NewLeaf(p),
+		Focused: p,
+		Title:   p.CustomName,
+	}
+	// Insert the new tab right after the active tab.
+	insertIdx := g.activeTab + 1
+	g.tabs = append(g.tabs, nil)
+	copy(g.tabs[insertIdx+1:], g.tabs[insertIdx:])
+	g.tabs[insertIdx] = newTab
+	g.switchTab(insertIdx)
+	setPaneHeaders(g.layout, g.font.CellH)
+	g.recomputeLayout()
+}
+
+// mergePaneToTab moves the focused pane into the target tab as a horizontal split.
+// If the current tab becomes empty, it is removed.
+func (g *Game) mergePaneToTab(targetIdx int) {
+	if targetIdx < 0 || targetIdx >= len(g.tabs) || targetIdx == g.activeTab {
+		return
+	}
+	g.zoomed = false
+
+	p := g.focused
+	srcIdx := g.activeTab
+	singlePane := len(g.layout.Leaves()) <= 1
+
+	if singlePane {
+		// Single-pane tab: move the whole tab's pane into the target.
+		// Detach the pane from its layout.
+		targetTab := g.tabs[targetIdx]
+		targetTab.Layout = targetTab.Layout.AttachH(targetTab.Focused, p)
+
+		// Remove the source tab (don't close the terminal).
+		g.tabs = append(g.tabs[:srcIdx], g.tabs[srcIdx+1:]...)
+		if len(g.tabs) == 0 {
+			return
+		}
+		// Adjust target index if source was before it.
+		if srcIdx < targetIdx {
+			targetIdx--
+		}
+		g.switchTabNoHistory(targetIdx)
+		// Recompute the target tab's layout.
+		setPaneHeaders(g.layout, g.font.CellH)
+		g.recomputeLayout()
+		g.setFocus(p)
+	} else {
+		// Multi-pane tab: detach focused pane and move it.
+		nextFocus := g.layout.NextLeaf(p)
+		newRoot := g.layout.Detach(p)
+		if newRoot == nil {
+			return
+		}
+		g.updateLayout(newRoot)
+		if nextFocus != nil && nextFocus != p {
+			g.setFocusNoHistory(nextFocus)
+		} else if len(g.layout.Leaves()) > 0 {
+			g.setFocusNoHistory(g.layout.Leaves()[0].Pane)
+		}
+		g.recomputeLayout()
+
+		// Attach into target tab.
+		targetTab := g.tabs[targetIdx]
+		targetTab.Layout = targetTab.Layout.AttachH(targetTab.Focused, p)
+		g.switchTab(targetIdx)
+		setPaneHeaders(g.layout, g.font.CellH)
+		g.recomputeLayout()
+		g.setFocus(p)
+	}
+	g.flashStatus("Pane moved to tab")
+}
+
+// mergePaneToNextTab moves the focused pane into the next tab.
+func (g *Game) mergePaneToNextTab() {
+	target := (g.activeTab + 1) % len(g.tabs)
+	if target == g.activeTab {
+		g.flashStatus("Only one tab")
+		return
+	}
+	g.mergePaneToTab(target)
+}
+
+// mergePaneToPrevTab moves the focused pane into the previous tab.
+func (g *Game) mergePaneToPrevTab() {
+	target := (g.activeTab - 1 + len(g.tabs)) % len(g.tabs)
+	if target == g.activeTab {
+		g.flashStatus("Only one tab")
+		return
+	}
+	g.mergePaneToTab(target)
+}
+
 // setFocus updates the focused pane in both Game and the active tab.
 func (g *Game) setFocus(p *pane.Pane) {
 	g.pushFocus()
@@ -3745,6 +3868,9 @@ func (g *Game) buildContextMenu() []help.MenuItem {
 				}
 			}},
 			{Label: "Rename Pane", Action: g.startRenamePane},
+			{Label: "Detach Pane to Tab", Action: g.detachPaneToTab},
+			{Label: "Move Pane to Next Tab", Action: g.mergePaneToNextTab},
+			{Label: "Move Pane to Previous Tab", Action: g.mergePaneToPrevTab},
 			{Separator: true},
 			{Label: "Focus Left", Shortcut: "Cmd+\u2190", Action: func() { g.focusDir(-1, 0) }},
 			{Label: "Focus Right", Shortcut: "Cmd+\u2192", Action: func() { g.focusDir(1, 0) }},
@@ -4564,6 +4690,9 @@ func (g *Game) buildPalette() {
 		func() { g.switchTab(1) },
 		func() { g.switchTab(2) },
 		func() { g.startNoteEdit(g.activeTab) },
+		g.detachPaneToTab,
+		g.mergePaneToNextTab,
+		g.mergePaneToPrevTab,
 		// Panes
 		g.splitH,
 		g.splitV,
