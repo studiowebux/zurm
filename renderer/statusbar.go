@@ -28,6 +28,7 @@ type StatusBarState struct {
 	RecordingDuration time.Duration // elapsed recording time
 	RecordingBytes    int64         // output MP4 file size on disk
 	RecordingMode     string        // "MP4"
+	Version           string        // app version, e.g. "v0.4.1"
 }
 
 // StatusBarHeight returns the physical pixel height of the status bar,
@@ -103,6 +104,9 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 			recText += " " + fmtFileSize(state.RecordingBytes)
 		}
 		rightSegs = append(rightSegs, seg{recText, color.RGBA{R: 220, G: 60, B: 60, A: 255}})
+	}
+	if state.Version != "" {
+		rightSegs = append(rightSegs, seg{state.Version, fg})
 	}
 
 	// Right column budget (margin + ? button + segments + separators between them).
