@@ -169,7 +169,7 @@ func (r *Renderer) StatusBarHeight() int {
 }
 
 // DrawAll renders the tab bar, all panes, status bar, and any active UI overlays onto screen.
-func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int, focused *pane.Pane, zoomed bool, menu *MenuState, overlay *OverlayState, confirm *ConfirmState, search *SearchState, statusBar *StatusBarState, tabSwitcher *TabSwitcherState, palette *PaletteState, paletteEntries []PaletteEntry, fileExplorer *FileExplorerState) {
+func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int, focused *pane.Pane, zoomed bool, menu *MenuState, overlay *OverlayState, confirm *ConfirmState, search *SearchState, statusBar *StatusBarState, tabSwitcher *TabSwitcherState, palette *PaletteState, paletteEntries []PaletteEntry, fileExplorer *FileExplorerState, tabSearch *TabSearchState) {
 	if r.offscreen == nil {
 		return
 	}
@@ -333,6 +333,9 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 
 	// Tab switcher overlay drawn above everything when open.
 	r.drawTabSwitcher(tabs, activeTab, tabSwitcher)
+
+	// Tab search overlay (Cmd+J) drawn above tab switcher.
+	r.drawTabSearch(tabs, activeTab, tabSearch)
 
 	// Command palette drawn above everything else when open.
 	if palette != nil && palette.Open {

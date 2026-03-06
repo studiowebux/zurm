@@ -72,6 +72,7 @@ close_confirm = true    # ask before closing a tab or pane
 [session]
 enabled           = true   # save/restore session on quit/launch
 restore_on_launch = true   # reopen tabs with last CWDs and titles
+auto_save         = false  # automatically save session on quit (set true to enable)
 
 [file_explorer]
 enabled   = true

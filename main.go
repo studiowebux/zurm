@@ -134,6 +134,15 @@ type Game struct {
 	// Tab switcher overlay state (pin-style).
 	tabSwitcherState renderer.TabSwitcherState
 
+	// Tab search overlay state (Cmd+J).
+	tabSearchState renderer.TabSearchState
+
+	// Key repeat state for tab search navigation (arrow keys).
+	tabSearchRepeatKey    ebiten.Key
+	tabSearchRepeatActive bool
+	tabSearchRepeatStart  time.Time
+	tabSearchRepeatLast   time.Time
+
 	// Command palette state (Cmd+P).
 	paletteState   renderer.PaletteState
 	paletteEntries []renderer.PaletteEntry
@@ -525,7 +534,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.renderer.HoveredURL = g.hoveredURL
 	g.renderer.DrawAll(screen, g.tabs, g.activeTab, g.focused, g.zoomed,
 		&g.menuState, &g.overlayState, &g.confirmState, &g.searchState, &g.statusBarState, &g.tabSwitcherState,
-		&g.paletteState, g.paletteEntries, &g.fileExplorerState)
+		&g.paletteState, g.paletteEntries, &g.fileExplorerState, &g.tabSearchState)
 	g.screenDirty = false
 	g.lastClockSec = time.Now().Unix()
 
@@ -602,6 +611,13 @@ func (g *Game) handleInput() {
 	if g.tabSwitcherState.Open {
 		g.screenDirty = true
 		g.handleTabSwitcherInput()
+		return
+	}
+
+	// When the tab search is open, route input to tab search handling.
+	if g.tabSearchState.Open {
+		g.screenDirty = true
+		g.handleTabSearchInput()
 		return
 	}
 
@@ -776,6 +792,10 @@ func (g *Game) handleInput() {
 				if g.cfg.Help.Enabled {
 					g.openPalette()
 				}
+
+			case meta && key == ebiten.KeyJ:
+				// Cmd+J — open tab search.
+				g.openTabSearch()
 
 			case meta && key == ebiten.KeyF:
 				// Cmd+F — open in-buffer search.
@@ -2293,6 +2313,16 @@ func (g *Game) handleMouse() {
 		return
 	}
 
+	// Tab search dismisses on any click.
+	if g.tabSearchState.Open {
+		if leftPressed && !leftWas {
+			g.closeTabSearch()
+		}
+		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
+		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
+		return
+	}
+
 	// Context menu takes priority: route all mouse events to menu handling.
 	if g.menuState.Open {
 		g.updateMenuHover(mx, my)
@@ -3171,6 +3201,129 @@ func (g *Game) handleTabSwitcherInput() {
 	g.screenDirty = true
 }
 
+// --- Tab search (Cmd+J) ---
+
+// openTabSearch opens the tab search overlay, closing conflicting surfaces.
+func (g *Game) openTabSearch() {
+	g.tabSearchState = renderer.TabSearchState{Open: true}
+	g.tabSwitcherState = renderer.TabSwitcherState{}
+	g.paletteState = renderer.PaletteState{}
+	g.overlayState = renderer.OverlayState{}
+	g.closeMenu()
+	g.screenDirty = true
+}
+
+// closeTabSearch closes the tab search overlay.
+func (g *Game) closeTabSearch() {
+	g.tabSearchState = renderer.TabSearchState{}
+	g.tabSearchRepeatActive = false
+	g.screenDirty = true
+}
+
+// updateTabSearchRepeat handles key repeat for arrow keys in the tab search overlay.
+func (g *Game) updateTabSearchRepeat(key ebiten.Key, now time.Time) bool {
+	pressed := ebiten.IsKeyPressed(key)
+	wasPressed := g.prevKeys[key]
+	g.prevKeys[key] = pressed
+
+	keyRepeatDelay := time.Duration(g.cfg.Keyboard.RepeatDelayMs) * time.Millisecond
+	keyRepeatInterval := time.Duration(g.cfg.Keyboard.RepeatIntervalMs) * time.Millisecond
+
+	if pressed && !wasPressed {
+		if g.tabSearchRepeatActive && g.tabSearchRepeatKey == key {
+			g.tabSearchRepeatActive = false
+		}
+		g.tabSearchRepeatKey = key
+		g.tabSearchRepeatActive = true
+		g.tabSearchRepeatStart = now
+		g.tabSearchRepeatLast = now
+		return true
+	}
+	if g.tabSearchRepeatActive && g.tabSearchRepeatKey == key &&
+		now.Sub(g.tabSearchRepeatStart) >= keyRepeatDelay &&
+		now.Sub(g.tabSearchRepeatLast) >= keyRepeatInterval {
+		g.tabSearchRepeatLast = now
+		return true
+	}
+	return false
+}
+
+// handleTabSearchInput processes keyboard input while the tab search overlay is open.
+func (g *Game) handleTabSearchInput() {
+	now := time.Now()
+
+	filtered := renderer.FilterTabSearch(g.tabs, g.tabSearchState.Query)
+
+	if g.updateTabSearchRepeat(ebiten.KeyArrowUp, now) && g.tabSearchState.Cursor > 0 {
+		g.tabSearchState.Cursor--
+	}
+	if g.updateTabSearchRepeat(ebiten.KeyArrowDown, now) && g.tabSearchState.Cursor < len(filtered)-1 {
+		g.tabSearchState.Cursor++
+	}
+
+	// ESC: clear query if non-empty, otherwise close.
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		if g.tabSearchState.Query != "" {
+			g.tabSearchState.Query = ""
+			g.tabSearchState.Cursor = 0
+		} else {
+			g.closeTabSearch()
+		}
+		g.prevKeys[ebiten.KeyEscape] = true
+		g.screenDirty = true
+		return
+	}
+
+	// Cmd+J toggles off.
+	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	if meta && inpututil.IsKeyJustPressed(ebiten.KeyJ) {
+		g.closeTabSearch()
+		g.prevKeys[ebiten.KeyJ] = true
+		return
+	}
+
+	keys := []ebiten.Key{ebiten.KeyEnter, ebiten.KeyNumpadEnter, ebiten.KeyBackspace}
+	for _, key := range keys {
+		pressed := ebiten.IsKeyPressed(key)
+		wasPressed := g.prevKeys[key]
+		if pressed && !wasPressed {
+			switch key {
+			case ebiten.KeyEnter, ebiten.KeyNumpadEnter:
+				if len(filtered) > 0 && g.tabSearchState.Cursor < len(filtered) {
+					g.switchTab(filtered[g.tabSearchState.Cursor].OrigIdx)
+					g.closeTabSearch()
+				}
+				g.prevKeys[key] = pressed
+				return
+			case ebiten.KeyBackspace:
+				if g.tabSearchState.Query != "" {
+					r := []rune(g.tabSearchState.Query)
+					if ebiten.IsKeyPressed(ebiten.KeyAlt) {
+						// Alt+Backspace: delete word.
+						ti := &TextInput{Text: g.tabSearchState.Query}
+						ti.DeleteWord()
+						g.tabSearchState.Query = ti.Text
+					} else {
+						g.tabSearchState.Query = string(r[:len(r)-1])
+					}
+					g.tabSearchState.Cursor = 0
+				}
+			}
+		}
+		g.prevKeys[key] = pressed
+	}
+
+	// Typing — append printable runes.
+	for _, r := range ebiten.AppendInputChars(nil) {
+		if r >= 32 {
+			g.tabSearchState.Query += string(r)
+			g.tabSearchState.Cursor = 0
+		}
+	}
+
+	g.screenDirty = true
+}
+
 // --- Pane management ---
 
 // splitH splits the focused pane horizontally (Cmd+D).
@@ -4001,6 +4154,8 @@ func (g *Game) buildPalette() {
 		func() { g.pinMode = true; g.statusBarState.PinMode = true },
 		// Tab Switcher
 		g.openTabSwitcher,
+		// Tab Search
+		g.openTabSearch,
 		// Blocks
 		func() {
 			g.blocksEnabled = !g.blocksEnabled
