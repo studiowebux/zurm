@@ -16,6 +16,7 @@ var Defaults = Config{
 		Foreground: "#E8E8F0",
 		Cursor:     "#A855F7",
 		Border:     "#1C1C2E",
+		Separator:  "#555570",
 		// Purple-accent dark palette
 		Black:         "#555570",
 		Red:           "#F87171",
@@ -42,12 +43,14 @@ var Defaults = Config{
 		Lines: 10000,
 	},
 	StatusBar: StatusBarConfig{
-		Enabled:          true,
-		ShowGit:          true,
-		ShowCwd:          true,
-		ShowClock:        false,
-		ShowProcess:      true,
-		SegmentSeparator: " · ",
+		Enabled:           true,
+		ShowGit:           true,
+		ShowCwd:           true,
+		ShowClock:         false,
+		ShowProcess:       true,
+		SegmentSeparator:  " · ",
+		SeparatorHeightPx: 1,
+		PaddingPx:         4,
 	},
 	Keyboard: KeyboardConfig{
 		LeftOptionAsMeta: true,

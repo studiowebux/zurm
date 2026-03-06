@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-03-06
+
+### Added
+
+- Configurable `separator` color in `[colors]` (shared by tab bar and status bar)
+- Configurable `separator_height_px` and `padding_px` in `[status_bar]`
+
+### Changed
+
+- Tab bar uses darkened background with visible divider lines between tabs
+- Tab bar has 1px bottom border separating it from pane content
+- Status bar separator and padding are now configurable with sensible defaults
+
+### Fixed
+
+- Help button no longer covers the status bar top separator line
+
 ## [0.8.1] - 2026-03-06
 
 ### Fixed

@@ -71,6 +71,14 @@ func deriveUIColors(cfg *config.Config) UIColors {
 	}
 }
 
+// separatorColor returns the configured separator color, falling back to BrightBlack.
+func (r *Renderer) separatorColor() color.RGBA {
+	if r.cfg.Colors.Separator != "" {
+		return config.ParseHexColor(r.cfg.Colors.Separator)
+	}
+	return config.ParseHexColor(r.cfg.Colors.BrightBlack)
+}
+
 // brighten returns a lighter version of c (scales RGB by 130%, clamped at 255).
 func brighten(c color.RGBA) color.RGBA {
 	scale := func(v uint8) uint8 {

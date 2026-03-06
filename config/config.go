@@ -55,13 +55,15 @@ repeat_delay_ms     = 500    # ms before key repeat starts
 repeat_interval_ms  = 50     # ms between repeated key events (~20/sec)
 
 [status_bar]
-enabled       = true
-show_cwd      = true
-show_git      = true
-show_clock         = false     # forces a redraw every second; enable if you want it
-show_process       = true      # foreground process name (polls every 1 s via TIOCGPGRP)
-branch_prefix      = ""        # set to " " if you have a Nerd Font patched JetBrains Mono
-segment_separator  = " · "    # separator drawn between status bar segments
+enabled              = true
+show_cwd             = true
+show_git             = true
+show_clock           = false   # forces a redraw every second; enable if you want it
+show_process         = true    # foreground process name (polls every 1 s via TIOCGPGRP)
+branch_prefix        = ""      # set to " " if you have a Nerd Font patched JetBrains Mono
+segment_separator    = " · "   # separator drawn between status bar segments
+separator_height_px  = 1       # height of top border line (0 = hidden)
+padding_px           = 4       # top padding above text (visual spacing from content)
 
 [help]
 enabled       = true
@@ -97,6 +99,7 @@ background = "#0F0F18"
 foreground = "#E8E8F0"
 cursor     = "#A855F7"
 border     = "#1C1C2E"
+separator  = "#555570"   # shared separator line color for tab bar and status bar
 
 # Purple-accent dark 16-color ANSI palette
 black          = "#555570"
@@ -134,6 +137,7 @@ type ColorConfig struct {
 	Foreground    string `toml:"foreground"`
 	Cursor        string `toml:"cursor"`
 	Border        string `toml:"border"`
+	Separator     string `toml:"separator"`
 	Black         string `toml:"black"`
 	Red           string `toml:"red"`
 	Green         string `toml:"green"`
@@ -162,13 +166,15 @@ type ScrollbackConfig struct {
 }
 
 type StatusBarConfig struct {
-	Enabled          bool   `toml:"enabled"`
-	ShowGit          bool   `toml:"show_git"`
-	ShowCwd          bool   `toml:"show_cwd"`
-	ShowClock        bool   `toml:"show_clock"`
-	ShowProcess      bool   `toml:"show_process"`
-	BranchPrefix     string `toml:"branch_prefix"`      // e.g. " " with a Nerd Font
-	SegmentSeparator string `toml:"segment_separator"`  // e.g. " · " or " | "
+	Enabled            bool   `toml:"enabled"`
+	ShowGit            bool   `toml:"show_git"`
+	ShowCwd            bool   `toml:"show_cwd"`
+	ShowClock          bool   `toml:"show_clock"`
+	ShowProcess        bool   `toml:"show_process"`
+	BranchPrefix       string `toml:"branch_prefix"`         // e.g. " " with a Nerd Font
+	SegmentSeparator   string `toml:"segment_separator"`     // e.g. " · " or " | "
+	SeparatorHeightPx  int    `toml:"separator_height_px"`   // height of top border line
+	PaddingPx          int    `toml:"padding_px"`            // top padding above text
 }
 
 type KeyboardConfig struct {

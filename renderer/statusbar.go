@@ -37,7 +37,9 @@ func StatusBarHeight(font *FontRenderer, cfg *config.Config) int {
 	if !cfg.StatusBar.Enabled {
 		return 0
 	}
-	return font.CellH + 4
+	padding := cfg.StatusBar.PaddingPx
+	sepH := cfg.StatusBar.SeparatorHeightPx
+	return font.CellH + 4 + padding + sepH
 }
 
 // drawStatusBar renders the status bar at the bottom of the offscreen image.
@@ -54,12 +56,17 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 	barBg := darken(config.ParseHexColor(r.cfg.Colors.Background))
 	r.offscreen.SubImage(barRect).(*ebiten.Image).Fill(barBg)
 
-	// 1px separator line at the top of the bar.
-	r.offscreen.SubImage(image.Rect(0, physH-h, physW, physH-h+1)).(*ebiten.Image).Fill(r.borderColor)
+	// Separator line at the top of the bar.
+	sepH := r.cfg.StatusBar.SeparatorHeightPx
+	if sepH > 0 {
+		sepColor := r.separatorColor()
+		r.offscreen.SubImage(image.Rect(0, physH-h, physW, physH-h+sepH)).(*ebiten.Image).Fill(sepColor)
+	}
 
 	fg := config.ParseHexColor(r.cfg.Colors.BrightBlack)
 	accentFg := config.ParseHexColor(r.cfg.Colors.Foreground)
-	textY := physH - h + (h-r.font.CellH)/2
+	padding := r.cfg.StatusBar.PaddingPx
+	textY := physH - h + sepH + padding + (h-sepH-padding-r.font.CellH)/2
 
 	totalCols := physW / r.font.CellW
 
@@ -176,10 +183,10 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 		}
 	}
 
-	// ? help button at the far right edge.
+	// ? help button at the far right edge (below the separator line).
 	helpBtnW := r.font.CellW * 3 // " ? " — one cell padding each side
 	helpBtnX := physW - helpBtnW
-	helpBtnRect := image.Rect(helpBtnX, physH-h, physW, physH)
+	helpBtnRect := image.Rect(helpBtnX, physH-h+sepH, physW, physH)
 	r.offscreen.SubImage(helpBtnRect).(*ebiten.Image).Fill(darken(barBg))
 	r.font.DrawString(r.offscreen, "?", helpBtnX+r.font.CellW, textY, accentFg)
 	if state != nil {
