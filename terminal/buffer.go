@@ -538,6 +538,14 @@ func (sb *ScreenBuffer) DisableAltScreen() {
 	sb.altWrapped = nil
 	sb.CursorRow = sb.savedCursorRow
 	sb.CursorCol = sb.savedCursorCol
+	// Clamp cursor after restore — a resize while alt screen was active
+	// may have changed dimensions since the cursor was saved.
+	if sb.CursorRow >= sb.Rows {
+		sb.CursorRow = sb.Rows - 1
+	}
+	if sb.CursorCol >= sb.Cols {
+		sb.CursorCol = sb.Cols - 1
+	}
 	sb.ScrollTop = 0
 	sb.ScrollBottom = sb.Rows - 1
 	for r := range sb.dirty {
@@ -586,6 +594,19 @@ func (sb *ScreenBuffer) Resize(rows, cols int) {
 	sb.wrapped = make([]bool, rows)
 	for r := 0; r < copyRows; r++ {
 		sb.wrapped[r] = oldWrapped[r]
+	}
+	// Resize the saved alt-screen wrapped slice so DisableAltScreen
+	// restores a correctly sized slice.
+	if sb.altWrapped != nil {
+		oldAltW := sb.altWrapped
+		sb.altWrapped = make([]bool, rows)
+		altCopy := copyRows
+		if len(oldAltW) < altCopy {
+			altCopy = len(oldAltW)
+		}
+		for r := 0; r < altCopy; r++ {
+			sb.altWrapped[r] = oldAltW[r]
+		}
 	}
 	for r := range sb.dirty {
 		sb.dirty[r] = true
