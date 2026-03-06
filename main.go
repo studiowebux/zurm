@@ -86,6 +86,10 @@ type Game struct {
 	// Selection drag state.
 	selDragging bool
 
+	// URL hover state — detected URLs in the focused pane's visible buffer.
+	hoveredURL *terminal.URLMatch // URL under the cursor, nil if none
+	urlMatches []terminal.URLMatch // cached URL matches for the focused pane
+
 	// PTY mouse motion tracking for modes 1002/1003.
 	lastMouseCol int // last col sent to PTY (1-based)
 	lastMouseRow int // last row sent to PTY (1-based)
@@ -489,6 +493,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// our snapshot and triggers a redraw on the next frame.
 	g.lastPtySeq = terminal.RenderSeq()
 
+	g.renderer.HoveredURL = g.hoveredURL
 	g.renderer.DrawAll(screen, g.tabs, g.activeTab, g.focused, g.zoomed,
 		&g.menuState, &g.overlayState, &g.confirmState, &g.searchState, &g.statusBarState, &g.tabSwitcherState,
 		&g.paletteState, g.paletteEntries, &g.fileExplorerState)
@@ -2109,6 +2114,12 @@ func (g *Game) handleMouse() {
 	if g.blocksEnabled && (mx != g.prevMX || my != g.prevMY) {
 		g.screenDirty = true
 	}
+
+	// URL hover detection — update when cursor moves over the focused pane.
+	if mx != g.prevMX || my != g.prevMY {
+		g.updateURLHover(mx, my, pad)
+	}
+
 	g.prevMX = mx
 	g.prevMY = my
 	_, scrollY := ebiten.Wheel()
@@ -2339,6 +2350,9 @@ func (g *Game) handleMouse() {
 		maxCol := g.focused.Term.Buf.Cols - 1
 		g.focused.Term.Buf.RUnlock()
 
+		// Save unclamped row for auto-scroll during selection drag.
+		rawRow := row
+
 		if col < 0 {
 			col = 0
 		} else if col > maxCol {
@@ -2348,6 +2362,16 @@ func (g *Game) handleMouse() {
 			row = 0
 		} else if row > maxRow {
 			row = maxRow
+		}
+
+		// Cmd+click opens the URL under the cursor in the default browser.
+		if leftPressed && !leftWas && ebiten.IsKeyPressed(ebiten.KeyMeta) {
+			if g.hoveredURL != nil {
+				exec.Command("open", g.hoveredURL.Text).Start() // #nosec G204 — opens user-visible URL in default browser
+				g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
+				g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
+				return
+			}
 		}
 
 		if leftPressed && !leftWas {
@@ -2387,6 +2411,21 @@ func (g *Game) handleMouse() {
 			g.focused.Term.Buf.Unlock()
 		} else if leftPressed && leftWas && g.selDragging {
 			g.focused.Term.Buf.Lock()
+			// Auto-scroll when dragging past the pane edges.
+			if rawRow < 0 {
+				vo := g.focused.Term.Buf.ViewOffset + 1
+				maxVO := g.focused.Term.Buf.ScrollbackLen()
+				if vo > maxVO {
+					vo = maxVO
+				}
+				g.focused.Term.Buf.SetViewOffset(vo)
+			} else if rawRow > maxRow {
+				vo := g.focused.Term.Buf.ViewOffset - 1
+				if vo < 0 {
+					vo = 0
+				}
+				g.focused.Term.Buf.SetViewOffset(vo)
+			}
 			g.focused.Term.Buf.Selection.EndRow = row
 			g.focused.Term.Buf.Selection.EndCol = col
 			g.focused.Term.Buf.BumpRenderGen()
@@ -3058,6 +3097,8 @@ func (g *Game) setFocusNoHistory(p *pane.Pane) {
 	g.focused = p
 	g.tabs[g.activeTab].Focused = p
 	g.selDragging = false
+	g.hoveredURL = nil
+	g.urlMatches = nil
 	g.scrollAccum = 0
 	g.mouseHeldBtn = -1
 	g.lastMouseCol = 0
@@ -3982,6 +4023,35 @@ func deserializePaneLayout(cfg *config.Config, rect image.Rectangle, cellW, cell
 
 	default:
 		return nil, fmt.Errorf("unknown layout kind: %s", layout.Kind)
+	}
+}
+
+// updateURLHover rescans URLs in the focused pane and updates hover state.
+func (g *Game) updateURLHover(mx, my, pad int) {
+	if g.focused == nil {
+		return
+	}
+	// Convert pixel to cell coordinates within the focused pane.
+	col := (mx - g.focused.Rect.Min.X - pad) / g.font.CellW
+	row := (my - g.focused.Rect.Min.Y - pad) / g.font.CellH
+	if col < 0 || row < 0 || col >= g.focused.Cols || row >= g.focused.Rows {
+		if g.hoveredURL != nil {
+			g.hoveredURL = nil
+			g.screenDirty = true
+		}
+		return
+	}
+
+	// Rescan URLs from the buffer.
+	g.focused.Term.Buf.RLock()
+	g.urlMatches = g.focused.Term.Buf.DetectURLs()
+	g.focused.Term.Buf.RUnlock()
+
+	hit := terminal.URLAt(g.urlMatches, row, col)
+	if hit != g.hoveredURL {
+		// Pointer comparison is sufficient — URLAt returns a pointer into urlMatches.
+		g.hoveredURL = hit
+		g.screenDirty = true
 	}
 }
 

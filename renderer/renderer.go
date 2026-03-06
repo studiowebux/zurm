@@ -18,6 +18,7 @@ type paneCacheEntry struct {
 	lastViewOffset int
 	lastCursorRow  int
 	lastCursorCol  int
+	hadURLHover    bool // true if URL hover was active on last draw
 }
 
 // blockSnap holds a point-in-time copy of block-related buffer state.
@@ -81,6 +82,10 @@ type Renderer struct {
 	// ui holds the derived UI chrome colors (panels, menus, overlays).
 	// Computed from cfg in NewRenderer so no draw function needs hardcoded colors.
 	ui UIColors
+
+	// HoveredURL is the URL currently under the cursor, if any.
+	// Set by main.go before DrawAll; read by DrawPane to render hover underline.
+	HoveredURL *terminal.URLMatch
 }
 
 // CopyTarget identifies which part of a block to copy.
@@ -237,11 +242,14 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 
 			// Cache check: only actual content changes (gen, cursor, viewOffset) trigger
 			// DrawPane. Block hover updates are handled by the blocks layer below and
-			// never require a full pane redraw.
+			// never require a full pane redraw. URL hover forces a redraw on the
+			// focused pane when hover state changes (appears or disappears).
+			hasURLHover := isFocused && r.HoveredURL != nil
 			unchanged := gen == cache.lastRenderGen &&
 				viewOff == cache.lastViewOffset &&
 				curRow == cache.lastCursorRow &&
-				curCol == cache.lastCursorCol
+				curCol == cache.lastCursorCol &&
+				hasURLHover == cache.hadURLHover
 
 			if !unchanged {
 				var paneSearch *SearchState
@@ -253,6 +261,7 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 				cache.lastViewOffset = viewOff
 				cache.lastCursorRow = curRow
 				cache.lastCursorCol = curCol
+				cache.hadURLHover = hasURLHover
 			}
 			p.Term.Buf.RUnlock()
 
@@ -491,6 +500,13 @@ func (r *Renderer) DrawPane(buf *terminal.ScreenBuffer, cur *terminal.Cursor,
 				}
 			}
 
+			// URL hover underline on the focused pane.
+			underline := cell.Underline
+			if r.HoveredURL != nil && isFocused && r.HoveredURL.ContainsCell(row, col) {
+				underline = true
+				fg = r.ui.Accent
+			}
+
 			x := originX + col*cellW + pad
 			y := originY + row*cellH + pad
 
@@ -499,7 +515,7 @@ func (r *Renderer) DrawPane(buf *terminal.ScreenBuffer, cur *terminal.Cursor,
 				ch = ' '
 			}
 
-			r.font.DrawGlyph(r.offscreen, ch, x, y, fg, cbg, cell.Bold, cell.Underline)
+			r.font.DrawGlyph(r.offscreen, ch, x, y, fg, cbg, cell.Bold, underline)
 		}
 	}
 
