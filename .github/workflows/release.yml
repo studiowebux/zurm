@@ -43,15 +43,20 @@ jobs:
           cp dist/zurm dist/zurm.app/Contents/MacOS/zurm
           cp macos/Info.plist dist/zurm.app/Contents/Info.plist
           cp assets/icons/zurm.icns dist/zurm.app/Contents/Resources/zurm.icns
-          sed -i '' "s/<string>0.3.2</<string>${VERSION}</" dist/zurm.app/Contents/Info.plist
-          cd dist && zip -r zurm-macos-arm64.zip zurm.app
+          sed -i '' "s/__VERSION__/${VERSION}/" dist/zurm.app/Contents/Info.plist
+          sed -i '' "s/__BUILD__/${VERSION}/" dist/zurm.app/Contents/Info.plist
+          codesign --sign - --force --deep dist/zurm.app
+
+      - name: Create DMG
+        run: |
+          hdiutil create -volname "Zurm" -srcfolder dist/zurm.app -ov -format UDZO dist/zurm-macos-arm64.dmg
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: binaries
           path: |
-            dist/zurm-macos-arm64.zip
+            dist/zurm-macos-arm64.dmg
             dist/zurm
           retention-days: 7
 
@@ -76,7 +81,7 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            dist/zurm-macos-arm64.zip
+            dist/zurm-macos-arm64.dmg
             dist/zurm
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

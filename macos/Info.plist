@@ -10,9 +10,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.studiowebux.zurm</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>__BUILD__</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.3.2</string>
+    <string>__VERSION__</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
@@ -54,6 +54,10 @@
     <key>NSAppearance</key>
     <string>NSAppearanceNameDarkAqua</string>
     <key>NSRequiresAquaSystemAppearance</key>
+    <false/>
+
+    <!-- Multiple instances -->
+    <key>LSMultipleInstancesProhibited</key>
     <false/>
 
     <!-- Dock & window behavior -->
