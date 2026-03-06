@@ -29,6 +29,7 @@ type StatusBarState struct {
 	RecordingBytes    int64         // output MP4 file size on disk
 	RecordingMode     string        // "MP4"
 	Version           string        // app version, e.g. "v0.4.1"
+	TabNote           string        // active tab's annotation, shown as a middle segment
 }
 
 // StatusBarHeight returns the physical pixel height of the status bar,
@@ -132,6 +133,9 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 	}
 	if r.cfg.StatusBar.ShowProcess && state.ForegroundProc != "" {
 		midSegs = append(midSegs, seg{state.ForegroundProc, accentFg})
+	}
+	if state.TabNote != "" {
+		midSegs = append(midSegs, seg{"[" + state.TabNote + "]", fg})
 	}
 
 	midCols := 0

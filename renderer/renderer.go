@@ -428,15 +428,21 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int) {
 			r.offscreen.SubImage(image.Rect(x+tabW-1, 0, x+tabW, tabBarH)).(*ebiten.Image).Fill(divider)
 		}
 
-		// Build the display string: rename input if active, otherwise the tab title.
+		// Build the display string: rename/note input if active, otherwise the tab title.
 		// Pinned tabs are prefixed with ·N to indicate their fixed slot.
+		// Tabs with notes show a trailing * indicator.
 		var title string
-		if t.Renaming {
+		if t.Noting {
+			title = "Note: " + t.NoteText + "_"
+		} else if t.Renaming {
 			title = t.RenameText + "_"
 		} else {
 			title = t.DisplayTitle(i)
 			if t.PinnedSlot != 0 {
 				title = fmt.Sprintf("\u00b7%c %s", t.PinnedSlot, title)
+			}
+			if t.Note != "" {
+				title = title + " *"
 			}
 		}
 		maxCols := (tabW - r.font.CellW) / r.font.CellW
