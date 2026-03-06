@@ -826,22 +826,3 @@ func parseParams(s string) []int {
 	return out
 }
 
-// xterm256 is a fallback for the first 16 xterm colors when palette is unavailable.
-var xterm256 = [16]color.RGBA{
-	{0, 0, 0, 255},       // 0  black
-	{128, 0, 0, 255},     // 1  red
-	{0, 128, 0, 255},     // 2  green
-	{128, 128, 0, 255},   // 3  yellow
-	{0, 0, 128, 255},     // 4  blue
-	{128, 0, 128, 255},   // 5  magenta
-	{0, 128, 128, 255},   // 6  cyan
-	{192, 192, 192, 255}, // 7  white
-	{128, 128, 128, 255}, // 8  bright black
-	{255, 0, 0, 255},     // 9  bright red
-	{0, 255, 0, 255},     // 10 bright green
-	{255, 255, 0, 255},   // 11 bright yellow
-	{0, 0, 255, 255},     // 12 bright blue
-	{255, 0, 255, 255},   // 13 bright magenta
-	{0, 255, 255, 255},   // 14 bright cyan
-	{255, 255, 255, 255}, // 15 bright white
-}
