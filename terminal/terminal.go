@@ -236,6 +236,18 @@ func (t *Terminal) SendClipboardResponses() {
 	}
 }
 
+// UpdateColors propagates new color settings to the buffer and parser.
+// Called during config hot-reload.
+func (t *Terminal) UpdateColors(cfg *config.Config) {
+	fg := config.ParseHexColor(cfg.Colors.Foreground)
+	bg := config.ParseHexColor(cfg.Colors.Background)
+	palette := cfg.Palette()
+	t.Buf.Lock()
+	t.Buf.UpdateColors(fg, bg, palette)
+	t.parser.SetPalette(palette)
+	t.Buf.Unlock()
+}
+
 // Resize resizes both the screen buffer and PTY.
 func (t *Terminal) Resize(cols, rows int) {
 	t.Buf.Lock()

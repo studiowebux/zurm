@@ -813,6 +813,10 @@ func (g *Game) handleInput() {
 					g.flashStatus("Command blocks: off")
 				}
 
+			case meta && key == ebiten.KeyComma:
+				// Cmd+, — reload config.
+				g.reloadConfig()
+
 			case meta && key == ebiten.KeyE:
 				// Cmd+E — toggle file explorer.
 				if g.fileExplorerState.Open {
@@ -4094,6 +4098,93 @@ func (g *Game) closePalette() {
 	g.screenDirty = true
 }
 
+// reloadConfig re-reads config.toml and propagates all changes at runtime.
+func (g *Game) reloadConfig() {
+	newCfg, meta, err := config.LoadWithMeta()
+	if err != nil {
+		g.flashStatus("Config reload failed: " + err.Error())
+		return
+	}
+	config.ApplyTheme(newCfg, meta)
+
+	oldFontSize := g.cfg.Font.Size
+	oldFontFile := g.cfg.Font.File
+	g.cfg = newCfg
+
+	// Propagate colors to renderer and all terminal panes.
+	g.renderer.ReloadColors(newCfg)
+	for _, t := range g.tabs {
+		for _, leaf := range t.Layout.Leaves() {
+			leaf.Pane.Term.UpdateColors(newCfg)
+		}
+	}
+
+	// Font reload — skip if recording is active (dimensions would become stale).
+	if (newCfg.Font.Size != oldFontSize || newCfg.Font.File != oldFontFile) && g.recorder != nil && !g.recorder.Active() {
+		fontBytes := jetbrainsMono
+		if newCfg.Font.File != "" {
+			if data, loadErr := os.ReadFile(newCfg.Font.File); loadErr == nil {
+				fontBytes = data
+			}
+		}
+		fontR, fontErr := renderer.NewFontRenderer(fontBytes, newCfg.Font.Size*g.dpi)
+		if fontErr == nil {
+			g.font = fontR
+			g.renderer.SetFont(fontR)
+			g.renderer.SetSize(int(float64(g.winW)*g.dpi), int(float64(g.winH)*g.dpi))
+			// Recompute all tab layouts with new cell dimensions.
+			for _, t := range g.tabs {
+				g.layout = t.Layout
+				g.recomputeLayout()
+			}
+			// Restore active tab layout pointer.
+			g.layout = g.tabs[g.activeTab].Layout
+		}
+	}
+
+	// Update runtime settings.
+	if newCfg.Keyboard.RepeatDelayMs > 0 {
+		keyRepeatDelay = time.Duration(newCfg.Keyboard.RepeatDelayMs) * time.Millisecond
+	}
+	if newCfg.Keyboard.RepeatIntervalMs > 0 {
+		keyRepeatInterval = time.Duration(newCfg.Keyboard.RepeatIntervalMs) * time.Millisecond
+	}
+	ebiten.SetTPS(newCfg.Performance.TPS)
+	g.blocksEnabled = newCfg.Blocks.Enabled
+	g.renderer.BlocksEnabled = g.blocksEnabled
+
+	// Rebuild palette to pick up new theme files.
+	g.buildPalette()
+
+	g.screenDirty = true
+	g.flashStatus("Config reloaded")
+}
+
+// switchTheme applies a theme by name at runtime.
+func (g *Game) switchTheme(name string) {
+	themeColors, err := config.LoadTheme(name)
+	if err != nil {
+		g.flashStatus("Theme not found: " + name)
+		return
+	}
+
+	// Re-read config meta so user-explicit colors still override the theme.
+	_, meta, _ := config.LoadWithMeta()
+	g.cfg.Theme.Name = name
+	g.cfg.Colors = config.MergeColorsWithMeta(themeColors, g.cfg.Colors, meta)
+
+	// Propagate.
+	g.renderer.ReloadColors(g.cfg)
+	for _, t := range g.tabs {
+		for _, leaf := range t.Layout.Leaves() {
+			leaf.Pane.Term.UpdateColors(g.cfg)
+		}
+	}
+
+	g.screenDirty = true
+	g.flashStatus("Theme: " + name)
+}
+
 // buildPalette constructs the parallel entries and actions slices for the command palette.
 // Called once after the Game is initialized so actions can reference g methods.
 func (g *Game) buildPalette() {
@@ -4177,8 +4268,17 @@ func (g *Game) buildPalette() {
 		// Help
 		g.toggleOverlay,
 		g.openPalette,
+		// Config
+		g.reloadConfig,
 		// App
 		func() { os.Exit(0) },
+	}
+
+	// Append dynamic theme entries from discovered theme files.
+	for _, name := range config.ListThemes() {
+		themeName := name // capture for closure
+		entries = append(entries, renderer.PaletteEntry{Name: "Theme: " + themeName, Shortcut: ""})
+		actions = append(actions, func() { g.switchTheme(themeName) })
 	}
 
 	g.paletteEntries = entries

@@ -626,6 +626,18 @@ func (sb *ScreenBuffer) Resize(rows, cols int) {
 	}
 }
 
+// UpdateColors replaces the default FG/BG, palette, and SGR defaults.
+// Marks all rows dirty so the next render reflects the new colors.
+// Caller must hold write lock.
+func (sb *ScreenBuffer) UpdateColors(fg, bg color.RGBA, palette [16]color.RGBA) {
+	sb.DefaultFG = fg
+	sb.DefaultBG = bg
+	sb.Palette = palette
+	sb.SGR.FG = fg
+	sb.SGR.BG = bg
+	sb.MarkAllDirty()
+}
+
 // MarkAllDirty marks every row as dirty.
 func (sb *ScreenBuffer) MarkAllDirty() {
 	for i := range sb.dirty {
