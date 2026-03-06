@@ -361,12 +361,19 @@ func (sb *ScreenBuffer) EraseInDisplay(mode int) {
 		}
 		clearRowTo(cells[sb.CursorRow], 0, sb.CursorCol+1, fg, bg)
 		sb.dirty[sb.CursorRow] = true
-	case 2, 3: // erase all
+	case 2: // erase all visible cells
 		for r := 0; r < sb.Rows; r++ {
 			cells[r] = blankRow(sb.Cols, fg, bg)
 			sb.dirty[r] = true
 			sb.wrapped[r] = false
 		}
+	case 3: // erase all visible cells + clear scrollback
+		for r := 0; r < sb.Rows; r++ {
+			cells[r] = blankRow(sb.Cols, fg, bg)
+			sb.dirty[r] = true
+			sb.wrapped[r] = false
+		}
+		sb.ClearScrollback()
 	}
 }
 

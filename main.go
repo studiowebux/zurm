@@ -473,6 +473,26 @@ func (g *Game) needsRender() bool {
 // SetScreenClearedEveryFrame(false) means the screen retains its content between frames,
 // so we only need to draw when something actually changed.
 func (g *Game) Draw(screen *ebiten.Image) {
+	// Recording: capture frame for FFMPEG pipe when active.
+	// Runs BEFORE needsRender() so that idle frames (no PTY output, no input)
+	// still produce duplicate frames at 30fps. The screen retains its content
+	// between frames (SetScreenClearedEveryFrame(false)), so ReadPixels returns
+	// the last painted content even when nothing new was drawn.
+	if g.recorder.Active() {
+		now := time.Now()
+		if now.Sub(g.recLastFrame) >= 33*time.Millisecond {
+			g.recLastFrame = now
+			needed := screen.Bounds().Dx() * screen.Bounds().Dy() * 4
+			if len(g.recBuf) != needed {
+				g.recBuf = make([]byte, needed)
+			}
+			screen.ReadPixels(g.recBuf)
+			frame := make([]byte, needed)
+			copy(frame, g.recBuf)
+			go g.recorder.AddFrame(frame)
+		}
+	}
+
 	if !g.needsRender() {
 		return
 	}
@@ -516,25 +536,6 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			}
 			g.screenDirty = true
 		}()
-	}
-
-	// Recording: capture frame for FFMPEG pipe when active.
-	// Throttled to 30fps and reuses a single pixel buffer to avoid GC pressure.
-	if g.recorder.Active() {
-		now := time.Now()
-		if now.Sub(g.recLastFrame) >= 33*time.Millisecond {
-			g.recLastFrame = now
-			needed := screen.Bounds().Dx() * screen.Bounds().Dy() * 4
-			if len(g.recBuf) != needed {
-				g.recBuf = make([]byte, needed)
-			}
-			screen.ReadPixels(g.recBuf)
-			// Copy into a separate slice for the goroutine since recBuf
-			// will be overwritten on the next frame.
-			frame := make([]byte, needed)
-			copy(frame, g.recBuf)
-			go g.recorder.AddFrame(frame)
-		}
 	}
 }
 
@@ -1044,6 +1045,18 @@ func (g *Game) handleFocus() {
 			}
 			g.repeatActive = false
 			g.scrollAccum = 0
+
+			// Force full redraw on focus regain. After macOS sleep/wake the
+			// process resumes but needsRender() returns false because no PTY
+			// output arrived yet — the screen appears frozen without this.
+			g.screenDirty = true
+			for _, t := range g.tabs {
+				for _, leaf := range t.Layout.Leaves() {
+					leaf.Pane.Term.Buf.Lock()
+					leaf.Pane.Term.Buf.MarkAllDirty()
+					leaf.Pane.Term.Buf.Unlock()
+				}
+			}
 		}
 		g.prevFocused = focused
 		g.focused.Term.SendFocusEvent(focused)
