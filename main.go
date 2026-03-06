@@ -2965,6 +2965,10 @@ func (g *Game) switchTabNoHistory(i int) {
 	if i < 0 || i >= len(g.tabs) {
 		return
 	}
+	// Snapshot the outgoing tab's render generation so that UI-only bumps
+	// (selection, search, cursor blink) do not trigger a false activity dot.
+	g.tabs[g.activeTab].SnapshotGen()
+
 	// Restore pane rects before leaving a zoomed tab so the layout is
 	// correct when switching back later.
 	if g.zoomed {
@@ -3341,7 +3345,8 @@ func (g *Game) splitH() {
 	statusBarH := g.renderer.StatusBarHeight()
 	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
 
-	newRoot, newPane, err := g.layout.SplitH(g.focused, g.cfg, g.font.CellW, g.font.CellH)
+	dir := sanitizeDirectory(g.statusBarState.Cwd)
+	newRoot, newPane, err := g.layout.SplitH(g.focused, g.cfg, g.font.CellW, g.font.CellH, dir)
 	if err != nil {
 		return
 	}
@@ -3364,7 +3369,8 @@ func (g *Game) splitV() {
 	statusBarH := g.renderer.StatusBarHeight()
 	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
 
-	newRoot, newPane, err := g.layout.SplitV(g.focused, g.cfg, g.font.CellW, g.font.CellH)
+	dir := sanitizeDirectory(g.statusBarState.Cwd)
+	newRoot, newPane, err := g.layout.SplitV(g.focused, g.cfg, g.font.CellW, g.font.CellH, dir)
 	if err != nil {
 		return
 	}

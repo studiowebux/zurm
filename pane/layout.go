@@ -157,10 +157,9 @@ func (n *LayoutNode) FindParent(p *Pane) (*LayoutNode, bool) {
 
 // SplitH splits the pane p horizontally (left | right), creating a new pane
 // as the right child. Returns the new tree root and the new pane.
-func (n *LayoutNode) SplitH(p *Pane, cfg *config.Config, cellW, cellH int) (*LayoutNode, *Pane, error) {
+func (n *LayoutNode) SplitH(p *Pane, cfg *config.Config, cellW, cellH int, dir string) (*LayoutNode, *Pane, error) {
 	// New pane gets a placeholder rect; ComputeRects will fix it after.
-	// Splits do not inherit CWD (dir=""); that is handled at the tab level.
-	newPane, err := New(cfg, p.Rect, cellW, cellH, "")
+	newPane, err := New(cfg, p.Rect, cellW, cellH, dir)
 	if err != nil {
 		return n, nil, err
 	}
@@ -179,8 +178,8 @@ func (n *LayoutNode) SplitH(p *Pane, cfg *config.Config, cellW, cellH int) (*Lay
 
 // SplitV splits the pane p vertically (top / bottom), creating a new pane
 // as the bottom child. Returns the new tree root and the new pane.
-func (n *LayoutNode) SplitV(p *Pane, cfg *config.Config, cellW, cellH int) (*LayoutNode, *Pane, error) {
-	newPane, err := New(cfg, p.Rect, cellW, cellH, "")
+func (n *LayoutNode) SplitV(p *Pane, cfg *config.Config, cellW, cellH int, dir string) (*LayoutNode, *Pane, error) {
+	newPane, err := New(cfg, p.Rect, cellW, cellH, dir)
 	if err != nil {
 		return n, nil, err
 	}
