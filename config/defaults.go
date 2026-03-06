@@ -91,6 +91,7 @@ var Defaults = Config{
 	},
 	Bell: BellConfig{
 		Style:      "visual",
+		Sound:      true,
 		DurationMs: 150,
 		Color:      "#F59E0B",
 	},

@@ -257,6 +257,8 @@ type BellConfig struct {
 	// Style controls how BEL (0x07) is presented to the user.
 	// "visual" = flash the pane border, "none" = ignore.
 	Style string `toml:"style"`
+	// Sound plays the macOS system alert sound on BEL.
+	Sound bool `toml:"sound"`
 	// DurationMs is how long the visual flash lasts in milliseconds.
 	DurationMs int `toml:"duration_ms"`
 	// Color is the hex color used for the visual flash.

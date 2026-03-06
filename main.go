@@ -198,6 +198,9 @@ type Game struct {
 
 	// flashExpiry is when statusBarState.FlashMessage should be cleared.
 	flashExpiry time.Time
+
+	// lastBellSound debounces system sound + dock badge to avoid spamming.
+	lastBellSound time.Time
 }
 
 func main() {
@@ -1111,6 +1114,9 @@ func (g *Game) handleFocus() {
 			g.repeatActive = false
 			g.scrollAccum = 0
 
+			// Clear dock badge when window regains focus.
+			clearDockBadge()
+
 			// Force full redraw on focus regain. After macOS sleep/wake the
 			// process resumes but needsRender() returns false because no PTY
 			// output arrived yet — the screen appears frozen without this.
@@ -1215,21 +1221,26 @@ func (g *Game) drainCwd() {
 	}
 }
 
-// drainBell reads BEL events from all visible panes and triggers visual feedback.
+// drainBell reads BEL events from all panes and triggers visual/audio/dock feedback.
 func (g *Game) drainBell() {
-	if g.cfg.Bell.Style == "none" {
-		return
-	}
 	dur := time.Duration(g.cfg.Bell.DurationMs) * time.Millisecond
+	now := time.Now()
+	fired := false
+
+	// Active tab panes — visual border flash.
 	for _, leaf := range g.layout.Leaves() {
 		select {
 		case <-leaf.Pane.Term.BellCh:
-			leaf.Pane.BellUntil = time.Now().Add(dur)
+			if g.cfg.Bell.Style != "none" {
+				leaf.Pane.BellUntil = now.Add(dur)
+			}
+			fired = true
 			g.screenDirty = true
 		default:
 		}
 	}
-	// Also drain background tabs — mark tab activity on bell.
+
+	// Background tabs — mark tab activity on bell.
 	for i, t := range g.tabs {
 		if i == g.activeTab {
 			continue
@@ -1238,10 +1249,31 @@ func (g *Game) drainBell() {
 			select {
 			case <-leaf.Pane.Term.BellCh:
 				t.HasActivity = true
+				fired = true
 				g.screenDirty = true
 			default:
 			}
 		}
+	}
+
+	if !fired {
+		return
+	}
+
+	// Debounce sound + dock notifications (500ms).
+	if now.Sub(g.lastBellSound) < 500*time.Millisecond {
+		return
+	}
+	g.lastBellSound = now
+
+	if g.cfg.Bell.Sound {
+		go playBellSound()
+	}
+
+	// Dock badge + bounce only when the window is not focused.
+	if !ebiten.IsFocused() {
+		setDockBadge()
+		requestDockAttention()
 	}
 }
 
