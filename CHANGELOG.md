@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-03-06
+
+### Added
+
+- Resize pane splits by dragging the divider with the mouse (4px hit zone)
+- Resize pane splits via Cmd+Option+Arrow keys (5% step per press)
+- Mouse drag to reorder tabs in the tab bar (8px threshold to distinguish from click)
+- Rename focused pane via context menu (Panes > Rename Pane) or command palette
+- Double-click on pane header to rename (mirrors tab rename UX)
+- Custom pane names persist across session save/restore
+
 ## [0.6.0] - 2026-03-06
 
 ### Changed
@@ -195,7 +206,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Block timer sourced from OSC C (command enter) for accurate execution duration
 - Block background tint uses premultiplied alpha for correct Ebitengine blending
 
-[Unreleased]: https://github.com/studiowebux/zurm/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/studiowebux/zurm/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/studiowebux/zurm/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/studiowebux/zurm/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/studiowebux/zurm/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/studiowebux/zurm/compare/v0.5.1...v0.5.2
