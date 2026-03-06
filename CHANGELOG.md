@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-03-05
+
+### Added
+
+- Display app version in the status bar (right side, before the help button)
+
+### Fixed
+
+- Resizing the window while a pane is zoomed no longer resets it to split dimensions
+- PTY size mismatch after window resize in zoom mode
+
 ## [0.4.0] - 2026-03-05
 
 ### Added
