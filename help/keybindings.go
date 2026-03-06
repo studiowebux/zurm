@@ -42,6 +42,7 @@ func AllBindings() []KeyBinding {
 		{Category: "Panes", Key: "Cmd+[ / ]", Description: "Cycle panes"},
 		{Category: "Panes", Key: "Cmd+Z", Description: "Zoom pane"},
 		{Category: "Panes", Key: "Drag divider", Description: "Resize pane split"},
+		{Category: "Panes", Key: "Double-click header", Description: "Rename pane"},
 		{Category: "Scroll", Key: "Shift+PgUp", Description: "Scroll up"},
 		{Category: "Scroll", Key: "Shift+PgDn", Description: "Scroll down"},
 		{Category: "Scroll", Key: "Mouse wheel", Description: "Scroll"},

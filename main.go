@@ -2480,6 +2480,22 @@ func (g *Game) handleMouse() {
 		}
 	}
 
+	// Double-click on pane header area → rename pane (mirrors tab double-click).
+	if leftPressed && !leftWas && g.focused.HeaderH > 0 &&
+		my >= g.focused.Rect.Min.Y && my < g.focused.Rect.Min.Y+g.focused.HeaderH {
+		now := time.Now()
+		if now.Sub(g.lastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
+			g.startRenamePane()
+			g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
+			g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
+			return
+		}
+		g.lastClickTime = now
+		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
+		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
+		return
+	}
+
 	if mouseMode == 0 {
 		col := (mx - g.focused.Rect.Min.X - pad) / g.font.CellW
 		row := (my - g.focused.Rect.Min.Y - pad - g.focused.HeaderH) / g.font.CellH
