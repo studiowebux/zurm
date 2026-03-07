@@ -86,7 +86,9 @@ var Defaults = Config{
 		WheelLinesPerTick: 3,
 	},
 	Performance: PerformanceConfig{
-		TPS: 30,
+		TPS:       30,
+		Pprof:     false,
+		PprofPort: 6060,
 	},
 	Session: SessionConfig{
 		Enabled:         true,

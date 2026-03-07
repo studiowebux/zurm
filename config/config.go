@@ -263,6 +263,12 @@ type PerformanceConfig struct {
 	// TPS is the Ebitengine tick rate (Update calls per second).
 	// Lower values reduce idle CPU. 30 is sufficient for a terminal.
 	TPS int `toml:"tps"`
+	// Pprof enables the net/http/pprof endpoint on localhost for runtime
+	// memory and goroutine profiling. Access via:
+	//   go tool pprof http://localhost:<pprof_port>/debug/pprof/heap
+	Pprof bool `toml:"pprof"`
+	// PprofPort is the localhost port for the pprof HTTP server.
+	PprofPort int `toml:"pprof_port"`
 }
 
 type SessionConfig struct {

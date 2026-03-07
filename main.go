@@ -8,6 +8,9 @@ import (
 	"image"
 	"io/fs"
 	"log"
+	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/exec"
 	"runtime"
@@ -378,6 +381,21 @@ func main() {
 	// Seed focus history with the initial tab so Cmd+; can return to it.
 	game.focusHistory = []focusEntry{{tabIdx: initialActive, pane: initialTabs[initialActive].Focused}}
 	initialTabs[initialActive].SnapshotGen()
+
+	// Start pprof server for runtime memory profiling when enabled.
+	if cfg.Performance.Pprof {
+		addr := fmt.Sprintf("localhost:%d", cfg.Performance.PprofPort)
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			log.Fatalf("pprof: cannot bind %s: %v", addr, err)
+		}
+		log.Printf("pprof: http://%s/debug/pprof/", addr)
+		go func() {
+			if err := http.Serve(ln, nil); err != nil {
+				log.Printf("pprof server: %v", err)
+			}
+		}()
+	}
 
 	ebiten.SetWindowSize(logW, logH)
 	ebiten.SetWindowTitle("zurm")
