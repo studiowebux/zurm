@@ -66,6 +66,8 @@ func AllBindings() []KeyBinding {
 		{Category: "Blocks", Key: "palette", Description: "Install shell hooks (OSC 133)"},
 		{Category: "Recording", Key: "Cmd+Shift+S", Description: "Take screenshot (PNG)"},
 		{Category: "Recording", Key: "Cmd+Shift+.", Description: "Start / stop screen recording (MP4)"},
+		{Category: "Speech", Key: "Cmd+Shift+U", Description: "Read selection aloud"},
+		{Category: "Speech", Key: "palette", Description: "Stop speaking"},
 		{Category: "Help", Key: "Cmd+/", Description: "Toggle keybindings"},
 		{Category: "Help", Key: "Cmd+P", Description: "Command palette"},
 		{Category: "Help", Key: "? button", Description: "Status bar shortcut"},

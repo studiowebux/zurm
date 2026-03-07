@@ -101,6 +101,11 @@ var Defaults = Config{
 		DurationMs: 150,
 		Color:      "#F59E0B",
 	},
+	Voice: VoiceConfig{
+		Enabled: false,
+		Voice:   "",
+		Rate:    180,
+	},
 	Blocks: BlocksConfig{
 		Enabled:      false,
 		ShowDuration: true,

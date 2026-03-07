@@ -172,6 +172,10 @@ type ScreenBuffer struct {
 	// accumulate stale block markers).
 	Blocks      []BlockBoundary
 	activeBlock *BlockBoundary
+
+	// BlockDoneCh receives the output text of completed command blocks (OSC 133 D).
+	// The game loop drains this for TTS auto-speak. Buffered to avoid blocking the parser.
+	BlockDoneCh chan string
 }
 
 // NewScreenBuffer allocates a grid with the given dimensions.
@@ -188,6 +192,7 @@ func NewScreenBuffer(rows, cols, maxScrollback int, fg, bg color.RGBA, palette [
 		maxScrollback: maxScrollback,
 		CursorVisible: true,
 		AutoWrap:      true,
+		BlockDoneCh:   make(chan string, 4),
 	}
 	sb.SGR.FG = fg
 	sb.SGR.BG = bg
@@ -992,6 +997,22 @@ func (sb *ScreenBuffer) applyBlockEvent(kind rune, exitCode int) {
 				sb.activeBlock.Duration = time.Since(sb.activeBlock.StartTime)
 			}
 			sb.Blocks = append(sb.Blocks, *sb.activeBlock)
+
+			// Send output text (rows between command and end) for TTS auto-speak.
+			// C fires after the shell echoes the newline (pre-execution), so AbsCmdRow
+			// is the first row where command output appears — use it directly.
+			if sb.activeBlock.AbsCmdRow >= 0 {
+				outStart := sb.activeBlock.AbsCmdRow
+				outEnd := sb.activeBlock.AbsEndRow
+				if outStart <= outEnd {
+					text := sb.TextRange(outStart, outEnd)
+					select {
+					case sb.BlockDoneCh <- text:
+					default: // drop if channel full
+					}
+				}
+			}
+
 			sb.activeBlock = nil
 		}
 	}

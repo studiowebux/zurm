@@ -29,6 +29,7 @@ import (
 	"github.com/studiowebux/zurm/session"
 	"github.com/studiowebux/zurm/tab"
 	"github.com/studiowebux/zurm/terminal"
+	"github.com/studiowebux/zurm/voice"
 )
 
 // version is set at build time via -ldflags "-X main.version=vX.Y.Z".
@@ -213,6 +214,9 @@ type Game struct {
 
 	// lastBellSound debounces system sound + dock badge to avoid spamming.
 	lastBellSound time.Time
+
+	// Text-to-speech via macOS `say` CLI.
+	speaker voice.Speaker
 }
 
 func main() {
@@ -487,6 +491,7 @@ func (g *Game) Update() error {
 	g.drainTitle()
 	g.drainCwd()
 	g.drainBell()
+	g.drainBlockDone()
 	g.drainGitBranch()
 	g.drainForeground()
 	g.recomputeSearch()
@@ -835,6 +840,11 @@ func (g *Game) handleInput() {
 		pressed := ebiten.IsKeyPressed(key)
 		wasPressed := g.prevKeys[key]
 		if pressed && !wasPressed {
+			// Stop active TTS on any keypress.
+			if g.speaker.Active() {
+				g.speaker.Stop()
+			}
+
 			switch {
 			case meta && key == ebiten.KeyC:
 				g.copySelection()
@@ -912,6 +922,10 @@ func (g *Game) handleInput() {
 			case meta && shift && key == ebiten.KeyPeriod:
 				// Cmd+Shift+. — toggle screen recording.
 				g.toggleRecording()
+
+			case meta && shift && key == ebiten.KeyU:
+				// Cmd+Shift+U — read selection aloud (TTS).
+				g.speakSelection()
 
 			// Tab management.
 			case meta && shift && key == ebiten.KeyT:
@@ -1352,12 +1366,20 @@ func (g *Game) drainBell() {
 	now := time.Now()
 	fired := false
 
-	// Active tab panes — visual border flash.
+	// Active tab panes — visual border flash + TTS on bell.
 	for _, leaf := range g.layout.Leaves() {
 		select {
 		case <-leaf.Pane.Term.BellCh:
 			if g.cfg.Bell.Style != "none" {
 				leaf.Pane.BellUntil = now.Add(dur)
+			}
+			// TTS: speak recent output on bell (e.g., Claude Code waiting for input).
+			if g.cfg.Voice.Enabled && leaf.Pane == g.focused {
+				text := g.getRecentBufferText(10)
+				text = strings.TrimSpace(text)
+				if text != "" {
+					_ = g.speaker.Speak(text, g.cfg.Voice.Voice, g.cfg.Voice.Rate)
+				}
 			}
 			fired = true
 			g.screenDirty = true
@@ -1400,6 +1422,40 @@ func (g *Game) drainBell() {
 	if !ebiten.IsFocused() {
 		setDockBadge()
 		requestDockAttention()
+	}
+}
+
+// drainBlockDone reads completed command block output from all panes.
+// When TTS is enabled, speaks output from the focused pane aloud.
+// Background tab channels are drained silently to prevent buildup.
+func (g *Game) drainBlockDone() {
+	// Drain all active tab panes — speak focused pane output if TTS enabled.
+	for _, leaf := range g.layout.Leaves() {
+		select {
+		case text := <-leaf.Pane.Term.Buf.BlockDoneCh:
+			if g.cfg.Voice.Enabled && leaf.Pane == g.focused {
+				text = strings.TrimSpace(text)
+				if text != "" {
+					if err := g.speaker.Speak(text, g.cfg.Voice.Voice, g.cfg.Voice.Rate); err != nil {
+						g.flashStatus("Speech failed: " + err.Error())
+					}
+				}
+			}
+		default:
+		}
+	}
+
+	// Drain background tabs silently.
+	for i, t := range g.tabs {
+		if i == g.activeTab {
+			continue
+		}
+		for _, leaf := range t.Layout.Leaves() {
+			select {
+			case <-leaf.Pane.Term.Buf.BlockDoneCh:
+			default:
+			}
+		}
 	}
 }
 
@@ -4947,6 +5003,9 @@ func (g *Game) buildPalette() {
 		// Recording
 		func() { g.screenshotPending = true; g.screenDirty = true },
 		g.toggleRecording,
+		// Speech
+		g.speakSelection,
+		g.stopSpeaking,
 		// Help
 		g.toggleOverlay,
 		g.openPalette,
@@ -5362,6 +5421,147 @@ func (g *Game) flashStatus(msg string) {
 	g.statusBarState.FlashMessage = msg
 	g.flashExpiry = time.Now().Add(3 * time.Second)
 	g.screenDirty = true
+}
+
+// speakSelection extracts the current selection (or visible buffer if no
+// selection) and reads it aloud via the macOS `say` command.
+func (g *Game) speakSelection() {
+	if !g.cfg.Voice.Enabled {
+		return
+	}
+
+	text := g.extractSelectedText()
+	if text == "" {
+		text = g.getVisibleBufferText()
+	}
+	if text == "" {
+		g.flashStatus("Nothing to speak")
+		return
+	}
+
+	if err := g.speaker.Speak(text, g.cfg.Voice.Voice, g.cfg.Voice.Rate); err != nil {
+		g.flashStatus("Speech failed: " + err.Error())
+		return
+	}
+	g.flashStatus("Speaking…")
+}
+
+// stopSpeaking kills any active TTS process.
+func (g *Game) stopSpeaking() {
+	g.speaker.Stop()
+	g.flashStatus("Speech stopped")
+}
+
+// extractSelectedText returns the selected text from the focused pane,
+// or empty string if no selection is active.
+func (g *Game) extractSelectedText() string {
+	g.focused.Term.Buf.RLock()
+	sel := g.focused.Term.Buf.Selection
+	cols := g.focused.Term.Buf.Cols
+
+	if !sel.Active {
+		g.focused.Term.Buf.RUnlock()
+		return ""
+	}
+
+	norm := sel.Normalize()
+	maxAbsRow := g.focused.Term.Buf.ScrollbackLen() + g.focused.Term.Buf.Rows - 1
+	if norm.StartRow < 0 {
+		norm.StartRow = 0
+	}
+	if norm.EndRow > maxAbsRow {
+		norm.EndRow = maxAbsRow
+	}
+
+	var text strings.Builder
+	for r := norm.StartRow; r <= norm.EndRow; r++ {
+		if r > norm.StartRow && !g.focused.Term.Buf.IsAbsRowWrapped(r) {
+			text.WriteByte('\n')
+		}
+		colStart := 0
+		colEnd := cols - 1
+		if r == norm.StartRow {
+			colStart = norm.StartCol
+		}
+		if r == norm.EndRow {
+			colEnd = norm.EndCol
+		}
+		var line strings.Builder
+		for c := colStart; c <= colEnd && c < cols; c++ {
+			ch := g.focused.Term.Buf.GetAbsCell(r, c).Char
+			if ch == 0 {
+				ch = ' '
+			}
+			line.WriteRune(ch)
+		}
+		text.WriteString(strings.TrimRight(line.String(), " "))
+	}
+	g.focused.Term.Buf.RUnlock()
+	return text.String()
+}
+
+// getVisibleBufferText returns all text currently visible in the focused pane.
+func (g *Game) getVisibleBufferText() string {
+	g.focused.Term.Buf.RLock()
+	defer g.focused.Term.Buf.RUnlock()
+
+	rows := g.focused.Term.Buf.Rows
+	cols := g.focused.Term.Buf.Cols
+	var text strings.Builder
+	for r := 0; r < rows; r++ {
+		absRow := g.focused.Term.Buf.DisplayToAbsRow(r)
+		var line strings.Builder
+		for c := 0; c < cols; c++ {
+			ch := g.focused.Term.Buf.GetAbsCell(absRow, c).Char
+			if ch == 0 {
+				ch = ' '
+			}
+			line.WriteRune(ch)
+		}
+		trimmed := strings.TrimRight(line.String(), " ")
+		if trimmed != "" || r < rows-1 {
+			if r > 0 {
+				text.WriteByte('\n')
+			}
+			text.WriteString(trimmed)
+		}
+	}
+	return strings.TrimRight(text.String(), "\n ")
+}
+
+// getRecentBufferText returns the last maxLines non-empty lines from the
+// bottom of the visible buffer. Useful for bell-triggered TTS where only
+// the recent output matters (e.g., Claude Code's question).
+func (g *Game) getRecentBufferText(maxLines int) string {
+	g.focused.Term.Buf.RLock()
+	defer g.focused.Term.Buf.RUnlock()
+
+	rows := g.focused.Term.Buf.Rows
+	cols := g.focused.Term.Buf.Cols
+
+	// Collect non-empty lines from the bottom up.
+	var lines []string
+	for r := rows - 1; r >= 0 && len(lines) < maxLines; r-- {
+		absRow := g.focused.Term.Buf.DisplayToAbsRow(r)
+		var line strings.Builder
+		for c := 0; c < cols; c++ {
+			ch := g.focused.Term.Buf.GetAbsCell(absRow, c).Char
+			if ch == 0 {
+				ch = ' '
+			}
+			line.WriteRune(ch)
+		}
+		trimmed := strings.TrimRight(line.String(), " ")
+		if trimmed != "" {
+			lines = append(lines, trimmed)
+		}
+	}
+
+	// Reverse to restore top-to-bottom order.
+	for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
+		lines[i], lines[j] = lines[j], lines[i]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // toggleRecording starts or stops a screen recording (FFMPEG → MP4).

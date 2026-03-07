@@ -101,6 +101,11 @@ fail_color    = "#F87171" # border color for non-zero exit codes
 bg_color      = ""        # optional hex background tint (empty = none)
 bg_alpha      = 0.0       # opacity of background tint (0.0–1.0)
 
+[voice]
+enabled = false   # enable TTS commands (Read Selection Aloud, auto-speak output)
+voice   = ""      # macOS voice name (e.g. "Samantha"); empty = system default
+rate    = 180     # speech rate in words per minute
+
 [theme]
 name = ""   # theme file name without .toml (e.g. "dark", "light"); empty = no theme
 
@@ -284,6 +289,15 @@ type BellConfig struct {
 	Color string `toml:"color"`
 }
 
+type VoiceConfig struct {
+	// Enabled controls whether TTS commands are available.
+	Enabled bool `toml:"enabled"`
+	// Voice is the macOS voice name (e.g. "Samantha"). Empty = system default.
+	Voice string `toml:"voice"`
+	// Rate is the speech rate in words per minute for the `say` command.
+	Rate int `toml:"rate"`
+}
+
 type ThemeConfig struct {
 	// Name is the theme filename without .toml extension (e.g. "dark", "light").
 	// Empty string means no theme — uses config colors directly.
@@ -338,6 +352,7 @@ type Config struct {
 	FileExplorer FileExplorerConfig `toml:"file_explorer"`
 	Blocks       BlocksConfig       `toml:"blocks"`
 	Bell         BellConfig         `toml:"bell"`
+	Voice        VoiceConfig        `toml:"voice"`
 	Theme        ThemeConfig        `toml:"theme"`
 }
 

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Text-to-speech: read selection aloud via macOS `say` command (Cmd+Shift+U)
+- TTS auto-speak: automatically reads command output aloud when enabled (requires OSC 133 shell hooks)
+- "Read Selection Aloud" and "Stop Speaking" command palette entries
+- `[voice]` config section: `enabled`, `voice`, `rate` (words per minute)
+- Falls back to visible buffer text when no selection is active
+
+## [0.12.0] - 2026-03-06
+
+### Added
+
+- Tab hover popover: minimap preview when hovering background tabs (configurable delay, size)
+
 ## [0.11.0] - 2026-03-06
 
 ### Added
