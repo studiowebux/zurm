@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-03-06
+
+### Added
+
+- Stats overlay (Cmd+I): live TPS/FPS, goroutines, heap memory, GC pauses, tab/pane count, buffer dimensions
+- "Toggle Stats Overlay" command palette entry
+
 ## [0.10.0] - 2026-03-06
 
 ### Added
