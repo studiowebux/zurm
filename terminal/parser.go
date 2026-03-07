@@ -636,7 +636,7 @@ func (p *Parser) dispatchCSI(final byte, private, secondary, kittyPop bool) {
 
 func (p *Parser) setPrivateMode(mode int, enable bool) {
 	switch mode {
-	case 1049: // alternate screen buffer
+	case 47, 1047, 1049: // alternate screen buffer
 		if enable {
 			p.sb.EnableAltScreen()
 		} else {

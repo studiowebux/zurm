@@ -721,28 +721,36 @@ func (g *Game) handleInput() {
 	if halfPage < 1 {
 		halfPage = 1
 	}
+	// Block scrollback when alternate screen is active — TUI apps (Claude Code,
+	// nvim, htop) own the full viewport and scrollback makes no sense.
+	g.focused.Term.Buf.RLock()
+	altActive := g.focused.Term.Buf.IsAltActive()
+	g.focused.Term.Buf.RUnlock()
+
 	scrolled := false
-	for _, key := range allKeys {
-		if !ebiten.IsKeyPressed(key) || g.prevKeys[key] {
-			continue
-		}
-		switch {
-		case key == ebiten.KeyPageUp:
-			g.focused.Term.Buf.Lock()
-			g.focused.Term.Buf.ScrollViewUp(halfPage)
-			g.focused.Term.Buf.Unlock()
-			scrolled = true
-		case key == ebiten.KeyPageDown:
-			g.focused.Term.Buf.Lock()
-			g.focused.Term.Buf.ScrollViewDown(halfPage)
-			g.focused.Term.Buf.Unlock()
-			scrolled = true
-		case (meta || ctrl) && key == ebiten.KeyK:
-			g.focused.Term.Buf.Lock()
-			g.focused.Term.Buf.ClearScrollback()
-			g.focused.Term.Buf.ClearSelection()
-			g.focused.Term.Buf.Unlock()
-			scrolled = true
+	if !altActive {
+		for _, key := range allKeys {
+			if !ebiten.IsKeyPressed(key) || g.prevKeys[key] {
+				continue
+			}
+			switch {
+			case key == ebiten.KeyPageUp:
+				g.focused.Term.Buf.Lock()
+				g.focused.Term.Buf.ScrollViewUp(halfPage)
+				g.focused.Term.Buf.Unlock()
+				scrolled = true
+			case key == ebiten.KeyPageDown:
+				g.focused.Term.Buf.Lock()
+				g.focused.Term.Buf.ScrollViewDown(halfPage)
+				g.focused.Term.Buf.Unlock()
+				scrolled = true
+			case (meta || ctrl) && key == ebiten.KeyK:
+				g.focused.Term.Buf.Lock()
+				g.focused.Term.Buf.ClearScrollback()
+				g.focused.Term.Buf.ClearSelection()
+				g.focused.Term.Buf.Unlock()
+				scrolled = true
+			}
 		}
 	}
 
@@ -751,7 +759,7 @@ func (g *Game) handleInput() {
 		g.focused.Term.Buf.RLock()
 		mouseMode := g.focused.Term.Buf.MouseMode
 		g.focused.Term.Buf.RUnlock()
-		if mouseMode == 0 {
+		if mouseMode == 0 && !altActive {
 			// Accumulate fractional trackpad deltas — int truncation drops sub-pixel
 			// input and makes smooth-scroll feel janky.
 			g.scrollAccum += wy * float64(g.cfg.Scroll.WheelLinesPerTick)
@@ -1242,10 +1250,12 @@ func (g *Game) handleResize() {
 
 	// When zoomed, the focused pane must fill the entire pane area.
 	// ComputeRects above set it to the normal split rect — override it.
+	// Clear HeaderH — zoomed pane has no header (only one visible pane).
 	if g.zoomed && g.focused != nil {
+		g.focused.HeaderH = 0
 		g.focused.Rect = paneRect
 		cols := (paneRect.Dx() - g.cfg.Window.Padding*2) / g.font.CellW
-		rows := (paneRect.Dy() - g.cfg.Window.Padding*2) / g.font.CellH
+		rows := (paneRect.Dy() - g.cfg.Window.Padding) / g.font.CellH
 		if cols < 1 {
 			cols = 1
 		}
@@ -2850,7 +2860,11 @@ func (g *Game) handleMouse() {
 	if wy != 0 {
 		// Shift+scroll bypasses PTY mouse mode and scrolls the terminal's own
 		// scrollback buffer (standard behaviour in iTerm2, kitty, etc.).
-		if ebiten.IsKeyPressed(ebiten.KeyShift) {
+		// Blocked in alt screen — TUI apps own the viewport.
+		g.focused.Term.Buf.RLock()
+		altShift := g.focused.Term.Buf.IsAltActive()
+		g.focused.Term.Buf.RUnlock()
+		if ebiten.IsKeyPressed(ebiten.KeyShift) && !altShift {
 			g.scrollAccum += wy * float64(g.cfg.Scroll.WheelLinesPerTick)
 			lines := int(g.scrollAccum)
 			if lines != 0 {
@@ -3572,6 +3586,129 @@ func (g *Game) closePane(p *pane.Pane) {
 	}
 }
 
+// detachPaneToTab extracts the focused pane into a new tab.
+// Only works when the current tab has multiple panes.
+func (g *Game) detachPaneToTab() {
+	leaves := g.layout.Leaves()
+	if len(leaves) <= 1 {
+		g.flashStatus("Only one pane — nothing to detach")
+		return
+	}
+	g.zoomed = false
+
+	// Remember the pane to detach.
+	p := g.focused
+
+	// Focus the next pane before detaching.
+	nextFocus := g.layout.NextLeaf(p)
+
+	// Detach from the current layout (does NOT close the terminal).
+	newRoot := g.layout.Detach(p)
+	if newRoot == nil {
+		return
+	}
+	g.updateLayout(newRoot)
+	if nextFocus != nil && nextFocus != p {
+		g.setFocusNoHistory(nextFocus)
+	} else if len(g.layout.Leaves()) > 0 {
+		g.setFocusNoHistory(g.layout.Leaves()[0].Pane)
+	}
+	g.recomputeLayout()
+
+	// Create a new tab with the detached pane.
+	newTab := &tab.Tab{
+		Layout:  pane.NewLeaf(p),
+		Focused: p,
+		Title:   p.CustomName,
+	}
+	// Insert the new tab right after the active tab.
+	insertIdx := g.activeTab + 1
+	g.tabs = append(g.tabs, nil)
+	copy(g.tabs[insertIdx+1:], g.tabs[insertIdx:])
+	g.tabs[insertIdx] = newTab
+	g.switchTab(insertIdx)
+	setPaneHeaders(g.layout, g.font.CellH)
+	g.recomputeLayout()
+}
+
+// mergePaneToTab moves the focused pane into the target tab as a horizontal split.
+// If the current tab becomes empty, it is removed.
+func (g *Game) mergePaneToTab(targetIdx int) {
+	if targetIdx < 0 || targetIdx >= len(g.tabs) || targetIdx == g.activeTab {
+		return
+	}
+	g.zoomed = false
+
+	p := g.focused
+	srcIdx := g.activeTab
+	singlePane := len(g.layout.Leaves()) <= 1
+
+	if singlePane {
+		// Single-pane tab: move the whole tab's pane into the target.
+		// Detach the pane from its layout.
+		targetTab := g.tabs[targetIdx]
+		targetTab.Layout = targetTab.Layout.AttachH(targetTab.Focused, p)
+
+		// Remove the source tab (don't close the terminal).
+		g.tabs = append(g.tabs[:srcIdx], g.tabs[srcIdx+1:]...)
+		if len(g.tabs) == 0 {
+			return
+		}
+		// Adjust target index if source was before it.
+		if srcIdx < targetIdx {
+			targetIdx--
+		}
+		g.switchTabNoHistory(targetIdx)
+		// Recompute the target tab's layout.
+		setPaneHeaders(g.layout, g.font.CellH)
+		g.recomputeLayout()
+		g.setFocus(p)
+	} else {
+		// Multi-pane tab: detach focused pane and move it.
+		nextFocus := g.layout.NextLeaf(p)
+		newRoot := g.layout.Detach(p)
+		if newRoot == nil {
+			return
+		}
+		g.updateLayout(newRoot)
+		if nextFocus != nil && nextFocus != p {
+			g.setFocusNoHistory(nextFocus)
+		} else if len(g.layout.Leaves()) > 0 {
+			g.setFocusNoHistory(g.layout.Leaves()[0].Pane)
+		}
+		g.recomputeLayout()
+
+		// Attach into target tab.
+		targetTab := g.tabs[targetIdx]
+		targetTab.Layout = targetTab.Layout.AttachH(targetTab.Focused, p)
+		g.switchTab(targetIdx)
+		setPaneHeaders(g.layout, g.font.CellH)
+		g.recomputeLayout()
+		g.setFocus(p)
+	}
+	g.flashStatus("Pane moved to tab")
+}
+
+// mergePaneToNextTab moves the focused pane into the next tab.
+func (g *Game) mergePaneToNextTab() {
+	target := (g.activeTab + 1) % len(g.tabs)
+	if target == g.activeTab {
+		g.flashStatus("Only one tab")
+		return
+	}
+	g.mergePaneToTab(target)
+}
+
+// mergePaneToPrevTab moves the focused pane into the previous tab.
+func (g *Game) mergePaneToPrevTab() {
+	target := (g.activeTab - 1 + len(g.tabs)) % len(g.tabs)
+	if target == g.activeTab {
+		g.flashStatus("Only one tab")
+		return
+	}
+	g.mergePaneToTab(target)
+}
+
 // setFocus updates the focused pane in both Game and the active tab.
 func (g *Game) setFocus(p *pane.Pane) {
 	g.pushFocus()
@@ -3745,6 +3882,9 @@ func (g *Game) buildContextMenu() []help.MenuItem {
 				}
 			}},
 			{Label: "Rename Pane", Action: g.startRenamePane},
+			{Label: "Detach Pane to Tab", Action: g.detachPaneToTab},
+			{Label: "Move Pane to Next Tab", Action: g.mergePaneToNextTab},
+			{Label: "Move Pane to Previous Tab", Action: g.mergePaneToPrevTab},
 			{Separator: true},
 			{Label: "Focus Left", Shortcut: "Cmd+\u2190", Action: func() { g.focusDir(-1, 0) }},
 			{Label: "Focus Right", Shortcut: "Cmd+\u2192", Action: func() { g.focusDir(1, 0) }},
@@ -4287,9 +4427,10 @@ func (g *Game) toggleZoom() {
 	g.renderer.SetLayoutDirty()
 	g.renderer.ClearPaneCache()
 	p := g.focused
+	p.HeaderH = 0 // zoomed pane has no header — only one pane visible
 	p.Rect = fullRect
 	cols := (fullRect.Dx() - g.cfg.Window.Padding*2) / g.font.CellW
-	rows := (fullRect.Dy() - g.cfg.Window.Padding*2) / g.font.CellH
+	rows := (fullRect.Dy() - g.cfg.Window.Padding) / g.font.CellH
 	if cols < 1 {
 		cols = 1
 	}
@@ -4512,6 +4653,14 @@ func (g *Game) reloadConfig() {
 	g.blocksEnabled = newCfg.Blocks.Enabled
 	g.renderer.BlocksEnabled = g.blocksEnabled
 
+	// Always recompute layout — status bar height, padding, or divider width
+	// may have changed, which shifts pane rects.
+	for _, t := range g.tabs {
+		g.layout = t.Layout
+		g.recomputeLayout()
+	}
+	g.layout = g.tabs[g.activeTab].Layout
+
 	// Rebuild palette to pick up new theme files.
 	g.buildPalette()
 
@@ -4564,6 +4713,9 @@ func (g *Game) buildPalette() {
 		func() { g.switchTab(1) },
 		func() { g.switchTab(2) },
 		func() { g.startNoteEdit(g.activeTab) },
+		g.detachPaneToTab,
+		g.mergePaneToNextTab,
+		g.mergePaneToPrevTab,
 		// Panes
 		g.splitH,
 		g.splitV,

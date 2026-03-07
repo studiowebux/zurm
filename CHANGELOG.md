@@ -15,10 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab notes persist across sessions via session.json
 - "Edit Tab Note" in right-click context menus (tab bar and pane)
 - File drag-and-drop: drop files from Finder to paste shell-escaped paths into the terminal
+- Detach pane to new tab (command palette or right-click menu)
+- Move pane to next/previous tab (command palette or right-click menu)
 
 ### Fixed
 
 - Right-click tab context menu now targets the clicked tab, not the active tab
+- Scrollback scrolling blocked when alternate screen is active (fixes broken scrolling in TUI apps like Claude Code, nvim, htop)
+- Zoomed pane now clears HeaderH so PTY gets correct row count (fixes Helix :q hidden behind status bar)
+- Pane row calculation uses single top padding instead of double, recovering ~1 wasted row at pane bottom
+- Config reload now recomputes layout for all tabs (fixes stale status bar height after config change)
 
 ### Changed
 

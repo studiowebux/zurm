@@ -42,7 +42,7 @@ func (n *LayoutNode) ComputeRects(rect image.Rectangle, cellW, cellH, padding, d
 	case Leaf:
 		n.Pane.Rect = rect
 		cols := (rect.Dx() - padding*2) / cellW
-		rows := (rect.Dy() - padding*2 - n.Pane.HeaderH) / cellH
+		rows := (rect.Dy() - padding - n.Pane.HeaderH) / cellH
 		if cols < 1 {
 			cols = 1
 		}
@@ -247,6 +247,26 @@ func removePane(n *LayoutNode, p *Pane) *LayoutNode {
 	n.Left = newLeft
 	n.Right = newRight
 	return n
+}
+
+// Detach removes the leaf containing p from the tree WITHOUT closing p.Term.
+// Returns the new root. If p is the only pane, returns nil.
+func (n *LayoutNode) Detach(p *Pane) *LayoutNode {
+	return removePane(n, p)
+}
+
+// AttachH inserts an existing pane as a horizontal split (left | right) beside
+// the target pane. Returns the new tree root.
+func (n *LayoutNode) AttachH(target, incoming *Pane) *LayoutNode {
+	oldLeaf := NewLeaf(target)
+	newLeaf := NewLeaf(incoming)
+	split := &LayoutNode{
+		Kind:  HSplit,
+		Left:  oldLeaf,
+		Right: newLeaf,
+		Ratio: 0.5,
+	}
+	return replaceLeaf(n, target, split)
 }
 
 // NextLeaf returns the pane after p in DFS order (wraps around).
