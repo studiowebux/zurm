@@ -135,7 +135,7 @@ type Game struct {
 
 	// Status bar state.
 	statusBarState renderer.StatusBarState
-	gitBranchCh    chan string // receives async git branch results
+	gitInfoCh chan gitInfo // receives async git status results
 
 	// Tab switcher overlay state (pin-style).
 	tabSwitcherState renderer.TabSwitcherState
@@ -215,8 +215,15 @@ type Game struct {
 	// lastBellSound debounces system sound + dock badge to avoid spamming.
 	lastBellSound time.Time
 
-	// Text-to-speech via macOS `say` CLI.
+	// Text-to-speech via macOS AVSpeechSynthesizer.
 	speaker voice.Speaker
+
+	// Speech-to-text via macOS SFSpeechRecognizer.
+	listener              voice.Listener
+	dictationState        renderer.DictationState
+	dictationLastChange   time.Time // last time transcript text changed
+	dictationLastText     string    // previous transcript for change detection
+	dictationEnterAt      time.Time // when to send deferred Enter after text injection
 }
 
 func main() {
@@ -359,6 +366,9 @@ func main() {
 
 	game.renderer.BlocksEnabled = game.blocksEnabled
 	game.statusBarState.Version = version
+	game.speaker.Init()
+	game.listener.SetLocale(cfg.Voice.Locale)
+	game.listener.InitListener()
 	game.buildPalette()
 
 	// Seed focus history with the initial tab so Cmd+; can return to it.
@@ -404,6 +414,7 @@ func (g *Game) Update() error {
 	}
 
 	// Clear transient flash message once its expiry has passed.
+	// Keep the flash alive while STT is listening (persistent indicator).
 	if g.statusBarState.FlashMessage != "" && time.Now().After(g.flashExpiry) {
 		g.statusBarState.FlashMessage = ""
 		g.screenDirty = true
@@ -440,6 +451,41 @@ func (g *Game) Update() error {
 		}
 	} else if g.statusBarState.Recording {
 		g.statusBarState.Recording = false
+		g.screenDirty = true
+	}
+
+	// Poll STT transcript and update dictation overlay.
+	if sttText, sttFinal, sttNew := g.listener.GetTranscript(); sttNew && sttText != "" {
+		if g.dictationState.Open {
+			g.dictationState.Transcript = sttText
+			if sttFinal {
+				g.injectDictation(sttText)
+			} else {
+				g.dictationState.Status = "Listening…"
+				if sttText != g.dictationLastText {
+					g.dictationLastText = sttText
+					g.dictationLastChange = now
+				}
+			}
+		}
+		g.screenDirty = true
+	}
+	// Silence timeout: auto-inject after 2 s of unchanged transcript.
+	if g.dictationState.Open && g.dictationState.Transcript != "" &&
+		!g.dictationLastChange.IsZero() && now.Sub(g.dictationLastChange) >= 2*time.Second {
+		g.injectDictation(g.dictationState.Transcript)
+		g.screenDirty = true
+	}
+	// Deferred Enter after dictation text injection (debounce).
+	if !g.dictationEnterAt.IsZero() && now.After(g.dictationEnterAt) {
+		if g.focused != nil {
+			g.focused.Term.SendBytes([]byte("\r"))
+		}
+		g.dictationEnterAt = time.Time{}
+	}
+	listening := g.listener.IsListening()
+	g.statusBarState.Listening = listening
+	if listening && now.Unix() != g.recLastStatusSec {
 		g.screenDirty = true
 	}
 
@@ -586,7 +632,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	g.renderer.DrawAll(screen, g.tabs, g.activeTab, g.focused, g.zoomed,
 		&g.menuState, &g.overlayState, &g.confirmState, &g.searchState, &g.statusBarState, &g.tabSwitcherState,
-		&g.paletteState, g.paletteEntries, &g.fileExplorerState, &g.tabSearchState, &g.statsState, &g.tabHoverState)
+		&g.paletteState, g.paletteEntries, &g.fileExplorerState, &g.tabSearchState, &g.statsState, &g.tabHoverState,
+		&g.dictationState)
 	g.screenDirty = false
 	g.lastClockSec = time.Now().Unix()
 
@@ -656,6 +703,13 @@ func (g *Game) handleInput() {
 	if g.fileExplorerState.Open {
 		g.screenDirty = true
 		g.handleFileExplorerInput()
+		return
+	}
+
+	// When the dictation overlay is open, route input to dictation handling.
+	if g.dictationState.Open {
+		g.screenDirty = true
+		g.handleDictationInput()
 		return
 	}
 
@@ -922,6 +976,9 @@ func (g *Game) handleInput() {
 			case meta && shift && key == ebiten.KeyPeriod:
 				// Cmd+Shift+. — toggle screen recording.
 				g.toggleRecording()
+			case meta && shift && key == ebiten.KeySpace:
+				// Cmd+Shift+Space — start dictation (STT).
+				g.startDictation()
 
 			case meta && shift && key == ebiten.KeyU:
 				// Cmd+Shift+U — read selection aloud (TTS).
@@ -1333,8 +1390,18 @@ func (g *Game) drainTitle() {
 	}
 }
 
+// gitInfo holds all git status data gathered asynchronously.
+type gitInfo struct {
+	Branch  string
+	Commit  string
+	Dirty   int
+	Staged  int
+	Ahead   int
+	Behind  int
+}
+
 // drainCwd reads the latest CWD from the focused pane's OSC 7 channel.
-// When the CWD changes it kicks off an async git branch lookup.
+// When the CWD changes it kicks off an async git status lookup.
 func (g *Game) drainCwd() {
 	select {
 	case cwd := <-g.focused.Term.CwdCh:
@@ -1342,19 +1409,60 @@ func (g *Game) drainCwd() {
 			g.statusBarState.Cwd = cwd
 			g.focused.Term.Cwd = cwd
 			g.statusBarState.GitBranch = "" // clear until new result arrives
+			g.statusBarState.GitCommit = ""
+			g.statusBarState.GitDirty = 0
+			g.statusBarState.GitStaged = 0
+			g.statusBarState.GitAhead = 0
+			g.statusBarState.GitBehind = 0
 			if g.cfg.StatusBar.ShowGit {
-				g.gitBranchCh = make(chan string, 1)
-				ch := g.gitBranchCh
+				g.gitInfoCh = make(chan gitInfo, 1)
+				ch := g.gitInfoCh
 				go func() {
-					out, err := exec.Command("git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD").Output() // #nosec G204 — fixed binary, user CWD only
-					if err != nil {
-						ch <- ""
+					info := gitInfo{}
+
+					// Branch name.
+					if out, err := exec.Command("git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil { // #nosec G204
+						info.Branch = strings.TrimSpace(string(out))
+					} else {
+						ch <- info
 						return
 					}
-					ch <- strings.TrimSpace(string(out))
+
+					// Short commit hash.
+					if out, err := exec.Command("git", "-C", cwd, "rev-parse", "--short", "HEAD").Output(); err == nil { // #nosec G204
+						info.Commit = strings.TrimSpace(string(out))
+					}
+
+					// Dirty and staged counts from porcelain status.
+					if out, err := exec.Command("git", "-C", cwd, "status", "--porcelain").Output(); err == nil { // #nosec G204
+						for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+							if len(line) < 2 {
+								continue
+							}
+							idx := line[0]
+							wt := line[1]
+							if idx != ' ' && idx != '?' {
+								info.Staged++
+							}
+							if wt != ' ' && wt != '?' {
+								info.Dirty++
+							}
+						}
+					}
+
+					// Ahead/behind upstream.
+					if out, err := exec.Command("git", "-C", cwd, "rev-list", "--left-right", "--count", "HEAD...@{upstream}").Output(); err == nil { // #nosec G204
+						parts := strings.Fields(strings.TrimSpace(string(out)))
+						if len(parts) == 2 {
+							fmt.Sscanf(parts[0], "%d", &info.Ahead)
+							fmt.Sscanf(parts[1], "%d", &info.Behind)
+						}
+					}
+
+					ch <- info
 				}()
 			}
-		g.screenDirty = true
+			g.screenDirty = true
 		}
 	default:
 	}
@@ -1375,10 +1483,10 @@ func (g *Game) drainBell() {
 			}
 			// TTS: speak recent output on bell (e.g., Claude Code waiting for input).
 			if g.cfg.Voice.Enabled && leaf.Pane == g.focused {
-				text := g.getRecentBufferText(10)
+				text := g.getRecentBufferText(g.cfg.Voice.ReadLines)
 				text = strings.TrimSpace(text)
 				if text != "" {
-					_ = g.speaker.Speak(text, g.cfg.Voice.Voice, g.cfg.Voice.Rate)
+					g.speaker.Speak(text, g.cfg.Voice.VoiceID, g.cfg.Voice.Rate, g.cfg.Voice.Pitch, g.cfg.Voice.Volume)
 				}
 			}
 			fired = true
@@ -1436,9 +1544,7 @@ func (g *Game) drainBlockDone() {
 			if g.cfg.Voice.Enabled && leaf.Pane == g.focused {
 				text = strings.TrimSpace(text)
 				if text != "" {
-					if err := g.speaker.Speak(text, g.cfg.Voice.Voice, g.cfg.Voice.Rate); err != nil {
-						g.flashStatus("Speech failed: " + err.Error())
-					}
+					g.speaker.Speak(text, g.cfg.Voice.VoiceID, g.cfg.Voice.Rate, g.cfg.Voice.Pitch, g.cfg.Voice.Volume)
 				}
 			}
 		default:
@@ -1459,15 +1565,20 @@ func (g *Game) drainBlockDone() {
 	}
 }
 
-// drainGitBranch reads a completed async git branch result when available.
+// drainGitBranch reads a completed async git info result when available.
 func (g *Game) drainGitBranch() {
-	if g.gitBranchCh == nil {
+	if g.gitInfoCh == nil {
 		return
 	}
 	select {
-	case branch := <-g.gitBranchCh:
-		g.statusBarState.GitBranch = branch
-		g.gitBranchCh = nil
+	case info := <-g.gitInfoCh:
+		g.statusBarState.GitBranch = info.Branch
+		g.statusBarState.GitCommit = info.Commit
+		g.statusBarState.GitDirty = info.Dirty
+		g.statusBarState.GitStaged = info.Staged
+		g.statusBarState.GitAhead = info.Ahead
+		g.statusBarState.GitBehind = info.Behind
+		g.gitInfoCh = nil
 		g.screenDirty = true
 	default:
 	}
@@ -5006,6 +5117,12 @@ func (g *Game) buildPalette() {
 		// Speech
 		g.speakSelection,
 		g.stopSpeaking,
+		g.pauseSpeaking,
+		g.continueSpeaking,
+		g.openVoiceSelector,
+		// Dictation
+		g.startDictation,
+		g.stopDictation,
 		// Help
 		g.toggleOverlay,
 		g.openPalette,
@@ -5020,6 +5137,13 @@ func (g *Game) buildPalette() {
 		themeName := name // capture for closure
 		entries = append(entries, renderer.PaletteEntry{Name: "Theme: " + themeName, Shortcut: ""})
 		actions = append(actions, func() { g.switchTheme(themeName) })
+	}
+
+	// Append dynamic voice entries from system voices.
+	for _, v := range g.speaker.ListVoices() {
+		vi := v // capture for closure
+		entries = append(entries, renderer.PaletteEntry{Name: "Voice: " + vi.Name + " (" + vi.Language + ")", Shortcut: ""})
+		actions = append(actions, func() { g.selectVoice(vi) })
 	}
 
 	g.paletteEntries = entries
@@ -5424,7 +5548,7 @@ func (g *Game) flashStatus(msg string) {
 }
 
 // speakSelection extracts the current selection (or visible buffer if no
-// selection) and reads it aloud via the macOS `say` command.
+// selection) and reads it aloud via AVSpeechSynthesizer.
 func (g *Game) speakSelection() {
 	if !g.cfg.Voice.Enabled {
 		return
@@ -5432,17 +5556,14 @@ func (g *Game) speakSelection() {
 
 	text := g.extractSelectedText()
 	if text == "" {
-		text = g.getVisibleBufferText()
+		text = g.getRecentBufferText(g.cfg.Voice.ReadLines)
 	}
 	if text == "" {
 		g.flashStatus("Nothing to speak")
 		return
 	}
 
-	if err := g.speaker.Speak(text, g.cfg.Voice.Voice, g.cfg.Voice.Rate); err != nil {
-		g.flashStatus("Speech failed: " + err.Error())
-		return
-	}
+	g.speaker.Speak(text, g.cfg.Voice.VoiceID, g.cfg.Voice.Rate, g.cfg.Voice.Pitch, g.cfg.Voice.Volume)
 	g.flashStatus("Speaking…")
 }
 
@@ -5450,6 +5571,99 @@ func (g *Game) speakSelection() {
 func (g *Game) stopSpeaking() {
 	g.speaker.Stop()
 	g.flashStatus("Speech stopped")
+}
+
+// pauseSpeaking pauses active speech.
+func (g *Game) pauseSpeaking() {
+	g.speaker.Pause()
+	g.flashStatus("Speech paused")
+}
+
+// continueSpeaking resumes paused speech.
+func (g *Game) continueSpeaking() {
+	g.speaker.Continue()
+	g.flashStatus("Speech resumed")
+}
+
+// selectVoice sets the active voice by identifier.
+func (g *Game) selectVoice(v voice.VoiceInfo) {
+	g.cfg.Voice.VoiceID = v.ID
+	g.flashStatus("Voice: " + v.Name)
+}
+
+// openVoiceSelector opens the command palette pre-filtered to voice entries.
+func (g *Game) openVoiceSelector() {
+	g.paletteState.Open = true
+	g.paletteState.Query = "Voice: "
+	g.paletteState.Cursor = 0
+	g.screenDirty = true
+}
+
+// injectDictation sends the transcript to the focused PTY and closes the overlay.
+func (g *Game) injectDictation(text string) {
+	if g.focused != nil && text != "" {
+		g.focused.Term.SendBytes([]byte(text))
+		g.dictationEnterAt = time.Now().Add(100 * time.Millisecond)
+	}
+	g.stopDictation()
+}
+
+// startDictation opens the dictation overlay and begins STT speech recognition.
+func (g *Game) startDictation() {
+	if g.dictationState.Open {
+		return
+	}
+	g.dictationState = renderer.DictationState{
+		Open:   true,
+		Status: "Initializing…",
+	}
+	g.dictationLastText = ""
+	g.dictationLastChange = time.Time{}
+	g.screenDirty = true
+
+	if !g.listener.IsAuthorized() {
+		g.dictationState.Status = "Requesting permission… grant both Speech and Microphone, then retry"
+		g.listener.RequestAuthorization()
+		return
+	}
+	g.listener.SetLocale(g.cfg.Voice.Locale)
+	g.listener.StartListening()
+	g.dictationState.Status = "Listening… speak now"
+}
+
+// stopDictation stops STT and closes the dictation overlay.
+func (g *Game) stopDictation() {
+	if g.listener.IsListening() {
+		g.listener.StopListening()
+	}
+	g.dictationState = renderer.DictationState{}
+	g.dictationLastText = ""
+	g.dictationLastChange = time.Time{}
+	g.screenDirty = true
+}
+
+// handleDictationInput processes keyboard input while the dictation overlay is open.
+func (g *Game) handleDictationInput() {
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.stopDictation()
+		g.prevKeys[ebiten.KeyEscape] = true
+		return
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
+		if g.dictationState.Transcript != "" {
+			g.injectDictation(g.dictationState.Transcript)
+			return
+		}
+		// Re-trigger start if permission was just granted or recognizer stopped.
+		if !g.listener.IsListening() && g.listener.IsAuthorized() {
+			g.listener.SetLocale(g.cfg.Voice.Locale)
+			g.listener.StartListening()
+			g.dictationState.Status = "Listening… speak now"
+			g.dictationState.Transcript = ""
+			g.dictationLastText = ""
+			g.dictationLastChange = time.Time{}
+		}
+	}
 }
 
 // extractSelectedText returns the selected text from the focused pane,
@@ -5552,7 +5766,7 @@ func (g *Game) getRecentBufferText(maxLines int) string {
 			line.WriteRune(ch)
 		}
 		trimmed := strings.TrimRight(line.String(), " ")
-		if trimmed != "" {
+		if trimmed != "" && hasAlphanumeric(trimmed) {
 			lines = append(lines, trimmed)
 		}
 	}
@@ -5562,6 +5776,16 @@ func (g *Game) getRecentBufferText(maxLines int) string {
 		lines[i], lines[j] = lines[j], lines[i]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// hasAlphanumeric returns true if s contains at least one ASCII letter or digit.
+func hasAlphanumeric(s string) bool {
+	for _, c := range s {
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+			return true
+		}
+	}
+	return false
 }
 
 // toggleRecording starts or stops a screen recording (FFMPEG → MP4).

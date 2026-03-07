@@ -79,6 +79,10 @@
     <string>zurm needs access to removable volumes to open terminals and browse files on external drives.</string>
     <key>NSNetworkVolumesUsageDescription</key>
     <string>zurm needs access to network volumes to open terminals and browse files on network drives.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>zurm needs microphone access to transcribe spoken input into the terminal.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>zurm uses on-device speech recognition to convert voice to terminal input. Audio never leaves your Mac.</string>
 
     <!-- Copyright -->
     <key>NSHumanReadableCopyright</key>

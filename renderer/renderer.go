@@ -191,7 +191,7 @@ func (r *Renderer) StatusBarHeight() int {
 }
 
 // DrawAll renders the tab bar, all panes, status bar, and any active UI overlays onto screen.
-func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int, focused *pane.Pane, zoomed bool, menu *MenuState, overlay *OverlayState, confirm *ConfirmState, search *SearchState, statusBar *StatusBarState, tabSwitcher *TabSwitcherState, palette *PaletteState, paletteEntries []PaletteEntry, fileExplorer *FileExplorerState, tabSearch *TabSearchState, stats *StatsState, tabHover *TabHoverState) {
+func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int, focused *pane.Pane, zoomed bool, menu *MenuState, overlay *OverlayState, confirm *ConfirmState, search *SearchState, statusBar *StatusBarState, tabSwitcher *TabSwitcherState, palette *PaletteState, paletteEntries []PaletteEntry, fileExplorer *FileExplorerState, tabSearch *TabSearchState, stats *StatsState, tabHover *TabHoverState, dictation *DictationState) {
 	if r.offscreen == nil {
 		return
 	}
@@ -364,6 +364,9 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 	if confirm != nil {
 		r.drawConfirm(confirm)
 	}
+
+	// Dictation overlay drawn above confirm dialog.
+	r.drawDictation(dictation)
 
 	// Tab switcher overlay drawn above everything when open.
 	r.drawTabSwitcher(tabs, activeTab, tabSwitcher)

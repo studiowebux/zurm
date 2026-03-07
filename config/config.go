@@ -67,6 +67,9 @@ show_cwd             = true
 show_git             = true
 show_clock           = false   # forces a redraw every second; enable if you want it
 show_process         = true    # foreground process name (polls every 1 s via TIOCGPGRP)
+show_commit          = true    # short commit hash next to branch name
+show_dirty           = true    # modified (~N) and staged (+N) file counts
+show_ahead_behind    = true    # commits ahead/behind upstream (N^ Nv)
 branch_prefix        = ""      # set to " " if you have a Nerd Font patched JetBrains Mono
 segment_separator    = " · "   # separator drawn between status bar segments
 separator_height_px  = 1       # height of top border line (0 = hidden)
@@ -102,9 +105,13 @@ bg_color      = ""        # optional hex background tint (empty = none)
 bg_alpha      = 0.0       # opacity of background tint (0.0–1.0)
 
 [voice]
-enabled = false   # enable TTS commands (Read Selection Aloud, auto-speak output)
-voice   = ""      # macOS voice name (e.g. "Samantha"); empty = system default
-rate    = 180     # speech rate in words per minute
+enabled  = false   # enable TTS commands (Read Selection Aloud, auto-speak output)
+voice_id = ""      # AVSpeechSynthesisVoice identifier; empty = system default
+rate     = 0.5     # speech rate (0.0–1.0; 0.5 = normal)
+pitch    = 1.0     # pitch multiplier (0.5–2.0; 1.0 = normal)
+volume   = 1.0     # volume (0.0–1.0; 1.0 = full)
+locale     = "en-US" # speech recognition language
+read_lines = 10     # lines to read on bell or Cmd+Shift+U (recent buffer)
 
 [theme]
 name = ""   # theme file name without .toml (e.g. "dark", "light"); empty = no theme
@@ -186,6 +193,9 @@ type StatusBarConfig struct {
 	ShowCwd            bool   `toml:"show_cwd"`
 	ShowClock          bool   `toml:"show_clock"`
 	ShowProcess        bool   `toml:"show_process"`
+	ShowCommit         bool   `toml:"show_commit"`           // short commit hash
+	ShowDirty          bool   `toml:"show_dirty"`            // modified/staged file counts
+	ShowAheadBehind    bool   `toml:"show_ahead_behind"`     // commits ahead/behind upstream
 	BranchPrefix       string `toml:"branch_prefix"`         // e.g. " " with a Nerd Font
 	SegmentSeparator   string `toml:"segment_separator"`     // e.g. " · " or " | "
 	SeparatorHeightPx  int    `toml:"separator_height_px"`   // height of top border line
@@ -292,10 +302,18 @@ type BellConfig struct {
 type VoiceConfig struct {
 	// Enabled controls whether TTS commands are available.
 	Enabled bool `toml:"enabled"`
-	// Voice is the macOS voice name (e.g. "Samantha"). Empty = system default.
-	Voice string `toml:"voice"`
-	// Rate is the speech rate in words per minute for the `say` command.
-	Rate int `toml:"rate"`
+	// VoiceID is the AVSpeechSynthesisVoice identifier. Empty = system default.
+	VoiceID string `toml:"voice_id"`
+	// Rate is the speech rate (0.0–1.0; 0.5 = normal).
+	Rate float64 `toml:"rate"`
+	// Pitch is the pitch multiplier (0.5–2.0; 1.0 = normal).
+	Pitch float64 `toml:"pitch"`
+	// Volume is the speech volume (0.0–1.0; 1.0 = full).
+	Volume float64 `toml:"volume"`
+	// Locale is the SFSpeechRecognizer language (e.g. "en-US", "fr-CA").
+	Locale string `toml:"locale"`
+	// ReadLines is the number of recent buffer lines to read on bell or Cmd+Shift+U.
+	ReadLines int `toml:"read_lines"`
 }
 
 type ThemeConfig struct {
@@ -394,6 +412,7 @@ func Load() (*Config, error) {
 	}
 
 	resolveShell(&cfg)
+	clampVoice(&cfg)
 	ApplyTheme(&cfg, meta)
 	return &cfg, nil
 }
@@ -412,6 +431,7 @@ func Reload() (*Config, error) {
 		return nil, fmt.Errorf("config reload: %w", err)
 	}
 	resolveShell(&cfg)
+	clampVoice(&cfg)
 	return &cfg, nil
 }
 
@@ -432,7 +452,30 @@ func LoadWithMeta() (*Config, toml.MetaData, error) {
 		return &cfg, meta, fmt.Errorf("config: %w", err)
 	}
 	resolveShell(&cfg)
+	clampVoice(&cfg)
 	return &cfg, meta, nil
+}
+
+// clampVoice migrates old WPM values and clamps voice parameters to valid ranges.
+func clampVoice(cfg *Config) {
+	if cfg.Voice.Rate > 1.0 {
+		cfg.Voice.Rate = 0.5
+	}
+	if cfg.Voice.Rate < 0.0 {
+		cfg.Voice.Rate = 0.0
+	}
+	if cfg.Voice.Pitch < 0.5 {
+		cfg.Voice.Pitch = 0.5
+	}
+	if cfg.Voice.Pitch > 2.0 {
+		cfg.Voice.Pitch = 2.0
+	}
+	if cfg.Voice.Volume < 0.0 {
+		cfg.Voice.Volume = 0.0
+	}
+	if cfg.Voice.Volume > 1.0 {
+		cfg.Voice.Volume = 1.0
+	}
 }
 
 // resolveShell fills in Shell.Program from $SHELL if not set.

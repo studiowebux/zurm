@@ -23,6 +23,13 @@ type ConfirmState struct {
 	Message string // e.g. "Close pane?" or "Close tab?"
 }
 
+// DictationState holds the rendering state for the speech-to-text overlay.
+type DictationState struct {
+	Open       bool
+	Status     string // "Listening…", "Requesting permission…", error messages
+	Transcript string // latest interim or final transcript text
+}
+
 // categoryGroup groups bindings under one category for rendering.
 type categoryGroup struct {
 	Category string
@@ -321,6 +328,79 @@ func (r *Renderer) drawConfirm(state *ConfirmState) {
 
 	hintX := panelX + (panelW-hintLen*cw)/2
 	r.font.DrawString(r.modalLayer, hint, hintX, panelY+panelPad+ch*2, r.ui.Dim)
+}
+
+// drawDictation renders a centered speech-to-text overlay with status and transcript.
+func (r *Renderer) drawDictation(state *DictationState) {
+	if state == nil || !state.Open {
+		return
+	}
+
+	physW := r.modalLayer.Bounds().Dx()
+	physH := r.modalLayer.Bounds().Dy()
+
+	// Semi-transparent backdrop.
+	if r.overlayBg == nil {
+		r.overlayBg = ebiten.NewImage(1, 1)
+		r.overlayBg.Fill(r.ui.Backdrop)
+	}
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Scale(float64(physW), float64(physH))
+	r.modalLayer.DrawImage(r.overlayBg, op)
+
+	cw := r.font.CellW
+	ch := r.font.CellH
+
+	// Layout: title, blank, status, blank, transcript (up to 60 chars), blank, hint.
+	title := "Speech to Text"
+	hint := "[Esc] stop and close"
+	status := state.Status
+	transcript := state.Transcript
+	if transcript == "" {
+		transcript = "(waiting for speech…)"
+	}
+
+	// Clamp transcript display width.
+	maxW := 60
+	if tr := []rune(transcript); len(tr) > maxW {
+		transcript = string(tr[:maxW]) + "…"
+	}
+
+	// Panel width = widest line.
+	innerW := len([]rune(title))
+	if l := len([]rune(hint)); l > innerW {
+		innerW = l
+	}
+	if l := len([]rune(status)); l > innerW {
+		innerW = l
+	}
+	if l := len([]rune(transcript)); l > innerW {
+		innerW = l
+	}
+
+	panelPad := cw
+	panelW := innerW*cw + panelPad*2
+	panelH := ch*7 + panelPad*2
+	panelX := (physW - panelW) / 2
+	panelY := (physH - panelH) / 2
+	panelRect := image.Rect(panelX, panelY, panelX+panelW, panelY+panelH)
+
+	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(r.ui.PanelBg)
+	r.drawOverlayBorder(panelRect)
+
+	// Title (centered, accent color).
+	titleX := panelX + (panelW-len([]rune(title))*cw)/2
+	r.font.DrawString(r.modalLayer, title, titleX, panelY+panelPad, r.ui.Accent)
+
+	// Status line.
+	r.font.DrawString(r.modalLayer, status, panelX+panelPad, panelY+panelPad+ch*2, r.ui.Fg)
+
+	// Transcript line.
+	r.font.DrawString(r.modalLayer, transcript, panelX+panelPad, panelY+panelPad+ch*4, r.ui.Accent)
+
+	// Hint line (dim).
+	hintX := panelX + (panelW-len([]rune(hint))*cw)/2
+	r.font.DrawString(r.modalLayer, hint, hintX, panelY+panelPad+ch*6, r.ui.Dim)
 }
 
 // drawOverlayBorder draws a 1px border around rect.
