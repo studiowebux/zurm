@@ -2,9 +2,11 @@ package renderer
 
 import (
 	"image"
+	"image/color"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/studiowebux/zurm/help"
+	"github.com/studiowebux/zurm/markdown"
 )
 
 
@@ -28,6 +30,16 @@ type DictationState struct {
 	Open       bool
 	Status     string // "Listening…", "Requesting permission…", error messages
 	Transcript string // latest interim or final transcript text
+}
+
+// MarkdownViewerState holds the rendering state for the markdown reader overlay.
+type MarkdownViewerState struct {
+	Open         bool
+	Title        string
+	Lines        []markdown.StyledLine
+	ScrollOffset int
+	MaxScroll    int // written by renderer each frame
+	RowH         int // written by renderer each frame
 }
 
 // categoryGroup groups bindings under one category for rendering.
@@ -401,6 +413,182 @@ func (r *Renderer) drawDictation(state *DictationState) {
 	// Hint line (dim).
 	hintX := panelX + (panelW-len([]rune(hint))*cw)/2
 	r.font.DrawString(r.modalLayer, hint, hintX, panelY+panelPad+ch*6, r.ui.Dim)
+}
+
+// drawMarkdownViewer renders a full-screen markdown reader overlay onto r.modalLayer.
+func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
+	if state == nil || !state.Open {
+		return
+	}
+
+	physW := r.modalLayer.Bounds().Dx()
+	physH := r.modalLayer.Bounds().Dy()
+
+	// Semi-transparent backdrop.
+	if r.overlayBg == nil {
+		r.overlayBg = ebiten.NewImage(1, 1)
+	}
+	r.overlayBg.Fill(r.ui.Backdrop)
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Scale(float64(physW), float64(physH))
+	r.modalLayer.DrawImage(r.overlayBg, op)
+
+	cw := r.font.CellW
+	ch := r.font.CellH
+	rowH := ch + 2
+
+	// Panel layout: 80% width, full height minus 1-cell margin.
+	panelPad := cw
+	panelW := physW * 80 / 100
+	if panelW > physW-2*cw {
+		panelW = physW - 2*cw
+	}
+
+	screenPad := ch
+	topPad := ch / 2
+	titleH := ch + 12
+	dividerH := 8
+	bottomPad := ch / 2
+	overhead := topPad + titleH + dividerH + bottomPad
+
+	totalContentH := len(state.Lines) * rowH
+
+	maxPanelH := physH - 2*screenPad
+	if maxPanelH < overhead {
+		maxPanelH = overhead
+	}
+	visibleContentH := maxPanelH - overhead
+	if visibleContentH > totalContentH {
+		visibleContentH = totalContentH
+	}
+	panelH := overhead + visibleContentH
+	if panelH > physH {
+		panelH = physH
+		visibleContentH = panelH - overhead
+	}
+
+	// Update scroll metrics for input handler.
+	state.RowH = rowH
+	state.MaxScroll = totalContentH - visibleContentH
+	if state.MaxScroll < 0 {
+		state.MaxScroll = 0
+	}
+	if state.ScrollOffset < 0 {
+		state.ScrollOffset = 0
+	}
+	if state.ScrollOffset > state.MaxScroll {
+		state.ScrollOffset = state.MaxScroll
+	}
+
+	panelX := (physW - panelW) / 2
+	panelY := (physH - panelH) / 2
+	panelRect := image.Rect(panelX, panelY, panelX+panelW, panelY+panelH)
+
+	// Panel background and border.
+	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(r.ui.PanelBg)
+	r.drawOverlayBorder(panelRect)
+
+	// Title row.
+	titleY := panelY + topPad + 3
+	title := state.Title
+	if title == "" {
+		title = "Markdown Viewer"
+	}
+	titleX := panelX + (panelW-len([]rune(title))*cw)/2
+	r.font.DrawString(r.modalLayer, title, titleX, titleY, r.ui.Accent)
+
+	hint := "Esc close"
+	if state.MaxScroll > 0 {
+		hint = "j/k scroll  " + hint
+	}
+	hintX := panelRect.Max.X - panelPad - len([]rune(hint))*cw
+	r.font.DrawString(r.modalLayer, hint, hintX, titleY, r.ui.Dim)
+
+	// Divider.
+	divY := panelY + topPad + titleH + dividerH/2
+	r.modalLayer.SubImage(image.Rect(panelX+panelPad, divY, panelX+panelW-panelPad, divY+1)).(*ebiten.Image).Fill(r.ui.Border)
+
+	// Content clip region.
+	contentTop := divY + dividerH/2 + 2
+	contentClipRect := image.Rect(panelX, contentTop, panelX+panelW, contentTop+visibleContentH)
+	contentImg := r.modalLayer.SubImage(contentClipRect).(*ebiten.Image)
+
+	// Draw styled lines.
+	drawY := contentTop - state.ScrollOffset
+	contentLeft := panelX + panelPad
+	contentRight := panelX + panelW - panelPad
+
+	// Bright white for bold text.
+	boldColor := color.RGBA{0xFF, 0xFF, 0xFF, 0xFF}
+
+	for _, line := range state.Lines {
+		// HRule: draw a horizontal line instead of text.
+		if len(line.Spans) == 1 && line.Spans[0].Style == markdown.StyleHRule {
+			lineY := drawY + rowH/2
+			contentImg.SubImage(image.Rect(contentLeft, lineY, contentRight, lineY+1)).(*ebiten.Image).Fill(r.ui.Border)
+			drawY += rowH
+			continue
+		}
+
+		x := contentLeft + line.Indent*cw
+
+		// Code block lines get full-width background.
+		isCodeLine := len(line.Spans) > 0 && line.Spans[0].Style == markdown.StyleCodeBlock
+		if isCodeLine {
+			bgRect := image.Rect(contentLeft, drawY, contentRight, drawY+rowH)
+			contentImg.SubImage(bgRect).(*ebiten.Image).Fill(r.ui.HoverBg)
+		}
+
+		// Blockquote accent stripe.
+		if len(line.Spans) > 0 && line.Spans[0].Style == markdown.StyleBlockquote {
+			stripeX := contentLeft
+			contentImg.SubImage(image.Rect(stripeX, drawY, stripeX+2, drawY+rowH)).(*ebiten.Image).Fill(r.ui.Accent)
+		}
+
+		for _, span := range line.Spans {
+			textW := len([]rune(span.Text)) * cw
+
+			switch span.Style {
+			case markdown.StyleHeading1, markdown.StyleHeading2, markdown.StyleHeading3:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
+			case markdown.StyleBold:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, boldColor)
+			case markdown.StyleItalic:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Dim)
+			case markdown.StyleInlineCode:
+				bgRect := image.Rect(x-1, drawY, x+textW+1, drawY+rowH)
+				contentImg.SubImage(bgRect).(*ebiten.Image).Fill(r.ui.HoverBg)
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.KeyName)
+			case markdown.StyleCodeBlock:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Fg)
+			case markdown.StyleLink:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
+			case markdown.StyleBlockquote:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Dim)
+			case markdown.StyleListItem:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
+			default:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Fg)
+			}
+
+			x += textW
+		}
+
+		drawY += rowH
+	}
+
+	// Scrollbar.
+	if state.MaxScroll > 0 {
+		sbX := panelRect.Max.X - 4
+		sbTrackY := contentTop
+		sbTrackH := visibleContentH
+		thumbH := sbTrackH * visibleContentH / totalContentH
+		if thumbH < 8 {
+			thumbH = 8
+		}
+		thumbY := sbTrackY + (sbTrackH-thumbH)*state.ScrollOffset/state.MaxScroll
+		r.modalLayer.SubImage(image.Rect(sbX, thumbY, sbX+3, thumbY+thumbH)).(*ebiten.Image).Fill(r.ui.Dim)
+	}
 }
 
 // drawOverlayBorder draws a 1px border around rect.

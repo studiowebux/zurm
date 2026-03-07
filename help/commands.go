@@ -76,6 +76,7 @@ func AllCommands() []Command {
 		// Help
 		{Name: "Show Keybindings", Shortcut: "Cmd+/"},
 		{Name: "Command Palette", Shortcut: "Cmd+P"},
+		{Name: "Markdown Reader Mode", Shortcut: "Cmd+Shift+M"},
 		// Config
 		{Name: "Reload Config", Shortcut: "Cmd+,"},
 		// App

@@ -22,6 +22,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/studiowebux/zurm/config"
 	"github.com/studiowebux/zurm/fileexplorer"
+	"github.com/studiowebux/zurm/markdown"
 	"github.com/studiowebux/zurm/help"
 	"github.com/studiowebux/zurm/pane"
 	"github.com/studiowebux/zurm/recorder"
@@ -217,6 +218,9 @@ type Game struct {
 
 	// Text-to-speech via macOS AVSpeechSynthesizer.
 	speaker voice.Speaker
+
+	// Markdown viewer overlay state (Cmd+Shift+M).
+	mdViewerState renderer.MarkdownViewerState
 
 	// Speech-to-text via macOS SFSpeechRecognizer.
 	listener              voice.Listener
@@ -633,7 +637,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.renderer.DrawAll(screen, g.tabs, g.activeTab, g.focused, g.zoomed,
 		&g.menuState, &g.overlayState, &g.confirmState, &g.searchState, &g.statusBarState, &g.tabSwitcherState,
 		&g.paletteState, g.paletteEntries, &g.fileExplorerState, &g.tabSearchState, &g.statsState, &g.tabHoverState,
-		&g.dictationState)
+		&g.dictationState, &g.mdViewerState)
 	g.screenDirty = false
 	g.lastClockSec = time.Now().Unix()
 
@@ -738,6 +742,13 @@ func (g *Game) handleInput() {
 	if g.pinMode {
 		g.screenDirty = true
 		g.handlePinInput()
+		return
+	}
+
+	// When the markdown viewer is open, route input to markdown viewer handling.
+	if g.mdViewerState.Open {
+		g.screenDirty = true
+		g.handleMarkdownViewerInput()
 		return
 	}
 
@@ -983,6 +994,10 @@ func (g *Game) handleInput() {
 			case meta && shift && key == ebiten.KeyU:
 				// Cmd+Shift+U — read selection aloud (TTS).
 				g.speakSelection()
+
+			case meta && shift && key == ebiten.KeyM:
+				// Cmd+Shift+M — markdown reader mode.
+				g.openMarkdownViewer()
 
 			// Tab management.
 			case meta && shift && key == ebiten.KeyT:
@@ -5146,6 +5161,7 @@ func (g *Game) buildPalette() {
 		// Help
 		g.toggleOverlay,
 		g.openPalette,
+		g.openMarkdownViewer,
 		// Config
 		g.reloadConfig,
 		// App
@@ -5913,5 +5929,128 @@ func resolveShellPath() {
 	}
 	if len(added) > 0 {
 		os.Setenv("PATH", currentPath+":"+strings.Join(added, ":"))
+	}
+}
+
+// openMarkdownViewer captures terminal content and opens the markdown viewer overlay.
+func (g *Game) openMarkdownViewer() {
+	content := g.captureMarkdownContent()
+	if content == "" {
+		g.flashStatus("No content to render")
+		return
+	}
+	g.openMarkdownViewerWithContent(content, "Markdown Viewer")
+}
+
+// openMarkdownViewerWithContent opens the markdown viewer with arbitrary content.
+// Reuse point for future llms.txt browser.
+func (g *Game) openMarkdownViewerWithContent(content, title string) {
+	// Determine column width from focused pane for wrapping.
+	cols := 80
+	if g.focused != nil {
+		g.focused.Term.Buf.RLock()
+		cols = g.focused.Term.Buf.Cols
+		g.focused.Term.Buf.RUnlock()
+	}
+	// Use 80% of panel width for text wrapping.
+	wrapCols := cols * 80 / 100
+	if wrapCols < 40 {
+		wrapCols = 40
+	}
+
+	lines := markdown.Parse(content, wrapCols)
+	g.mdViewerState = renderer.MarkdownViewerState{
+		Open:  true,
+		Title: title,
+		Lines: lines,
+	}
+	g.screenDirty = true
+}
+
+// captureMarkdownContent extracts text from the terminal for markdown viewing.
+// Priority: last block output > active selection > visible screen.
+func (g *Game) captureMarkdownContent() string {
+	if g.focused == nil {
+		return ""
+	}
+
+	buf := g.focused.Term.Buf
+	buf.RLock()
+	defer buf.RUnlock()
+
+	// Priority 1: last completed block output.
+	if g.blocksEnabled && len(buf.Blocks) > 0 {
+		// Find the last block with valid output range.
+		for i := len(buf.Blocks) - 1; i >= 0; i-- {
+			b := buf.Blocks[i]
+			if b.AbsCmdRow >= 0 && b.AbsEndRow > b.AbsCmdRow {
+				return buf.TextRange(b.AbsCmdRow, b.AbsEndRow)
+			}
+		}
+	}
+
+	// Priority 2: active selection.
+	sel := buf.Selection
+	if sel.Active {
+		norm := sel.Normalize()
+		return buf.TextRange(norm.StartRow, norm.EndRow)
+	}
+
+	// Priority 3: visible screen.
+	sbLen := buf.ScrollbackLen()
+	viewStart := sbLen + buf.ViewOffset
+	viewEnd := viewStart + buf.Rows - 1
+	return buf.TextRange(viewStart, viewEnd)
+}
+
+// handleMarkdownViewerInput processes keyboard input while the markdown viewer is open.
+func (g *Game) handleMarkdownViewerInput() {
+	// ESC or Cmd+Shift+M: close viewer.
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.mdViewerState = renderer.MarkdownViewerState{}
+		g.renderer.SetLayoutDirty()
+		g.prevKeys[ebiten.KeyEscape] = true
+		return
+	}
+
+	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	shift := ebiten.IsKeyPressed(ebiten.KeyShift)
+	if meta && shift && inpututil.IsKeyJustPressed(ebiten.KeyM) {
+		g.mdViewerState = renderer.MarkdownViewerState{}
+		g.renderer.SetLayoutDirty()
+		return
+	}
+
+	edgeKeys := []ebiten.Key{
+		ebiten.KeyArrowUp, ebiten.KeyArrowDown,
+		ebiten.KeyJ, ebiten.KeyK,
+		ebiten.KeyPageUp, ebiten.KeyPageDown,
+		ebiten.KeyHome, ebiten.KeyEnd,
+	}
+
+	for _, key := range edgeKeys {
+		pressed := ebiten.IsKeyPressed(key)
+		wasPressed := g.prevKeys[key]
+		if pressed && !wasPressed {
+			rowH := g.mdViewerState.RowH
+			if rowH == 0 {
+				rowH = 16
+			}
+			switch key {
+			case ebiten.KeyArrowUp, ebiten.KeyK:
+				g.mdViewerState.ScrollOffset -= rowH
+			case ebiten.KeyArrowDown, ebiten.KeyJ:
+				g.mdViewerState.ScrollOffset += rowH
+			case ebiten.KeyPageUp:
+				g.mdViewerState.ScrollOffset -= 10 * rowH
+			case ebiten.KeyPageDown:
+				g.mdViewerState.ScrollOffset += 10 * rowH
+			case ebiten.KeyHome:
+				g.mdViewerState.ScrollOffset = 0
+			case ebiten.KeyEnd:
+				g.mdViewerState.ScrollOffset = g.mdViewerState.MaxScroll
+			}
+		}
+		g.prevKeys[key] = pressed
 	}
 }
