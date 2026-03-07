@@ -16,6 +16,11 @@ import (
 type StatusBarState struct {
 	Cwd             string
 	GitBranch       string
+	GitCommit       string // short commit hash (7 chars)
+	GitDirty        int    // modified file count
+	GitStaged       int    // staged file count
+	GitAhead        int    // commits ahead of upstream
+	GitBehind       int    // commits behind upstream
 	ForegroundProc  string          // foreground process name, "" when shell is foreground
 	ScrollOffset    int             // buf.ViewOffset of the focused pane; 0 = live output
 	Zoomed          bool            // true when a pane is fullscreened via Cmd+Z
@@ -137,7 +142,33 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 	// --- Left middle segments: branch then process ---
 	var midSegs []seg
 	if r.cfg.StatusBar.ShowGit && state.GitBranch != "" {
-		midSegs = append(midSegs, seg{r.cfg.StatusBar.BranchPrefix + state.GitBranch, fg})
+		gitText := r.cfg.StatusBar.BranchPrefix + state.GitBranch
+		if r.cfg.StatusBar.ShowCommit && state.GitCommit != "" {
+			gitText += " " + state.GitCommit
+		}
+		if r.cfg.StatusBar.ShowDirty {
+			var gitFlags []string
+			if state.GitStaged > 0 {
+				gitFlags = append(gitFlags, fmt.Sprintf("+%d", state.GitStaged))
+			}
+			if state.GitDirty > 0 {
+				gitFlags = append(gitFlags, fmt.Sprintf("~%d", state.GitDirty))
+			}
+			if len(gitFlags) > 0 {
+				gitText += " " + strings.Join(gitFlags, " ")
+			}
+		}
+		if r.cfg.StatusBar.ShowAheadBehind && (state.GitAhead > 0 || state.GitBehind > 0) {
+			var arrows []string
+			if state.GitAhead > 0 {
+				arrows = append(arrows, fmt.Sprintf("%d^", state.GitAhead))
+			}
+			if state.GitBehind > 0 {
+				arrows = append(arrows, fmt.Sprintf("%dv", state.GitBehind))
+			}
+			gitText += " " + strings.Join(arrows, " ")
+		}
+		midSegs = append(midSegs, seg{gitText, fg})
 	}
 	if r.cfg.StatusBar.ShowProcess && state.ForegroundProc != "" {
 		midSegs = append(midSegs, seg{state.ForegroundProc, accentFg})

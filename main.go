@@ -135,7 +135,7 @@ type Game struct {
 
 	// Status bar state.
 	statusBarState renderer.StatusBarState
-	gitBranchCh    chan string // receives async git branch results
+	gitInfoCh chan gitInfo // receives async git status results
 
 	// Tab switcher overlay state (pin-style).
 	tabSwitcherState renderer.TabSwitcherState
@@ -1390,8 +1390,18 @@ func (g *Game) drainTitle() {
 	}
 }
 
+// gitInfo holds all git status data gathered asynchronously.
+type gitInfo struct {
+	Branch  string
+	Commit  string
+	Dirty   int
+	Staged  int
+	Ahead   int
+	Behind  int
+}
+
 // drainCwd reads the latest CWD from the focused pane's OSC 7 channel.
-// When the CWD changes it kicks off an async git branch lookup.
+// When the CWD changes it kicks off an async git status lookup.
 func (g *Game) drainCwd() {
 	select {
 	case cwd := <-g.focused.Term.CwdCh:
@@ -1399,19 +1409,60 @@ func (g *Game) drainCwd() {
 			g.statusBarState.Cwd = cwd
 			g.focused.Term.Cwd = cwd
 			g.statusBarState.GitBranch = "" // clear until new result arrives
+			g.statusBarState.GitCommit = ""
+			g.statusBarState.GitDirty = 0
+			g.statusBarState.GitStaged = 0
+			g.statusBarState.GitAhead = 0
+			g.statusBarState.GitBehind = 0
 			if g.cfg.StatusBar.ShowGit {
-				g.gitBranchCh = make(chan string, 1)
-				ch := g.gitBranchCh
+				g.gitInfoCh = make(chan gitInfo, 1)
+				ch := g.gitInfoCh
 				go func() {
-					out, err := exec.Command("git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD").Output() // #nosec G204 — fixed binary, user CWD only
-					if err != nil {
-						ch <- ""
+					info := gitInfo{}
+
+					// Branch name.
+					if out, err := exec.Command("git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil { // #nosec G204
+						info.Branch = strings.TrimSpace(string(out))
+					} else {
+						ch <- info
 						return
 					}
-					ch <- strings.TrimSpace(string(out))
+
+					// Short commit hash.
+					if out, err := exec.Command("git", "-C", cwd, "rev-parse", "--short", "HEAD").Output(); err == nil { // #nosec G204
+						info.Commit = strings.TrimSpace(string(out))
+					}
+
+					// Dirty and staged counts from porcelain status.
+					if out, err := exec.Command("git", "-C", cwd, "status", "--porcelain").Output(); err == nil { // #nosec G204
+						for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+							if len(line) < 2 {
+								continue
+							}
+							idx := line[0]
+							wt := line[1]
+							if idx != ' ' && idx != '?' {
+								info.Staged++
+							}
+							if wt != ' ' && wt != '?' {
+								info.Dirty++
+							}
+						}
+					}
+
+					// Ahead/behind upstream.
+					if out, err := exec.Command("git", "-C", cwd, "rev-list", "--left-right", "--count", "HEAD...@{upstream}").Output(); err == nil { // #nosec G204
+						parts := strings.Fields(strings.TrimSpace(string(out)))
+						if len(parts) == 2 {
+							fmt.Sscanf(parts[0], "%d", &info.Ahead)
+							fmt.Sscanf(parts[1], "%d", &info.Behind)
+						}
+					}
+
+					ch <- info
 				}()
 			}
-		g.screenDirty = true
+			g.screenDirty = true
 		}
 	default:
 	}
@@ -1514,15 +1565,20 @@ func (g *Game) drainBlockDone() {
 	}
 }
 
-// drainGitBranch reads a completed async git branch result when available.
+// drainGitBranch reads a completed async git info result when available.
 func (g *Game) drainGitBranch() {
-	if g.gitBranchCh == nil {
+	if g.gitInfoCh == nil {
 		return
 	}
 	select {
-	case branch := <-g.gitBranchCh:
-		g.statusBarState.GitBranch = branch
-		g.gitBranchCh = nil
+	case info := <-g.gitInfoCh:
+		g.statusBarState.GitBranch = info.Branch
+		g.statusBarState.GitCommit = info.Commit
+		g.statusBarState.GitDirty = info.Dirty
+		g.statusBarState.GitStaged = info.Staged
+		g.statusBarState.GitAhead = info.Ahead
+		g.statusBarState.GitBehind = info.Behind
+		g.gitInfoCh = nil
 		g.screenDirty = true
 	default:
 	}

@@ -67,6 +67,9 @@ show_cwd             = true
 show_git             = true
 show_clock           = false   # forces a redraw every second; enable if you want it
 show_process         = true    # foreground process name (polls every 1 s via TIOCGPGRP)
+show_commit          = true    # short commit hash next to branch name
+show_dirty           = true    # modified (~N) and staged (+N) file counts
+show_ahead_behind    = true    # commits ahead/behind upstream (N^ Nv)
 branch_prefix        = ""      # set to " " if you have a Nerd Font patched JetBrains Mono
 segment_separator    = " · "   # separator drawn between status bar segments
 separator_height_px  = 1       # height of top border line (0 = hidden)
@@ -190,6 +193,9 @@ type StatusBarConfig struct {
 	ShowCwd            bool   `toml:"show_cwd"`
 	ShowClock          bool   `toml:"show_clock"`
 	ShowProcess        bool   `toml:"show_process"`
+	ShowCommit         bool   `toml:"show_commit"`           // short commit hash
+	ShowDirty          bool   `toml:"show_dirty"`            // modified/staged file counts
+	ShowAheadBehind    bool   `toml:"show_ahead_behind"`     // commits ahead/behind upstream
 	BranchPrefix       string `toml:"branch_prefix"`         // e.g. " " with a Nerd Font
 	SegmentSeparator   string `toml:"segment_separator"`     // e.g. " · " or " | "
 	SeparatorHeightPx  int    `toml:"separator_height_px"`   // height of top border line
