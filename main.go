@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"flag"
 	"fmt"
@@ -143,7 +144,8 @@ type Game struct {
 
 	// Status bar state.
 	statusBarState renderer.StatusBarState
-	gitInfoCh chan gitInfo // receives async git status results
+	gitInfoCh     chan gitInfo     // receives async git status results
+	gitInfoCancel context.CancelFunc // cancels the previous git info goroutine
 
 	// Tab switcher overlay state (pin-style).
 	tabSwitcherState renderer.TabSwitcherState
@@ -1482,13 +1484,20 @@ func (g *Game) drainCwd() {
 			g.statusBarState.GitAhead = 0
 			g.statusBarState.GitBehind = 0
 			if g.cfg.StatusBar.ShowGit {
+				// Cancel any in-flight git query before starting a new one.
+				if g.gitInfoCancel != nil {
+					g.gitInfoCancel()
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				g.gitInfoCancel = cancel
 				g.gitInfoCh = make(chan gitInfo, 1)
 				ch := g.gitInfoCh
 				go func() {
+					defer cancel()
 					info := gitInfo{}
 
 					// Branch name.
-					if out, err := exec.Command("git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil { // #nosec G204
+					if out, err := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil { // #nosec G204
 						info.Branch = strings.TrimSpace(string(out))
 					} else {
 						ch <- info
@@ -1496,12 +1505,12 @@ func (g *Game) drainCwd() {
 					}
 
 					// Short commit hash.
-					if out, err := exec.Command("git", "-C", cwd, "rev-parse", "--short", "HEAD").Output(); err == nil { // #nosec G204
+					if out, err := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse", "--short", "HEAD").Output(); err == nil { // #nosec G204
 						info.Commit = strings.TrimSpace(string(out))
 					}
 
 					// Dirty and staged counts from porcelain status.
-					if out, err := exec.Command("git", "-C", cwd, "status", "--porcelain").Output(); err == nil { // #nosec G204
+					if out, err := exec.CommandContext(ctx, "git", "-C", cwd, "status", "--porcelain").Output(); err == nil { // #nosec G204
 						for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
 							if len(line) < 2 {
 								continue
@@ -1518,7 +1527,7 @@ func (g *Game) drainCwd() {
 					}
 
 					// Ahead/behind upstream.
-					if out, err := exec.Command("git", "-C", cwd, "rev-list", "--left-right", "--count", "HEAD...@{upstream}").Output(); err == nil { // #nosec G204
+					if out, err := exec.CommandContext(ctx, "git", "-C", cwd, "rev-list", "--left-right", "--count", "HEAD...@{upstream}").Output(); err == nil { // #nosec G204
 						parts := strings.Fields(strings.TrimSpace(string(out)))
 						if len(parts) == 2 {
 							fmt.Sscanf(parts[0], "%d", &info.Ahead)
