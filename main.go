@@ -29,6 +29,7 @@ import (
 	"github.com/studiowebux/zurm/session"
 	"github.com/studiowebux/zurm/tab"
 	"github.com/studiowebux/zurm/terminal"
+	"github.com/studiowebux/zurm/voice"
 )
 
 // version is set at build time via -ldflags "-X main.version=vX.Y.Z".
@@ -213,6 +214,9 @@ type Game struct {
 
 	// lastBellSound debounces system sound + dock badge to avoid spamming.
 	lastBellSound time.Time
+
+	// Text-to-speech via macOS `say` CLI.
+	speaker voice.Speaker
 }
 
 func main() {
@@ -912,6 +916,10 @@ func (g *Game) handleInput() {
 			case meta && shift && key == ebiten.KeyPeriod:
 				// Cmd+Shift+. — toggle screen recording.
 				g.toggleRecording()
+
+			case meta && shift && key == ebiten.KeyU:
+				// Cmd+Shift+U — read selection aloud (TTS).
+				g.speakSelection()
 
 			// Tab management.
 			case meta && shift && key == ebiten.KeyT:
@@ -4947,6 +4955,9 @@ func (g *Game) buildPalette() {
 		// Recording
 		func() { g.screenshotPending = true; g.screenDirty = true },
 		g.toggleRecording,
+		// Speech
+		g.speakSelection,
+		g.stopSpeaking,
 		// Help
 		g.toggleOverlay,
 		g.openPalette,
@@ -5362,6 +5373,112 @@ func (g *Game) flashStatus(msg string) {
 	g.statusBarState.FlashMessage = msg
 	g.flashExpiry = time.Now().Add(3 * time.Second)
 	g.screenDirty = true
+}
+
+// speakSelection extracts the current selection (or visible buffer if no
+// selection) and reads it aloud via the macOS `say` command.
+func (g *Game) speakSelection() {
+	if !g.cfg.Voice.Enabled {
+		return
+	}
+
+	text := g.extractSelectedText()
+	if text == "" {
+		text = g.getVisibleBufferText()
+	}
+	if text == "" {
+		g.flashStatus("Nothing to speak")
+		return
+	}
+
+	if err := g.speaker.Speak(text, g.cfg.Voice.Voice, g.cfg.Voice.Rate); err != nil {
+		g.flashStatus("Speech failed: " + err.Error())
+		return
+	}
+	g.flashStatus("Speaking…")
+}
+
+// stopSpeaking kills any active TTS process.
+func (g *Game) stopSpeaking() {
+	g.speaker.Stop()
+	g.flashStatus("Speech stopped")
+}
+
+// extractSelectedText returns the selected text from the focused pane,
+// or empty string if no selection is active.
+func (g *Game) extractSelectedText() string {
+	g.focused.Term.Buf.RLock()
+	sel := g.focused.Term.Buf.Selection
+	cols := g.focused.Term.Buf.Cols
+
+	if !sel.Active {
+		g.focused.Term.Buf.RUnlock()
+		return ""
+	}
+
+	norm := sel.Normalize()
+	maxAbsRow := g.focused.Term.Buf.ScrollbackLen() + g.focused.Term.Buf.Rows - 1
+	if norm.StartRow < 0 {
+		norm.StartRow = 0
+	}
+	if norm.EndRow > maxAbsRow {
+		norm.EndRow = maxAbsRow
+	}
+
+	var text strings.Builder
+	for r := norm.StartRow; r <= norm.EndRow; r++ {
+		if r > norm.StartRow && !g.focused.Term.Buf.IsAbsRowWrapped(r) {
+			text.WriteByte('\n')
+		}
+		colStart := 0
+		colEnd := cols - 1
+		if r == norm.StartRow {
+			colStart = norm.StartCol
+		}
+		if r == norm.EndRow {
+			colEnd = norm.EndCol
+		}
+		var line strings.Builder
+		for c := colStart; c <= colEnd && c < cols; c++ {
+			ch := g.focused.Term.Buf.GetAbsCell(r, c).Char
+			if ch == 0 {
+				ch = ' '
+			}
+			line.WriteRune(ch)
+		}
+		text.WriteString(strings.TrimRight(line.String(), " "))
+	}
+	g.focused.Term.Buf.RUnlock()
+	return text.String()
+}
+
+// getVisibleBufferText returns all text currently visible in the focused pane.
+func (g *Game) getVisibleBufferText() string {
+	g.focused.Term.Buf.RLock()
+	defer g.focused.Term.Buf.RUnlock()
+
+	rows := g.focused.Term.Buf.Rows
+	cols := g.focused.Term.Buf.Cols
+	var text strings.Builder
+	for r := 0; r < rows; r++ {
+		absRow := g.focused.Term.Buf.DisplayToAbsRow(r)
+		var line strings.Builder
+		for c := 0; c < cols; c++ {
+			ch := g.focused.Term.Buf.GetAbsCell(absRow, c).Char
+			if ch == 0 {
+				ch = ' '
+			}
+			line.WriteRune(ch)
+		}
+		trimmed := strings.TrimRight(line.String(), " ")
+		if trimmed != "" || r < rows-1 {
+			if r > 0 {
+				text.WriteByte('\n')
+			}
+			text.WriteString(trimmed)
+		}
+	}
+	return strings.TrimRight(text.String(), "\n ")
 }
 
 // toggleRecording starts or stops a screen recording (FFMPEG → MP4).
