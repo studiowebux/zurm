@@ -191,7 +191,7 @@ func (r *Renderer) StatusBarHeight() int {
 }
 
 // DrawAll renders the tab bar, all panes, status bar, and any active UI overlays onto screen.
-func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int, focused *pane.Pane, zoomed bool, menu *MenuState, overlay *OverlayState, confirm *ConfirmState, search *SearchState, statusBar *StatusBarState, tabSwitcher *TabSwitcherState, palette *PaletteState, paletteEntries []PaletteEntry, fileExplorer *FileExplorerState, tabSearch *TabSearchState) {
+func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int, focused *pane.Pane, zoomed bool, menu *MenuState, overlay *OverlayState, confirm *ConfirmState, search *SearchState, statusBar *StatusBarState, tabSwitcher *TabSwitcherState, palette *PaletteState, paletteEntries []PaletteEntry, fileExplorer *FileExplorerState, tabSearch *TabSearchState, stats *StatsState) {
 	if r.offscreen == nil {
 		return
 	}
@@ -336,6 +336,9 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 
 	// Search bar drawn above pane content, below status bar (non-modal, stays in offscreen).
 	r.drawSearchBar(search)
+
+	// Stats overlay drawn above pane content (non-modal, stays in offscreen).
+	r.drawStats(stats)
 
 	// Status bar drawn last into offscreen so it always sits on top of pane content.
 	r.drawStatusBar(statusBar)

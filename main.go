@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"runtime"
 	"path/filepath"
 	"strings"
 	"time"
@@ -199,6 +200,10 @@ type Game struct {
 	recBuf          []byte     // reusable pixel buffer for frame capture (avoids per-frame alloc)
 	recLastFrame    time.Time  // last frame capture time (throttle to 30fps)
 	recLastStatusSec int64    // unix second of last status bar update (throttle os.Stat + blink)
+
+	// Stats overlay state (Cmd+I).
+	statsState     renderer.StatsState
+	statsLastTick  time.Time // last stats collection time
 
 	// flashExpiry is when statusBarState.FlashMessage should be cleared.
 	flashExpiry time.Time
@@ -507,6 +512,11 @@ func (g *Game) needsRender() bool {
 	if g.cfg.StatusBar.ShowClock && time.Now().Unix() != g.lastClockSec {
 		return true
 	}
+	// Stats overlay refreshes once per second when open.
+	if g.statsState.Open && time.Since(g.statsLastTick) >= time.Second {
+		g.collectStats()
+		return true
+	}
 	return false
 }
 
@@ -560,7 +570,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	g.renderer.DrawAll(screen, g.tabs, g.activeTab, g.focused, g.zoomed,
 		&g.menuState, &g.overlayState, &g.confirmState, &g.searchState, &g.statusBarState, &g.tabSwitcherState,
-		&g.paletteState, g.paletteEntries, &g.fileExplorerState, &g.tabSearchState)
+		&g.paletteState, g.paletteEntries, &g.fileExplorerState, &g.tabSearchState, &g.statsState)
 	g.screenDirty = false
 	g.lastClockSec = time.Now().Unix()
 
@@ -850,6 +860,17 @@ func (g *Game) handleInput() {
 					g.flashStatus("Command blocks: on")
 				} else {
 					g.flashStatus("Command blocks: off")
+				}
+
+			case meta && key == ebiten.KeyI:
+				// Cmd+I — toggle stats overlay.
+				g.statsState.Open = !g.statsState.Open
+				if g.statsState.Open {
+					g.collectStats()
+					g.flashStatus("Stats: on")
+				} else {
+					g.renderer.SetLayoutDirty() // clear stale overlay pixels from offscreen
+					g.flashStatus("Stats: off")
 				}
 
 			case meta && !shift && key == ebiten.KeyEqual:
@@ -4786,6 +4807,17 @@ func (g *Game) buildPalette() {
 			}
 		},
 		g.installShellHooks,
+		// Stats
+		func() {
+			g.statsState.Open = !g.statsState.Open
+			if g.statsState.Open {
+				g.collectStats()
+				g.flashStatus("Stats: on")
+			} else {
+				g.renderer.SetLayoutDirty()
+				g.flashStatus("Stats: off")
+			}
+		},
 		// Session
 		g.manualSaveSession,
 		// Recording
@@ -4972,6 +5004,37 @@ func (g *Game) handleOverlayInput() {
 			}
 		}
 	}
+}
+
+// collectStats populates the stats overlay with current runtime metrics.
+func (g *Game) collectStats() {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	g.statsState.TPS = ebiten.ActualTPS()
+	g.statsState.FPS = ebiten.ActualFPS()
+	g.statsState.Goroutines = runtime.NumGoroutine()
+	g.statsState.HeapAlloc = m.HeapAlloc
+	g.statsState.HeapSys = m.HeapSys
+	g.statsState.NumGC = m.NumGC
+	if m.NumGC > 0 {
+		g.statsState.GCPauseNs = m.PauseNs[(m.NumGC+255)%256]
+	}
+	g.statsState.TabCount = len(g.tabs)
+	paneCount := 0
+	for _, t := range g.tabs {
+		paneCount += len(t.Layout.Leaves())
+	}
+	g.statsState.PaneCount = paneCount
+	if g.focused != nil {
+		g.focused.Term.Buf.RLock()
+		g.statsState.BufRows = g.focused.Term.Buf.Rows
+		g.statsState.BufCols = g.focused.Term.Buf.Cols
+		g.statsState.Scrollback = g.focused.Term.Buf.ScrollbackLen()
+		g.focused.Term.Buf.RUnlock()
+	}
+	g.statsLastTick = time.Now()
+	g.screenDirty = true
 }
 
 // saveSession persists the current tab state to the session file.
