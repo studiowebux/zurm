@@ -191,7 +191,7 @@ func (r *Renderer) StatusBarHeight() int {
 }
 
 // DrawAll renders the tab bar, all panes, status bar, and any active UI overlays onto screen.
-func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int, focused *pane.Pane, zoomed bool, menu *MenuState, overlay *OverlayState, confirm *ConfirmState, search *SearchState, statusBar *StatusBarState, tabSwitcher *TabSwitcherState, palette *PaletteState, paletteEntries []PaletteEntry, fileExplorer *FileExplorerState, tabSearch *TabSearchState, stats *StatsState) {
+func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int, focused *pane.Pane, zoomed bool, menu *MenuState, overlay *OverlayState, confirm *ConfirmState, search *SearchState, statusBar *StatusBarState, tabSwitcher *TabSwitcherState, palette *PaletteState, paletteEntries []PaletteEntry, fileExplorer *FileExplorerState, tabSearch *TabSearchState, stats *StatsState, tabHover *TabHoverState) {
 	if r.offscreen == nil {
 		return
 	}
@@ -345,6 +345,10 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 
 	// All modal/overlay content draws onto modalLayer (cleared above) so it always
 	// composites above blocksLayer in the final screen pass below.
+
+	// Tab hover popover — drawn first onto modalLayer so it sits below other modals.
+	// modalLayer is cleared every frame, preventing stale pixel accumulation.
+	r.drawTabHoverPopover(tabHover)
 
 	// Context menu drawn above terminal content.
 	if menu != nil {
@@ -505,10 +509,17 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int) {
 // search, when non-nil and open, highlights matched cells in the pane.
 func (r *Renderer) DrawPane(buf *terminal.ScreenBuffer, cur *terminal.Cursor,
 	rect image.Rectangle, isFocused bool, showBorder bool, search *SearchState, headerH int) {
+	r.drawPaneTo(r.offscreen, buf, cur, rect, isFocused, showBorder, search, headerH)
+}
+
+// drawPaneTo renders a single pane into an arbitrary destination image.
+// Extracted from DrawPane so thumbnails can render to a temp image.
+func (r *Renderer) drawPaneTo(dst *ebiten.Image, buf *terminal.ScreenBuffer, cur *terminal.Cursor,
+	rect image.Rectangle, isFocused bool, showBorder bool, search *SearchState, headerH int) {
 
 	bg := config.ParseHexColor(r.cfg.Colors.Background)
 
-	r.offscreen.SubImage(rect).(*ebiten.Image).Fill(bg)
+	dst.SubImage(rect).(*ebiten.Image).Fill(bg)
 
 	rows := buf.Rows
 	cols := buf.Cols
@@ -590,7 +601,7 @@ func (r *Renderer) DrawPane(buf *terminal.ScreenBuffer, cur *terminal.Cursor,
 				ch = ' '
 			}
 
-			r.font.DrawGlyph(r.offscreen, ch, x, y, fg, cbg, cell.Bold, underline)
+			r.font.DrawGlyph(dst, ch, x, y, fg, cbg, cell.Bold, underline)
 		}
 	}
 
@@ -611,7 +622,7 @@ func (r *Renderer) DrawPane(buf *terminal.ScreenBuffer, cur *terminal.Cursor,
 				cursorStyle = 2
 			}
 
-			r.font.DrawCursor(r.offscreen, x, y, cursorStyle, r.cursorColor)
+			r.font.DrawCursor(dst, x, y, cursorStyle, r.cursorColor)
 
 			if cur.Style == terminal.CursorBlock {
 				cell := buf.GetDisplayCell(curRow, curCol)
@@ -619,7 +630,7 @@ func (r *Renderer) DrawPane(buf *terminal.ScreenBuffer, cur *terminal.Cursor,
 				if ch == 0 {
 					ch = ' '
 				}
-				r.font.DrawGlyph(r.offscreen, ch, x, y,
+				r.font.DrawGlyph(dst, ch, x, y,
 					config.ParseHexColor(r.cfg.Colors.Background),
 					r.cursorColor,
 					cell.Bold, cell.Underline)
@@ -628,7 +639,7 @@ func (r *Renderer) DrawPane(buf *terminal.ScreenBuffer, cur *terminal.Cursor,
 	}
 
 	if showBorder {
-		r.drawBorder(rect, r.cursorColor)
+		r.drawBorderTo(dst, rect, r.cursorColor)
 	}
 }
 
@@ -701,13 +712,17 @@ func (r *Renderer) drawDividers(node *pane.LayoutNode) {
 	r.drawDividers(node.Right)
 }
 
-// drawBorder draws a 1px rectangle border just inside rect.
+// drawBorder draws a 1px rectangle border just inside rect on r.offscreen.
 func (r *Renderer) drawBorder(rect image.Rectangle, clr color.RGBA) {
-	img := r.offscreen
-	img.SubImage(image.Rect(rect.Min.X, rect.Min.Y, rect.Max.X, rect.Min.Y+1)).(*ebiten.Image).Fill(clr)
-	img.SubImage(image.Rect(rect.Min.X, rect.Max.Y-1, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(clr)
-	img.SubImage(image.Rect(rect.Min.X, rect.Min.Y, rect.Min.X+1, rect.Max.Y)).(*ebiten.Image).Fill(clr)
-	img.SubImage(image.Rect(rect.Max.X-1, rect.Min.Y, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(clr)
+	r.drawBorderTo(r.offscreen, rect, clr)
+}
+
+// drawBorderTo draws a 1px rectangle border just inside rect on dst.
+func (r *Renderer) drawBorderTo(dst *ebiten.Image, rect image.Rectangle, clr color.RGBA) {
+	dst.SubImage(image.Rect(rect.Min.X, rect.Min.Y, rect.Max.X, rect.Min.Y+1)).(*ebiten.Image).Fill(clr)
+	dst.SubImage(image.Rect(rect.Min.X, rect.Max.Y-1, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(clr)
+	dst.SubImage(image.Rect(rect.Min.X, rect.Min.Y, rect.Min.X+1, rect.Max.Y)).(*ebiten.Image).Fill(clr)
+	dst.SubImage(image.Rect(rect.Max.X-1, rect.Min.Y, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(clr)
 }
 
 // drawThickBorder draws a border of the given thickness just inside rect.
@@ -717,4 +732,37 @@ func (r *Renderer) drawThickBorder(rect image.Rectangle, clr color.RGBA, thick i
 	img.SubImage(image.Rect(rect.Min.X, rect.Max.Y-thick, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(clr)
 	img.SubImage(image.Rect(rect.Min.X, rect.Min.Y, rect.Min.X+thick, rect.Max.Y)).(*ebiten.Image).Fill(clr)
 	img.SubImage(image.Rect(rect.Max.X-thick, rect.Min.Y, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(clr)
+}
+
+// drawDividersTo paints divider strips between sibling panes onto dst,
+// offsetting all rects by (offsetX, offsetY) for thumbnail rendering.
+func (r *Renderer) drawDividersTo(dst *ebiten.Image, node *pane.LayoutNode, offsetX, offsetY int) {
+	if node == nil || node.Kind == pane.Leaf {
+		return
+	}
+	left := node.Left
+	right := node.Right
+	if left != nil && right != nil {
+		var gap image.Rectangle
+		if node.Kind == pane.HSplit {
+			if right.Rect.Min.X > left.Rect.Max.X {
+				gap = image.Rect(
+					left.Rect.Max.X+offsetX, node.Rect.Min.Y+offsetY,
+					right.Rect.Min.X+offsetX, node.Rect.Max.Y+offsetY,
+				)
+			}
+		} else {
+			if right.Rect.Min.Y > left.Rect.Max.Y {
+				gap = image.Rect(
+					node.Rect.Min.X+offsetX, left.Rect.Max.Y+offsetY,
+					node.Rect.Max.X+offsetX, right.Rect.Min.Y+offsetY,
+				)
+			}
+		}
+		if !gap.Empty() {
+			dst.SubImage(gap).(*ebiten.Image).Fill(r.borderColor)
+		}
+	}
+	r.drawDividersTo(dst, node.Left, offsetX, offsetY)
+	r.drawDividersTo(dst, node.Right, offsetX, offsetY)
 }

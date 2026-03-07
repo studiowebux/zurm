@@ -65,6 +65,12 @@ var Defaults = Config{
 	Tabs: TabsConfig{
 		MaxWidthChars: 24,
 		NewTabDir:     "cwd",
+		Hover: TabHoverConfig{
+			Enabled: true,
+			DelayMs: 300,
+			Width:   320,
+			Height:  200,
+		},
 	},
 	Panes: PanesConfig{
 		DividerWidthPixels: 1,

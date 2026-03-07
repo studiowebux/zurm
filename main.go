@@ -205,6 +205,9 @@ type Game struct {
 	statsState     renderer.StatsState
 	statsLastTick  time.Time // last stats collection time
 
+	// Tab hover popover state (minimap preview on background tab hover).
+	tabHoverState renderer.TabHoverState
+
 	// flashExpiry is when statusBarState.FlashMessage should be cleared.
 	flashExpiry time.Time
 
@@ -347,6 +350,7 @@ func main() {
 		blocksEnabled:    cfg.Blocks.Enabled,
 		recorder:         recorder.New(winW, winH),
 		recDone:          make(chan string, 1),
+		tabHoverState:    renderer.TabHoverState{TabIdx: -1},
 	}
 
 	game.renderer.BlocksEnabled = game.blocksEnabled
@@ -517,6 +521,13 @@ func (g *Game) needsRender() bool {
 		g.collectStats()
 		return true
 	}
+	// Tab hover popover: trigger redraw when delay has elapsed.
+	if g.cfg.Tabs.Hover.Enabled && g.tabHoverState.TabIdx >= 0 && !g.tabHoverState.Active {
+		delay := time.Duration(g.cfg.Tabs.Hover.DelayMs) * time.Millisecond
+		if time.Since(g.tabHoverState.HoverStart) >= delay {
+			return true
+		}
+	}
 	return false
 }
 
@@ -570,7 +581,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	g.renderer.DrawAll(screen, g.tabs, g.activeTab, g.focused, g.zoomed,
 		&g.menuState, &g.overlayState, &g.confirmState, &g.searchState, &g.statusBarState, &g.tabSwitcherState,
-		&g.paletteState, g.paletteEntries, &g.fileExplorerState, &g.tabSearchState, &g.statsState)
+		&g.paletteState, g.paletteEntries, &g.fileExplorerState, &g.tabSearchState, &g.statsState, &g.tabHoverState)
 	g.screenDirty = false
 	g.lastClockSec = time.Now().Unix()
 
@@ -2398,6 +2409,10 @@ func (g *Game) handleMouse() {
 
 	g.prevMX = mx
 	g.prevMY = my
+
+	// Tab hover popover tracking — update before processing clicks.
+	g.updateTabHover(mx, my)
+
 	_, scrollY := ebiten.Wheel()
 	if scrollY != 0 {
 		g.screenDirty = true
@@ -2569,6 +2584,10 @@ func (g *Game) handleMouse() {
 	// Click in tab bar — switch tab, rename on double-click, or drag to reorder.
 	// During selection drag, skip the tab bar handler so auto-scroll can run.
 	// tabW must match the renderer's cap (24 * CellW) so click regions align with drawn tabs.
+	// Dismiss tab hover popover on any click.
+	if (leftPressed && !leftWas) || (rightPressed && !rightWas) {
+		g.dismissTabHover()
+	}
 	if my < tabBarH && !g.selDragging {
 		physW := int(float64(g.winW) * g.dpi)
 		numTabs := len(g.tabs)
@@ -3086,6 +3105,7 @@ func (g *Game) newTab() {
 
 // closeActiveTab closes all panes in the active tab and removes it.
 func (g *Game) closeActiveTab() {
+	g.dismissTabHover()
 	for _, leaf := range g.tabs[g.activeTab].Layout.Leaves() {
 		leaf.Pane.Term.Close()
 	}
@@ -3100,6 +3120,107 @@ func (g *Game) closeActiveTab() {
 	}
 	g.renderer.SetLayoutDirty()
 	g.syncActive()
+}
+
+// dismissTabHover clears the tab hover popover state and marks the screen dirty.
+func (g *Game) dismissTabHover() {
+	if g.tabHoverState.TabIdx >= 0 || g.tabHoverState.Active {
+		renderer.DismissTabHover(&g.tabHoverState)
+		g.screenDirty = true
+	}
+}
+
+// updateTabHover tracks which tab the mouse is hovering over and manages the
+// popover lifecycle (delay, activation, cache invalidation).
+func (g *Game) updateTabHover(mx, my int) {
+	if !g.cfg.Tabs.Hover.Enabled {
+		return
+	}
+
+	tabBarH := g.renderer.TabBarHeight()
+	numTabs := len(g.tabs)
+
+	// Dismiss conditions: single tab, overlays open, dragging, cursor outside tab bar.
+	if numTabs <= 1 || g.tabDragging || g.menuState.Open || g.overlayState.Open ||
+		g.confirmState.Open || g.searchState.Open || g.paletteState.Open ||
+		g.fileExplorerState.Open || g.tabSwitcherState.Open || g.tabSearchState.Open {
+		g.dismissTabHover()
+		return
+	}
+
+	if my < 0 || my >= tabBarH {
+		g.dismissTabHover()
+		return
+	}
+
+	// Compute which tab the cursor is over (same width calc as tab click handler).
+	physW := int(float64(g.winW) * g.dpi)
+	maxTabW := g.cfg.Tabs.MaxWidthChars * g.font.CellW
+	tabW := physW / numTabs
+	if tabW > maxTabW {
+		tabW = maxTabW
+	}
+	if tabW <= 0 {
+		g.dismissTabHover()
+		return
+	}
+
+	hoverIdx := mx / tabW
+	if hoverIdx < 0 || hoverIdx >= numTabs {
+		g.dismissTabHover()
+		return
+	}
+
+	// Skip the active tab — user already sees it.
+	if hoverIdx == g.activeTab {
+		g.dismissTabHover()
+		return
+	}
+
+	// Tab changed — reset hover timer.
+	if hoverIdx != g.tabHoverState.TabIdx {
+		g.dismissTabHover()
+		g.tabHoverState.TabIdx = hoverIdx
+		g.tabHoverState.HoverStart = time.Now()
+		return
+	}
+
+	// Check if delay has elapsed.
+	delay := time.Duration(g.cfg.Tabs.Hover.DelayMs) * time.Millisecond
+	if !g.tabHoverState.Active && time.Since(g.tabHoverState.HoverStart) < delay {
+		return
+	}
+
+	// Activate the popover.
+	if !g.tabHoverState.Active {
+		g.tabHoverState.Active = true
+
+		// Compute popover position (centered below the hovered tab).
+		popW := int(float64(g.cfg.Tabs.Hover.Width) * g.dpi)
+		popH := int(float64(g.cfg.Tabs.Hover.Height) * g.dpi)
+		tabCenterX := hoverIdx*tabW + tabW/2
+		popX := tabCenterX - popW/2
+		popY := tabBarH + 4 // small gap below tab bar
+
+		g.tabHoverState.PopoverX = popX
+		g.tabHoverState.PopoverY = popY
+		g.tabHoverState.PopoverW = popW
+		g.tabHoverState.PopoverH = popH
+		g.screenDirty = true
+	}
+
+	// Check cache validity and regenerate thumbnail if stale.
+	hoveredTab := g.tabs[hoverIdx]
+	cacheKey := renderer.TabHoverCacheKey(hoveredTab)
+	if cacheKey != g.tabHoverState.CacheKey || g.tabHoverState.Thumbnail == nil {
+		if g.tabHoverState.Thumbnail != nil {
+			g.tabHoverState.Thumbnail.Deallocate()
+		}
+		contentRect := g.renderer.ComputeContentRect(hoveredTab)
+		g.tabHoverState.Thumbnail = g.renderer.RenderTabThumbnail(hoveredTab, contentRect)
+		g.tabHoverState.CacheKey = cacheKey
+		g.screenDirty = true
+	}
 }
 
 // focusEntry records a tab+pane focus state for the history stack.
@@ -3315,6 +3436,7 @@ func (g *Game) handlePinInput() {
 
 // reorderTab moves the tab at index from to index to, keeping activeTab correct.
 func (g *Game) reorderTab(from, to int) {
+	g.dismissTabHover()
 	n := len(g.tabs)
 	if from == to || from < 0 || to < 0 || from >= n || to >= n {
 		return
@@ -4479,6 +4601,7 @@ func (g *Game) toggleZoom() {
 // recomputeLayout recalculates rects and resizes all pane terminals.
 // Call after any layout mutation (split ratio change, split/close, zoom toggle).
 func (g *Game) recomputeLayout() {
+	g.dismissTabHover()
 	physW := int(float64(g.winW) * g.dpi)
 	physH := int(float64(g.winH) * g.dpi)
 	tabBarH := g.renderer.TabBarHeight()
@@ -4634,6 +4757,7 @@ func (g *Game) adjustFontSize(delta float64) {
 
 // reloadConfig re-reads config.toml and propagates all changes at runtime.
 func (g *Game) reloadConfig() {
+	g.dismissTabHover()
 	newCfg, meta, err := config.LoadWithMeta()
 	if err != nil {
 		g.flashStatus("Config reload failed: " + err.Error())
