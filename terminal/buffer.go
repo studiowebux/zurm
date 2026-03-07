@@ -61,6 +61,7 @@ type BlockBoundary struct {
 	AbsPromptRow int           // absolute row of OSC 133;A (prompt start)
 	AbsCmdRow    int           // absolute row of OSC 133;C (pre-execution); -1 if not yet fired
 	AbsEndRow    int           // absolute row of OSC 133;D (post-execution); -1 if still running
+	CmdCol       int           // column where user input starts (from OSC 133;B); -1 if unknown
 	ExitCode     int           // exit code from D;N; -1 = still running / unknown
 	CommandText  string        // text on the row at the time C fired
 	StartTime    time.Time     // when A was received (prompt appeared)
@@ -969,11 +970,15 @@ func (sb *ScreenBuffer) applyBlockEvent(kind rune, exitCode int) {
 			AbsPromptRow: absRow,
 			AbsCmdRow:    -1,
 			AbsEndRow:    -1,
+			CmdCol:       -1,
 			ExitCode:     -1,
 			StartTime:    time.Now(),
 		}
 	case 'B':
-		// Prompt end — reserved for prompt-column tracking in a future pass.
+		// Prompt end — cursor is now at the first column of user input.
+		if sb.activeBlock != nil {
+			sb.activeBlock.CmdCol = sb.CursorCol
+		}
 	case 'C':
 		if sb.activeBlock != nil {
 			sb.activeBlock.AbsCmdRow = absRow

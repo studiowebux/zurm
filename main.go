@@ -2592,9 +2592,19 @@ func (g *Game) handleMouse() {
 			h.Buf.RLock()
 			switch h.CopyTarget {
 			case renderer.CopyCmdText:
-				// Command text lives on the prompt row; strip the prompt prefix.
+				// Extract only the user-typed command, excluding the prompt.
+				// CmdCol (from OSC 133;B) gives the exact column where user input starts.
+				// Fall back to StripPrompt pattern matching when B was not received.
 				raw := h.Buf.TextRange(h.AbsStart, h.AbsStart)
-				copyText = renderer.StripPrompt(raw)
+				if h.CmdCol >= 0 {
+					runes := []rune(raw)
+					if h.CmdCol < len(runes) {
+						copyText = strings.TrimSpace(string(runes[h.CmdCol:]))
+					}
+				}
+				if copyText == "" {
+					copyText = renderer.StripPrompt(raw)
+				}
 				label = "Command copied"
 			case renderer.CopyOutput:
 				// AbsCmdRow is the first output row (cursor position when C fires).
@@ -5831,6 +5841,10 @@ _zurm_precmd() {
 _zurm_preexec() { _zurm_cmd_started=1; printf '\033]133;C\007'; }
 precmd_functions+=(_zurm_precmd)
 preexec_functions+=(_zurm_preexec)
+# Emit B (prompt end) via zle-line-init — fires after the prompt is drawn,
+# works with any prompt tool (starship, p10k, oh-my-zsh).
+_zurm_line_init() { print -n '\033]133;B\007'; }
+zle -N zle-line-init _zurm_line_init
 ` + markerEnd + "\n"
 	case strings.HasSuffix(shell, "bash"):
 		rcFile = filepath.Join(os.Getenv("HOME"), ".bashrc")

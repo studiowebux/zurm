@@ -139,7 +139,13 @@ func (r *Renderer) drawBlocksSnap(snap *blockSnap) {
 			continue
 		}
 
-		badgeY := rect.Min.Y + startDisplay*ch + pad
+		// Shift badges down one row when the block starts at the viewport top
+		// and the pane is scrolled, so they don't overlap the scroll indicator pill.
+		badgeRow := startDisplay
+		if badgeRow == 0 && viewOff > 0 && visEnd > 0 {
+			badgeRow = 1
+		}
+		badgeY := rect.Min.Y + badgeRow*ch + pad
 		rightX := boxX1 - cw
 
 		blockRect := image.Rect(boxX0, boxY0, boxX1, boxY1)
@@ -174,6 +180,7 @@ func (r *Renderer) drawBlocksSnap(snap *blockSnap) {
 				AbsStart:   b.AbsPromptRow,
 				AbsCmdRow:  b.AbsCmdRow,
 				AbsEnd:     endAbs,
+				CmdCol:     b.CmdCol,
 				CopyTarget: copyTarget,
 				CmdRect:    cmdRect,
 				OutRect:    outRect,
