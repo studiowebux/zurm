@@ -5945,15 +5945,12 @@ func (g *Game) openMarkdownViewer() {
 // openMarkdownViewerWithContent opens the markdown viewer with arbitrary content.
 // Reuse point for future llms.txt browser.
 func (g *Game) openMarkdownViewerWithContent(content, title string) {
-	// Determine column width from focused pane for wrapping.
-	cols := 80
-	if g.focused != nil {
-		g.focused.Term.Buf.RLock()
-		cols = g.focused.Term.Buf.Cols
-		g.focused.Term.Buf.RUnlock()
-	}
-	// Use 80% of panel width for text wrapping.
-	wrapCols := cols * 80 / 100
+	// Derive wrap columns from the actual panel pixel width and cell width.
+	// Panel is 80% of window width; subtract padding (2 * cellW) and scrollbar (4px).
+	physW := int(float64(g.winW) * g.dpi)
+	panelW := physW * 80 / 100
+	cw := g.font.CellW
+	wrapCols := (panelW - 2*cw - 4) / cw
 	if wrapCols < 40 {
 		wrapCols = 40
 	}
