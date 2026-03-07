@@ -1416,14 +1416,16 @@ func (g *Game) drainBell() {
 // When TTS is enabled, speaks output from the focused pane aloud.
 // Background tab channels are drained silently to prevent buildup.
 func (g *Game) drainBlockDone() {
-	// Drain focused pane — speak if TTS enabled.
+	// Drain all active tab panes — speak focused pane output if TTS enabled.
 	for _, leaf := range g.layout.Leaves() {
 		select {
 		case text := <-leaf.Pane.Term.Buf.BlockDoneCh:
-			if g.cfg.Voice.Enabled {
+			if g.cfg.Voice.Enabled && leaf.Pane == g.focused {
 				text = strings.TrimSpace(text)
 				if text != "" {
-					_ = g.speaker.Speak(text, g.cfg.Voice.Voice, g.cfg.Voice.Rate)
+					if err := g.speaker.Speak(text, g.cfg.Voice.Voice, g.cfg.Voice.Rate); err != nil {
+						g.flashStatus("Speech failed: " + err.Error())
+					}
 				}
 			}
 		default:

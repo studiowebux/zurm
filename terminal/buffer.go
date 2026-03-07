@@ -999,13 +999,17 @@ func (sb *ScreenBuffer) applyBlockEvent(kind rune, exitCode int) {
 			sb.Blocks = append(sb.Blocks, *sb.activeBlock)
 
 			// Send output text (rows between command and end) for TTS auto-speak.
-			outStart := sb.activeBlock.AbsCmdRow + 1
-			outEnd := sb.activeBlock.AbsEndRow
-			if outStart <= outEnd {
-				text := sb.TextRange(outStart, outEnd)
-				select {
-				case sb.BlockDoneCh <- text:
-				default: // drop if channel full
+			// C fires after the shell echoes the newline (pre-execution), so AbsCmdRow
+			// is the first row where command output appears — use it directly.
+			if sb.activeBlock.AbsCmdRow >= 0 {
+				outStart := sb.activeBlock.AbsCmdRow
+				outEnd := sb.activeBlock.AbsEndRow
+				if outStart <= outEnd {
+					text := sb.TextRange(outStart, outEnd)
+					select {
+					case sb.BlockDoneCh <- text:
+					default: // drop if channel full
+					}
 				}
 			}
 
