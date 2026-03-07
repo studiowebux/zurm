@@ -46,6 +46,12 @@ cursor_blink    = false # true = blinking cursor at 530 ms; false = steady
 max_width_chars = 24   # maximum tab label width in character cells
 new_tab_dir     = "cwd"   # "cwd" = inherit active tab's directory; "home" = $HOME
 
+[tabs.hover]
+enabled  = true    # show minimap popover when hovering a background tab
+delay_ms = 300     # ms before popover appears
+width    = 320     # popover width in logical pixels
+height   = 200     # popover height in logical pixels
+
 [panes]
 divider_width_pixels = 1   # pixel width of the border between panes
 
@@ -203,12 +209,25 @@ type HelpConfig struct {
 	CloseConfirm bool `toml:"close_confirm"`
 }
 
+type TabHoverConfig struct {
+	// Enabled controls whether hovering a background tab shows a minimap popover.
+	Enabled bool `toml:"enabled"`
+	// DelayMs is the hover delay before the popover appears.
+	DelayMs int `toml:"delay_ms"`
+	// Width is the popover width in logical pixels.
+	Width int `toml:"width"`
+	// Height is the popover height in logical pixels.
+	Height int `toml:"height"`
+}
+
 type TabsConfig struct {
 	// MaxWidthChars caps each tab label width in character cells.
 	MaxWidthChars int `toml:"max_width_chars"`
 	// NewTabDir controls where new tabs open: "cwd" inherits the active tab's
 	// working directory; "home" always opens in $HOME.
 	NewTabDir string `toml:"new_tab_dir"`
+	// Hover configures the tab hover minimap popover.
+	Hover TabHoverConfig `toml:"hover"`
 }
 
 type PanesConfig struct {
