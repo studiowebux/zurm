@@ -120,9 +120,12 @@ type ScreenBuffer struct {
 	renderGen atomic.Uint64
 
 	// Scrollback ring buffer — lines evicted from the top of the primary screen.
-	// Index 0 is oldest, len-1 is most recent.
-	scrollback        [][]Cell
-	scrollbackWrapped []bool
+	// Fixed-size backing array indexed via scrollHead/scrollCount.
+	// Logical index 0 is oldest, scrollCount-1 is most recent.
+	scrollback        [][]Cell // pre-allocated to maxScrollback
+	scrollbackWrapped []bool   // parallel ring: soft-wrap flag per scrollback line
+	scrollHead        int      // physical index of oldest entry
+	scrollCount       int      // number of valid entries
 	maxScrollback     int
 
 	// ViewOffset > 0 means the user has scrolled back.
@@ -197,6 +200,10 @@ func NewScreenBuffer(rows, cols, maxScrollback, maxBlocks int, fg, bg color.RGBA
 		CursorVisible: true,
 		AutoWrap:      true,
 		BlockDoneCh:   make(chan string, 4),
+	}
+	if maxScrollback > 0 {
+		sb.scrollback = make([][]Cell, maxScrollback)
+		sb.scrollbackWrapped = make([]bool, maxScrollback)
 	}
 	sb.SGR.FG = fg
 	sb.SGR.BG = bg
@@ -317,24 +324,7 @@ func (sb *ScreenBuffer) ScrollUp(n int) {
 		if top == 0 && !sb.altActive && sb.maxScrollback > 0 {
 			evicted := make([]Cell, sb.Cols)
 			copy(evicted, cells[top])
-			sb.scrollback = append(sb.scrollback, evicted)
-			sb.scrollbackWrapped = append(sb.scrollbackWrapped, sb.wrapped[top])
-			// Keep the user's view pinned when scrolled up.
-			if sb.ViewOffset > 0 {
-				sb.ViewOffset++
-			}
-			if len(sb.scrollback) > sb.maxScrollback {
-				// Drop oldest line — zero it first (SEC-002).
-				for j := range sb.scrollback[0] {
-					sb.scrollback[0][j] = Cell{}
-				}
-				sb.scrollback = sb.scrollback[1:]
-				sb.scrollbackWrapped = sb.scrollbackWrapped[1:]
-				// Adjust ViewOffset for the dropped line.
-				if sb.ViewOffset > 0 {
-					sb.ViewOffset--
-				}
-			}
+			sb.scrollbackPush(evicted, sb.wrapped[top])
 		}
 		copy(cells[top:bot], cells[top+1:bot+1])
 		copy(sb.wrapped[top:bot], sb.wrapped[top+1:bot+1])
@@ -752,14 +742,15 @@ func (sb *ScreenBuffer) GetDisplayCell(row, col int) Cell {
 	}
 	// Map into scrollback: the most recent scrollback line sits just above
 	// primary row 0, so scrollback index = len - ViewOffset + row.
-	sbIdx := len(sb.scrollback) - sb.ViewOffset + row
-	if sbIdx < 0 || sbIdx >= len(sb.scrollback) {
+	sbIdx := sb.scrollCount - sb.ViewOffset + row
+	if sbIdx < 0 || sbIdx >= sb.scrollCount {
 		return Cell{Char: ' ', FG: sb.DefaultFG, BG: sb.DefaultBG}
 	}
-	if col < 0 || col >= len(sb.scrollback[sbIdx]) {
+	sbRow := sb.scrollbackGet(sbIdx)
+	if col < 0 || col >= len(sbRow) {
 		return Cell{Char: ' ', FG: sb.DefaultFG, BG: sb.DefaultBG}
 	}
-	return sb.scrollback[sbIdx][col]
+	return sbRow[col]
 }
 
 // IsDisplayRowWrapped reports whether the given display row is a soft-wrap
@@ -773,18 +764,18 @@ func (sb *ScreenBuffer) IsDisplayRowWrapped(row int) bool {
 		}
 		return false
 	}
-	sbIdx := len(sb.scrollback) - sb.ViewOffset + row
-	if sbIdx < 0 || sbIdx >= len(sb.scrollbackWrapped) {
+	sbIdx := sb.scrollCount - sb.ViewOffset + row
+	if sbIdx < 0 || sbIdx >= sb.scrollCount {
 		return false
 	}
-	return sb.scrollbackWrapped[sbIdx]
+	return sb.scrollbackWrapped[(sb.scrollHead+sbIdx)%sb.maxScrollback]
 }
 
 // ScrollViewUp scrolls the viewport n rows toward scrollback history.
 // Caller must hold write lock.
 func (sb *ScreenBuffer) ScrollViewUp(n int) {
 	sb.ViewOffset += n
-	max := len(sb.scrollback)
+	max := sb.scrollCount
 	if sb.ViewOffset > max {
 		sb.ViewOffset = max
 	}
@@ -812,7 +803,43 @@ func (sb *ScreenBuffer) ResetView() {
 
 // ScrollbackLen returns the number of lines currently stored in scrollback.
 func (sb *ScreenBuffer) ScrollbackLen() int {
-	return len(sb.scrollback)
+	return sb.scrollCount
+}
+
+// scrollbackGet returns the row at logical index i (0 = oldest).
+// Caller must ensure 0 <= i < scrollCount.
+func (sb *ScreenBuffer) scrollbackGet(i int) []Cell {
+	return sb.scrollback[(sb.scrollHead+i)%sb.maxScrollback]
+}
+
+// scrollbackPush appends a row to the ring buffer, evicting the oldest entry
+// when at capacity. Evicted rows are zeroed for GC (SEC-002).
+func (sb *ScreenBuffer) scrollbackPush(row []Cell, wrapped bool) {
+	if sb.maxScrollback <= 0 {
+		return
+	}
+	// Keep the user's view pinned when scrolled up.
+	if sb.ViewOffset > 0 {
+		sb.ViewOffset++
+	}
+	if sb.scrollCount < sb.maxScrollback {
+		sb.scrollback[sb.scrollCount] = row
+		sb.scrollbackWrapped[sb.scrollCount] = wrapped
+		sb.scrollCount++
+	} else {
+		// Evict oldest — zero cells for GC (SEC-002).
+		evicted := sb.scrollback[sb.scrollHead]
+		for j := range evicted {
+			evicted[j] = Cell{}
+		}
+		sb.scrollback[sb.scrollHead] = row
+		sb.scrollbackWrapped[sb.scrollHead] = wrapped
+		sb.scrollHead = (sb.scrollHead + 1) % sb.maxScrollback
+		// Adjust ViewOffset for the dropped line.
+		if sb.ViewOffset > 0 {
+			sb.ViewOffset--
+		}
+	}
 }
 
 
@@ -832,25 +859,26 @@ func (sb *ScreenBuffer) SetViewOffset(n int) {
 // absolute row in the concatenated [scrollback | primary] space.
 // Caller must hold at least RLock.
 func (sb *ScreenBuffer) DisplayToAbsRow(displayRow int) int {
-	return len(sb.scrollback) - sb.ViewOffset + displayRow
+	return sb.scrollCount - sb.ViewOffset + displayRow
 }
 
 // AbsToDisplayRow converts an absolute row to a display row.
 // A negative result or one >= Rows means the row is off-screen.
 // Caller must hold at least RLock.
 func (sb *ScreenBuffer) AbsToDisplayRow(absRow int) int {
-	return absRow - len(sb.scrollback) + sb.ViewOffset
+	return absRow - sb.scrollCount + sb.ViewOffset
 }
 
 // GetAbsCell returns the cell at an absolute row and column.
 // Caller must hold at least RLock.
 func (sb *ScreenBuffer) GetAbsCell(absRow, col int) Cell {
-	sbLen := len(sb.scrollback)
+	sbLen := sb.scrollCount
 	if absRow < sbLen {
-		if absRow < 0 || col < 0 || col >= len(sb.scrollback[absRow]) {
+		row := sb.scrollbackGet(absRow)
+		if absRow < 0 || col < 0 || row == nil || col >= len(row) {
 			return Cell{Char: ' ', FG: sb.DefaultFG, BG: sb.DefaultBG}
 		}
-		return sb.scrollback[absRow][col]
+		return row[col]
 	}
 	return sb.GetCell(absRow-sbLen, col)
 }
@@ -858,12 +886,12 @@ func (sb *ScreenBuffer) GetAbsCell(absRow, col int) Cell {
 // IsAbsRowWrapped reports whether the absolute row is a soft-wrap continuation.
 // Caller must hold at least RLock.
 func (sb *ScreenBuffer) IsAbsRowWrapped(absRow int) bool {
-	sbLen := len(sb.scrollback)
+	sbLen := sb.scrollCount
 	if absRow < sbLen {
-		if absRow < 0 || absRow >= len(sb.scrollbackWrapped) {
+		if absRow < 0 || absRow >= sb.scrollCount {
 			return false
 		}
-		return sb.scrollbackWrapped[absRow]
+		return sb.scrollbackWrapped[(sb.scrollHead+absRow)%sb.maxScrollback]
 	}
 	screenRow := absRow - sbLen
 	if screenRow < 0 || screenRow >= len(sb.wrapped) {
@@ -894,13 +922,13 @@ func (sb *ScreenBuffer) SearchAll(query string) []SearchMatch {
 	qlen := len(qrunes)
 
 	var matches []SearchMatch
-	total := len(sb.scrollback) + sb.Rows
+	total := sb.scrollCount + sb.Rows
 	for absRow := 0; absRow < total; absRow++ {
 		var row []Cell
-		if absRow < len(sb.scrollback) {
-			row = sb.scrollback[absRow]
+		if absRow < sb.scrollCount {
+			row = sb.scrollbackGet(absRow)
 		} else {
-			row = sb.Cells[absRow-len(sb.scrollback)]
+			row = sb.Cells[absRow-sb.scrollCount]
 		}
 		col := 0
 		for col <= len(row)-qlen {
@@ -929,13 +957,15 @@ func (sb *ScreenBuffer) SearchAll(query string) []SearchMatch {
 // ClearScrollback zeroes and discards all scrollback history (SEC-002).
 // Caller must hold write lock.
 func (sb *ScreenBuffer) ClearScrollback() {
-	for i := range sb.scrollback {
-		for j := range sb.scrollback[i] {
-			sb.scrollback[i][j] = Cell{}
+	for i := 0; i < sb.scrollCount; i++ {
+		row := sb.scrollbackGet(i)
+		for j := range row {
+			row[j] = Cell{}
 		}
+		sb.scrollback[(sb.scrollHead+i)%sb.maxScrollback] = nil
 	}
-	sb.scrollback = sb.scrollback[:0]
-	sb.scrollbackWrapped = sb.scrollbackWrapped[:0]
+	sb.scrollHead = 0
+	sb.scrollCount = 0
 	sb.ViewOffset = 0
 	sb.MarkAllDirty()
 }
@@ -1040,12 +1070,12 @@ func (sb *ScreenBuffer) applyBlockEvent(kind rune, exitCode int) {
 // TextRange extracts plain text from absolute rows [absStart, absEnd] inclusive.
 // Reads from scrollback and the primary screen. Caller must hold at least read lock.
 func (sb *ScreenBuffer) TextRange(absStart, absEnd int) string {
-	sbLen := len(sb.scrollback)
+	sbLen := sb.scrollCount
 	var out strings.Builder
 	for abs := absStart; abs <= absEnd; abs++ {
 		var row []Cell
 		if abs < sbLen {
-			row = sb.scrollback[abs]
+			row = sb.scrollbackGet(abs)
 		} else {
 			screenRow := abs - sbLen
 			cells := sb.cells()
