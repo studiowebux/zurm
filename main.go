@@ -840,6 +840,11 @@ func (g *Game) handleInput() {
 		pressed := ebiten.IsKeyPressed(key)
 		wasPressed := g.prevKeys[key]
 		if pressed && !wasPressed {
+			// Stop active TTS on any keypress.
+			if g.speaker.Active() {
+				g.speaker.Stop()
+			}
+
 			switch {
 			case meta && key == ebiten.KeyC:
 				g.copySelection()
@@ -1361,12 +1366,20 @@ func (g *Game) drainBell() {
 	now := time.Now()
 	fired := false
 
-	// Active tab panes — visual border flash.
+	// Active tab panes — visual border flash + TTS on bell.
 	for _, leaf := range g.layout.Leaves() {
 		select {
 		case <-leaf.Pane.Term.BellCh:
 			if g.cfg.Bell.Style != "none" {
 				leaf.Pane.BellUntil = now.Add(dur)
+			}
+			// TTS: speak recent output on bell (e.g., Claude Code waiting for input).
+			if g.cfg.Voice.Enabled && leaf.Pane == g.focused {
+				text := g.getRecentBufferText(10)
+				text = strings.TrimSpace(text)
+				if text != "" {
+					_ = g.speaker.Speak(text, g.cfg.Voice.Voice, g.cfg.Voice.Rate)
+				}
 			}
 			fired = true
 			g.screenDirty = true
@@ -5514,6 +5527,41 @@ func (g *Game) getVisibleBufferText() string {
 		}
 	}
 	return strings.TrimRight(text.String(), "\n ")
+}
+
+// getRecentBufferText returns the last maxLines non-empty lines from the
+// bottom of the visible buffer. Useful for bell-triggered TTS where only
+// the recent output matters (e.g., Claude Code's question).
+func (g *Game) getRecentBufferText(maxLines int) string {
+	g.focused.Term.Buf.RLock()
+	defer g.focused.Term.Buf.RUnlock()
+
+	rows := g.focused.Term.Buf.Rows
+	cols := g.focused.Term.Buf.Cols
+
+	// Collect non-empty lines from the bottom up.
+	var lines []string
+	for r := rows - 1; r >= 0 && len(lines) < maxLines; r-- {
+		absRow := g.focused.Term.Buf.DisplayToAbsRow(r)
+		var line strings.Builder
+		for c := 0; c < cols; c++ {
+			ch := g.focused.Term.Buf.GetAbsCell(absRow, c).Char
+			if ch == 0 {
+				ch = ' '
+			}
+			line.WriteRune(ch)
+		}
+		trimmed := strings.TrimRight(line.String(), " ")
+		if trimmed != "" {
+			lines = append(lines, trimmed)
+		}
+	}
+
+	// Reverse to restore top-to-bottom order.
+	for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
+		lines[i], lines[j] = lines[j], lines[i]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // toggleRecording starts or stops a screen recording (FFMPEG → MP4).
