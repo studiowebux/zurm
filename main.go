@@ -491,6 +491,7 @@ func (g *Game) Update() error {
 	g.drainTitle()
 	g.drainCwd()
 	g.drainBell()
+	g.drainBlockDone()
 	g.drainGitBranch()
 	g.drainForeground()
 	g.recomputeSearch()
@@ -1408,6 +1409,38 @@ func (g *Game) drainBell() {
 	if !ebiten.IsFocused() {
 		setDockBadge()
 		requestDockAttention()
+	}
+}
+
+// drainBlockDone reads completed command block output from all panes.
+// When TTS is enabled, speaks output from the focused pane aloud.
+// Background tab channels are drained silently to prevent buildup.
+func (g *Game) drainBlockDone() {
+	// Drain focused pane — speak if TTS enabled.
+	for _, leaf := range g.layout.Leaves() {
+		select {
+		case text := <-leaf.Pane.Term.Buf.BlockDoneCh:
+			if g.cfg.Voice.Enabled {
+				text = strings.TrimSpace(text)
+				if text != "" {
+					_ = g.speaker.Speak(text, g.cfg.Voice.Voice, g.cfg.Voice.Rate)
+				}
+			}
+		default:
+		}
+	}
+
+	// Drain background tabs silently.
+	for i, t := range g.tabs {
+		if i == g.activeTab {
+			continue
+		}
+		for _, leaf := range t.Layout.Leaves() {
+			select {
+			case <-leaf.Pane.Term.Buf.BlockDoneCh:
+			default:
+			}
+		}
 	}
 }
 

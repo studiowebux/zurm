@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Text-to-speech: read selection aloud via macOS `say` command (Cmd+Shift+U)
+- TTS auto-speak: automatically reads command output aloud when enabled (requires OSC 133 shell hooks)
 - "Read Selection Aloud" and "Stop Speaking" command palette entries
 - `[voice]` config section: `enabled`, `voice`, `rate` (words per minute)
 - Falls back to visible buffer text when no selection is active
