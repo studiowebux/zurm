@@ -69,6 +69,7 @@ func AllBindings() []KeyBinding {
 		{Category: "Help", Key: "Cmd+/", Description: "Toggle keybindings"},
 		{Category: "Help", Key: "Cmd+P", Description: "Command palette"},
 		{Category: "Help", Key: "? button", Description: "Status bar shortcut"},
+		{Category: "App", Key: "Cmd+I", Description: "Toggle stats overlay"},
 		{Category: "App", Key: "Cmd+=", Description: "Increase font size"},
 		{Category: "App", Key: "Cmd+-", Description: "Decrease font size"},
 		{Category: "App", Key: "Cmd+,", Description: "Reload config"},
