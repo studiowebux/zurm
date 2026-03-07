@@ -27,6 +27,10 @@ type LayoutNode struct {
 	Right *LayoutNode  // non-nil for HSplit/VSplit
 	Ratio float64      // fraction of space given to Left (default 0.5)
 	Rect  image.Rectangle
+
+	// cachedLeaves avoids re-allocating the leaves slice on every call.
+	// Invalidated by InvalidateLeaves after tree mutations (split, remove).
+	cachedLeaves []*LayoutNode
 }
 
 // NewLeaf wraps an existing Pane in a Leaf node.
@@ -85,13 +89,41 @@ func (n *LayoutNode) ComputeRects(rect image.Rectangle, cellW, cellH, padding, d
 }
 
 // Leaves returns all leaf nodes in DFS order (left-to-right, top-to-bottom).
+// The result is cached — call InvalidateLeaves after tree mutations.
 func (n *LayoutNode) Leaves() []*LayoutNode {
-	if n.Kind == Leaf {
-		return []*LayoutNode{n}
+	if n.cachedLeaves != nil {
+		return n.cachedLeaves
 	}
-	result := n.Left.Leaves()
-	result = append(result, n.Right.Leaves()...)
+	if n.Kind == Leaf {
+		n.cachedLeaves = []*LayoutNode{n}
+		return n.cachedLeaves
+	}
+	result := make([]*LayoutNode, 0, 4)
+	result = n.collectLeaves(result)
+	n.cachedLeaves = result
 	return result
+}
+
+// collectLeaves appends leaf nodes to dst without caching intermediate results.
+func (n *LayoutNode) collectLeaves(dst []*LayoutNode) []*LayoutNode {
+	if n.Kind == Leaf {
+		return append(dst, n)
+	}
+	dst = n.Left.collectLeaves(dst)
+	dst = n.Right.collectLeaves(dst)
+	return dst
+}
+
+// InvalidateLeaves clears the cached leaves slice on this node and all ancestors.
+// Call after any tree mutation (split, remove, detach, attach).
+func (n *LayoutNode) InvalidateLeaves() {
+	n.cachedLeaves = nil
+	if n.Left != nil {
+		n.Left.InvalidateLeaves()
+	}
+	if n.Right != nil {
+		n.Right.InvalidateLeaves()
+	}
 }
 
 // PaneAt returns the Pane whose Rect contains pixel (x, y), or nil.
@@ -173,7 +205,9 @@ func (n *LayoutNode) SplitH(p *Pane, cfg *config.Config, cellW, cellH int, dir s
 		Ratio: 0.5,
 	}
 
-	return replaceLeaf(n, p, split), newPane, nil
+	result := replaceLeaf(n, p, split)
+	result.InvalidateLeaves()
+	return result, newPane, nil
 }
 
 // SplitV splits the pane p vertically (top / bottom), creating a new pane
@@ -193,7 +227,9 @@ func (n *LayoutNode) SplitV(p *Pane, cfg *config.Config, cellW, cellH int, dir s
 		Ratio: 0.5,
 	}
 
-	return replaceLeaf(n, p, split), newPane, nil
+	result := replaceLeaf(n, p, split)
+	result.InvalidateLeaves()
+	return result, newPane, nil
 }
 
 // replaceLeaf returns a new tree with the leaf containing p replaced by replacement.
@@ -214,7 +250,11 @@ func replaceLeaf(n *LayoutNode, p *Pane, replacement *LayoutNode) *LayoutNode {
 // If p is the only pane, returns nil.
 func (n *LayoutNode) Remove(p *Pane) *LayoutNode {
 	p.Term.Close()
-	return removePane(n, p)
+	result := removePane(n, p)
+	if result != nil {
+		result.InvalidateLeaves()
+	}
+	return result
 }
 
 // removePane recursively removes the leaf for p and returns the updated subtree.
@@ -252,7 +292,11 @@ func removePane(n *LayoutNode, p *Pane) *LayoutNode {
 // Detach removes the leaf containing p from the tree WITHOUT closing p.Term.
 // Returns the new root. If p is the only pane, returns nil.
 func (n *LayoutNode) Detach(p *Pane) *LayoutNode {
-	return removePane(n, p)
+	result := removePane(n, p)
+	if result != nil {
+		result.InvalidateLeaves()
+	}
+	return result
 }
 
 // AttachH inserts an existing pane as a horizontal split (left | right) beside
@@ -266,7 +310,9 @@ func (n *LayoutNode) AttachH(target, incoming *Pane) *LayoutNode {
 		Right: newLeaf,
 		Ratio: 0.5,
 	}
-	return replaceLeaf(n, target, split)
+	result := replaceLeaf(n, target, split)
+	result.InvalidateLeaves()
+	return result
 }
 
 // NextLeaf returns the pane after p in DFS order (wraps around).
