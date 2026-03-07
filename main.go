@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	_ "embed"
 	"flag"
 	"fmt"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
@@ -2318,11 +2321,21 @@ func sanitizeTitle(s string) string {
 }
 
 // handlePaste reads the system clipboard and sends it to the focused PTY.
+// Line endings are normalized to \r because the TTY expects carriage return
+// for newlines (keyboard Enter sends \r, the line discipline converts it).
 func (g *Game) handlePaste() {
 	out, err := exec.Command("pbpaste").Output()
 	if err != nil || len(out) == 0 {
 		return
 	}
+	// NFC normalize — macOS clipboard uses NFD (decomposed accents).
+	// Terminal programs expect precomposed characters (NFC).
+	out = norm.NFC.Bytes(out)
+
+	// Normalize line endings: \r\n → \r, then remaining \n → \r.
+	out = bytes.ReplaceAll(out, []byte("\r\n"), []byte("\r"))
+	out = bytes.ReplaceAll(out, []byte("\n"), []byte("\r"))
+
 	g.focused.Term.Buf.RLock()
 	bracketed := g.focused.Term.Buf.BracketedPaste
 	g.focused.Term.Buf.RUnlock()

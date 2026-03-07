@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Cell represents a single character cell in the terminal grid.
@@ -243,8 +245,30 @@ func (sb *ScreenBuffer) GetCell(row, col int) Cell {
 }
 
 // PutChar writes the current SGR-attributed rune at the cursor and advances.
+// Combining characters (Unicode Mn/Mc/Me) are merged with the preceding cell
+// via NFC normalization instead of occupying their own cell.
 // Caller must hold write lock.
 func (sb *ScreenBuffer) PutChar(ch rune) {
+	// Combining character — merge with the previous cell via NFC.
+	if unicode.In(ch, unicode.Mn, unicode.Mc, unicode.Me) {
+		prevCol := sb.CursorCol - 1
+		prevRow := sb.CursorRow
+		if prevCol < 0 {
+			return // no previous cell on this row — discard
+		}
+		prev := sb.GetCell(prevRow, prevCol)
+		if prev.Char != 0 {
+			composed := norm.NFC.String(string(prev.Char) + string(ch))
+			runes := []rune(composed)
+			if len(runes) == 1 {
+				prev.Char = runes[0]
+				sb.SetCell(prevRow, prevCol, prev)
+				return
+			}
+		}
+		return // can't compose — discard the combining mark
+	}
+
 	if sb.CursorCol >= sb.Cols {
 		if !sb.AutoWrap {
 			sb.CursorCol = sb.Cols - 1 // clamp: overwrite last column
