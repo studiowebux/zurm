@@ -66,9 +66,19 @@
     <key>NSSupportsSuddenTermination</key>
     <false/>
 
-    <!-- Privacy descriptions (required for App Store / notarization) -->
+    <!-- Privacy descriptions (required for TCC / notarization) -->
     <key>NSAppleEventsUsageDescription</key>
     <string>zurm needs to send Apple Events to open URLs in your default browser.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>zurm needs access to Documents to open terminals and browse files in this folder.</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>zurm needs access to Desktop to open terminals, browse files, and save recordings in this folder.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>zurm needs access to Downloads to open terminals and browse files in this folder.</string>
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>zurm needs access to removable volumes to open terminals and browse files on external drives.</string>
+    <key>NSNetworkVolumesUsageDescription</key>
+    <string>zurm needs access to network volumes to open terminals and browse files on network drives.</string>
 
     <!-- Copyright -->
     <key>NSHumanReadableCopyright</key>
