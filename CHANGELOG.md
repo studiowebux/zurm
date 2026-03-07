@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Right-click tab context menu now targets the clicked tab, not the active tab
 - Scrollback scrolling blocked when alternate screen is active (fixes broken scrolling in TUI apps like Claude Code, nvim, htop)
+- Zoomed pane now clears HeaderH so PTY gets correct row count (fixes Helix :q hidden behind status bar)
+- Pane row calculation uses single top padding instead of double, recovering ~1 wasted row at pane bottom
+- Config reload now recomputes layout for all tabs (fixes stale status bar height after config change)
 
 ### Changed
 

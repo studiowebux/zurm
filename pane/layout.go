@@ -42,7 +42,7 @@ func (n *LayoutNode) ComputeRects(rect image.Rectangle, cellW, cellH, padding, d
 	case Leaf:
 		n.Pane.Rect = rect
 		cols := (rect.Dx() - padding*2) / cellW
-		rows := (rect.Dy() - padding*2 - n.Pane.HeaderH) / cellH
+		rows := (rect.Dy() - padding - n.Pane.HeaderH) / cellH
 		if cols < 1 {
 			cols = 1
 		}
