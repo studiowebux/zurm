@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/studiowebux/zurm/config"
@@ -32,6 +33,10 @@ type Terminal struct {
 	// lastCursorStyle is the last DECSCUSR code applied to Cursor.
 	// Used by SyncCursorStyle to avoid redundant SetStyle calls.
 	lastCursorStyle int
+
+	// paused is set when the window is idle/unfocused. Polling goroutines
+	// (pollCWD, pollForeground) skip work while this is true.
+	paused atomic.Bool
 }
 
 // New creates a Terminal from the given config.
@@ -287,6 +292,10 @@ func (t *Terminal) Pid() int {
 	return t.pty.Pid()
 }
 
+// SetPaused controls whether background polling goroutines skip work.
+// Called by the game loop when the window becomes idle or regains focus.
+func (t *Terminal) SetPaused(p bool) { t.paused.Store(p) }
+
 // pollCWD runs in a background goroutine, querying the shell process CWD
 // via lsof every 2 seconds. This is the fallback for shells that do not
 // send OSC 7. Results are sent to CwdCh; OSC 7 updates take priority
@@ -300,6 +309,9 @@ func (t *Terminal) pollCWD() {
 		case <-dead:
 			return
 		case <-ticker.C:
+			if t.paused.Load() {
+				continue
+			}
 			pid := t.Pid()
 			if pid <= 0 {
 				continue
@@ -338,6 +350,9 @@ func (t *Terminal) pollForeground() {
 		case <-dead:
 			return
 		case <-ticker.C:
+			if t.paused.Load() {
+				continue
+			}
 			name := t.foregroundProcessName()
 			if name != lastName {
 				lastName = name

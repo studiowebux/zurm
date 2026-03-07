@@ -86,6 +86,10 @@ type Game struct {
 	// prevFocused tracks window focus state for mode-1004 focus events.
 	prevFocused bool
 
+	// Idle suspension — reduce TPS when window is unfocused to save CPU/memory.
+	unfocusedAt time.Time // when focus was lost; zero = focused
+	suspended   bool      // true when TPS has been reduced
+
 	// Key repeat state for special keys.
 	repeatKey    ebiten.Key
 	repeatSeq    []byte // exact bytes to resend on repeat; nil uses KeyEventToBytes
@@ -1270,10 +1274,37 @@ func altPrintableSeq(key ebiten.Key) []byte {
 
 // handleFocus sends mode-1004 focus events when the window focus state changes.
 // On focus regain, resets input state so stale prevKeys don't swallow the first keystrokes.
+// Also manages idle suspension: after 5 seconds unfocused, TPS drops to 1 and
+// terminal polling goroutines are paused to minimize CPU and allocation pressure.
 func (g *Game) handleFocus() {
 	focused := ebiten.IsFocused()
+
+	// Idle suspension: reduce TPS after 5 seconds unfocused.
+	if !focused && !g.suspended && !g.unfocusedAt.IsZero() &&
+		time.Since(g.unfocusedAt) > 5*time.Second {
+		ebiten.SetTPS(1)
+		g.suspended = true
+		for _, t := range g.tabs {
+			for _, leaf := range t.Layout.Leaves() {
+				leaf.Pane.Term.SetPaused(true)
+			}
+		}
+	}
+
 	if focused != g.prevFocused {
 		if focused {
+			// Wake from suspension.
+			if g.suspended {
+				ebiten.SetTPS(g.cfg.Performance.TPS)
+				g.suspended = false
+				for _, t := range g.tabs {
+					for _, leaf := range t.Layout.Leaves() {
+						leaf.Pane.Term.SetPaused(false)
+					}
+				}
+			}
+			g.unfocusedAt = time.Time{}
+
 			// Reset edge-detection state: snapshot current physical key state so the
 			// next frame sees correct "was pressed" values. Without this, keys held
 			// during the blur (e.g. Cmd from Cmd+Tab) appear as stale presses and
@@ -1298,6 +1329,9 @@ func (g *Game) handleFocus() {
 					leaf.Pane.Term.Buf.Unlock()
 				}
 			}
+		} else {
+			// Record when focus was lost.
+			g.unfocusedAt = time.Now()
 		}
 		g.prevFocused = focused
 		g.focused.Term.SendFocusEvent(focused)
