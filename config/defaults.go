@@ -116,8 +116,6 @@ var Defaults = Config{
 	Blocks: BlocksConfig{
 		Enabled:      false,
 		ShowDuration: true,
-		Padding:      2,
-		Gap:          4,
 		BorderWidth:  3,
 		BorderColor:  "#1C1C2E",
 		SuccessColor: "#34D399",
