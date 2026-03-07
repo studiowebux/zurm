@@ -3712,6 +3712,9 @@ func (g *Game) openTabSearch() {
 	g.paletteState = renderer.PaletteState{}
 	g.overlayState = renderer.OverlayState{}
 	g.closeMenu()
+	g.tabSearchRepeatActive = false
+	g.prevKeys[ebiten.KeyArrowUp] = ebiten.IsKeyPressed(ebiten.KeyArrowUp)
+	g.prevKeys[ebiten.KeyArrowDown] = ebiten.IsKeyPressed(ebiten.KeyArrowDown)
 	g.screenDirty = true
 }
 
@@ -3728,13 +3731,17 @@ func (g *Game) updateTabSearchRepeat(key ebiten.Key, now time.Time) bool {
 	wasPressed := g.prevKeys[key]
 	g.prevKeys[key] = pressed
 
-	keyRepeatDelay := time.Duration(g.cfg.Keyboard.RepeatDelayMs) * time.Millisecond
-	keyRepeatInterval := time.Duration(g.cfg.Keyboard.RepeatIntervalMs) * time.Millisecond
-
-	if pressed && !wasPressed {
+	if !pressed {
 		if g.tabSearchRepeatActive && g.tabSearchRepeatKey == key {
 			g.tabSearchRepeatActive = false
 		}
+		return false
+	}
+
+	keyRepeatDelay := time.Duration(g.cfg.Keyboard.RepeatDelayMs) * time.Millisecond
+	keyRepeatInterval := time.Duration(g.cfg.Keyboard.RepeatIntervalMs) * time.Millisecond
+
+	if !wasPressed {
 		g.tabSearchRepeatKey = key
 		g.tabSearchRepeatActive = true
 		g.tabSearchRepeatStart = now
@@ -4870,6 +4877,9 @@ func (g *Game) openPalette() {
 	g.paletteState = renderer.PaletteState{Open: true}
 	g.overlayState = renderer.OverlayState{}
 	g.closeMenu()
+	g.paletteRepeatActive = false
+	g.prevKeys[ebiten.KeyArrowUp] = ebiten.IsKeyPressed(ebiten.KeyArrowUp)
+	g.prevKeys[ebiten.KeyArrowDown] = ebiten.IsKeyPressed(ebiten.KeyArrowDown)
 	g.screenDirty = true
 }
 
