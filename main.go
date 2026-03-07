@@ -15,6 +15,8 @@ import (
 	"time"
 	"unicode"
 
+	"golang.org/x/text/unicode/norm"
+
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/studiowebux/zurm/config"
@@ -2326,6 +2328,10 @@ func (g *Game) handlePaste() {
 	if err != nil || len(out) == 0 {
 		return
 	}
+	// NFC normalize — macOS clipboard uses NFD (decomposed accents).
+	// Terminal programs expect precomposed characters (NFC).
+	out = norm.NFC.Bytes(out)
+
 	// Normalize line endings: \r\n → \r, then remaining \n → \r.
 	out = bytes.ReplaceAll(out, []byte("\r\n"), []byte("\r"))
 	out = bytes.ReplaceAll(out, []byte("\n"), []byte("\r"))
