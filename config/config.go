@@ -94,9 +94,6 @@ width_pct = 35       # panel width as percent of screen width
 [blocks]
 enabled       = false   # render OSC 133 command blocks; toggle at runtime with Cmd+B (requires shell hooks)
 show_duration = true    # show elapsed execution time (time from Enter to prompt return)
-padding       = 2       # px from cell top to top border (ascender gap zone; keep ≤ 4)
-gap           = 4       # px from cell bottom to bottom border (descender zone; keep ≤ 6)
-                        # visible gap between consecutive blocks = padding + gap
 border_width  = 3       # width in pixels of the left accent stripe
 border_color  = "#1C1C2E" # border color when exit status is unknown
 success_color = "#34D399" # border color for exit code 0
@@ -328,15 +325,6 @@ type BlocksConfig struct {
 	Enabled bool `toml:"enabled"`
 	// ShowDuration controls whether the elapsed time is shown for commands > 1 s.
 	ShowDuration bool `toml:"show_duration"`
-	// Padding is the number of pixels from the cell top to the top border.
-	// The top border sits inside the ascender gap (blank above tallest glyphs).
-	// Keep at 2–4 px for clean rendering (JetBrains Mono 2× DPI ascender gap ≈ 4–5 px).
-	Padding int `toml:"padding"`
-	// Gap is the number of pixels from the cell bottom to the bottom border.
-	// The bottom border sits in the descender zone (blank below baseline for most chars).
-	// Visible gap between consecutive blocks = Padding + Gap.
-	// Keep at 4–6 px for clean rendering (descender zone ≈ 5–6 px).
-	Gap int `toml:"gap"`
 	// BorderWidth is the width in pixels of the left accent stripe.
 	BorderWidth int `toml:"border_width"`
 	// BorderColor is the hex border color when exit status is unknown.

@@ -91,36 +91,17 @@ func (r *Renderer) drawBlocksSnap(snap *blockSnap) {
 			visEnd = rows - 1
 		}
 
-		// Block box geometry — working WITH the font's natural blank zones.
-		//
-		// boxY0 = cell_top + Padding
-		//   The top border sits Padding pixels INSIDE the first cell, in the
-		//   ascender gap (the blank space above the tallest glyphs).
-		//   For JetBrains Mono at 2× DPI (~30 px cells) the ascender gap is
-		//   ~4–5 px, so Padding ≤ 4 keeps the border in blank space.
-		//
-		// boxY1 = cell_bottom - Gap
-		//   The bottom border sits Gap pixels INSIDE the last cell from the
-		//   bottom, in the descender zone (blank below the baseline for
-		//   non-descender characters, ~5–6 px for typical fonts).
-		//
-		// Visible gap between consecutive blocks = Padding + Gap:
-		//   Block N's bottom border is Gap px from its cell bottom.
-		//   Block N+1's top border is Padding px from its cell top.
-		//   Since the two cells share a boundary, those blank zones stack:
-		//   Gap px of descender blank + Padding px of ascender blank = total gap.
-		//   Both zones are visually empty for most characters, so the gap is
-		//   clean terminal background with no border cutting through glyphs.
+		// Block box geometry — cell-aligned.
+		// boxY0 = top of first visible cell, boxY1 = bottom of last visible cell.
+		// No padding/gap offsets — borders and bg are confined to exact cell boundaries.
 		pad := r.padding
-		padding := cfg.Padding
-		gap := cfg.Gap
 		boxX0 := rect.Min.X + 1
 		boxX1 := rect.Max.X - pad
-		boxY0 := rect.Min.Y + visStart*ch + pad + padding
+		boxY0 := rect.Min.Y + visStart*ch + pad
 		if boxY0 < rect.Min.Y {
 			boxY0 = rect.Min.Y
 		}
-		boxY1 := rect.Min.Y + (visEnd+1)*ch + pad - gap
+		boxY1 := rect.Min.Y + (visEnd+1)*ch + pad
 		if boxY1 <= boxY0 {
 			continue // block too thin to render
 		}
@@ -158,7 +139,13 @@ func (r *Renderer) drawBlocksSnap(snap *blockSnap) {
 			continue
 		}
 
-		badgeY := rect.Min.Y + startDisplay*ch + pad
+		// Shift badges down one row when the block starts at the viewport top
+		// and the pane is scrolled, so they don't overlap the scroll indicator pill.
+		badgeRow := startDisplay
+		if badgeRow == 0 && viewOff > 0 && visEnd > 0 {
+			badgeRow = 1
+		}
+		badgeY := rect.Min.Y + badgeRow*ch + pad
 		rightX := boxX1 - cw
 
 		blockRect := image.Rect(boxX0, boxY0, boxX1, boxY1)
@@ -193,6 +180,7 @@ func (r *Renderer) drawBlocksSnap(snap *blockSnap) {
 				AbsStart:   b.AbsPromptRow,
 				AbsCmdRow:  b.AbsCmdRow,
 				AbsEnd:     endAbs,
+				CmdCol:     b.CmdCol,
 				CopyTarget: copyTarget,
 				CmdRect:    cmdRect,
 				OutRect:    outRect,

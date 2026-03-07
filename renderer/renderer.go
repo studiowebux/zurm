@@ -111,6 +111,7 @@ type BlockHoverState struct {
 	AbsStart  int                    // AbsPromptRow of the hovered block
 	AbsCmdRow int                    // AbsCmdRow of the hovered block
 	AbsEnd    int                    // AbsEndRow of the hovered block
+	CmdCol    int                    // column where user input starts (from OSC 133;B); -1 if unknown
 	CopyTarget CopyTarget            // which copy button is under cursor
 	CmdRect   image.Rectangle        // hit rect of "cmd" button
 	OutRect   image.Rectangle        // hit rect of "out" button
