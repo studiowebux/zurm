@@ -173,6 +173,7 @@ type ScreenBuffer struct {
 	// accumulate stale block markers).
 	Blocks      []BlockBoundary
 	activeBlock *BlockBoundary
+	maxBlocks   int // 0 = unlimited
 
 	// BlockDoneCh receives the output text of completed command blocks (OSC 133 D).
 	// The game loop drains this for TTS auto-speak. Buffered to avoid blocking the parser.
@@ -181,7 +182,8 @@ type ScreenBuffer struct {
 
 // NewScreenBuffer allocates a grid with the given dimensions.
 // maxScrollback is the maximum number of lines to keep in scrollback history.
-func NewScreenBuffer(rows, cols, maxScrollback int, fg, bg color.RGBA, palette [16]color.RGBA) *ScreenBuffer {
+// maxBlocks caps the number of completed command blocks retained (0 = unlimited).
+func NewScreenBuffer(rows, cols, maxScrollback, maxBlocks int, fg, bg color.RGBA, palette [16]color.RGBA) *ScreenBuffer {
 	sb := &ScreenBuffer{
 		Rows:          rows,
 		Cols:          cols,
@@ -191,6 +193,7 @@ func NewScreenBuffer(rows, cols, maxScrollback int, fg, bg color.RGBA, palette [
 		ScrollTop:     0,
 		ScrollBottom:  rows - 1,
 		maxScrollback: maxScrollback,
+		maxBlocks:     maxBlocks,
 		CursorVisible: true,
 		AutoWrap:      true,
 		BlockDoneCh:   make(chan string, 4),
@@ -943,6 +946,18 @@ func (sb *ScreenBuffer) ActiveBlock() *BlockBoundary {
 	return sb.activeBlock
 }
 
+// appendBlock adds a completed block and evicts the oldest entry when maxBlocks
+// is exceeded. Uses copy+reslice to avoid the [1:] backing-array leak pattern.
+// Caller must hold write lock.
+func (sb *ScreenBuffer) appendBlock(b BlockBoundary) {
+	sb.Blocks = append(sb.Blocks, b)
+	if sb.maxBlocks > 0 && len(sb.Blocks) > sb.maxBlocks {
+		copy(sb.Blocks, sb.Blocks[1:])
+		sb.Blocks[len(sb.Blocks)-1] = BlockBoundary{} // zero for GC
+		sb.Blocks = sb.Blocks[:len(sb.Blocks)-1]
+	}
+}
+
 // applyBlockEvent processes one OSC 133 marker. Called by the parser while the
 // buffer write lock is held.
 //
@@ -964,7 +979,7 @@ func (sb *ScreenBuffer) applyBlockEvent(kind rune, exitCode int) {
 				sb.activeBlock.Duration = time.Since(sb.activeBlock.StartTime)
 			}
 			// ExitCode stays -1 (unknown — no D was received).
-			sb.Blocks = append(sb.Blocks, *sb.activeBlock)
+			sb.appendBlock(*sb.activeBlock)
 		}
 		sb.activeBlock = &BlockBoundary{
 			AbsPromptRow: absRow,
@@ -1001,7 +1016,7 @@ func (sb *ScreenBuffer) applyBlockEvent(kind rune, exitCode int) {
 			} else {
 				sb.activeBlock.Duration = time.Since(sb.activeBlock.StartTime)
 			}
-			sb.Blocks = append(sb.Blocks, *sb.activeBlock)
+			sb.appendBlock(*sb.activeBlock)
 
 			// Send output text (rows between command and end) for TTS auto-speak.
 			// C fires after the shell echoes the newline (pre-execution), so AbsCmdRow
@@ -1017,7 +1032,6 @@ func (sb *ScreenBuffer) applyBlockEvent(kind rune, exitCode int) {
 					}
 				}
 			}
-
 			sb.activeBlock = nil
 		}
 	}

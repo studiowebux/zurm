@@ -117,6 +117,7 @@ var Defaults = Config{
 		Enabled:      false,
 		ShowDuration: true,
 		BorderWidth:  3,
+		MaxHistory:   1000,
 		BorderColor:  "#1C1C2E",
 		SuccessColor: "#34D399",
 		FailColor:    "#F87171",

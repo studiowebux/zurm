@@ -338,6 +338,9 @@ type BlocksConfig struct {
 	BgColor string `toml:"bg_color"`
 	// BgAlpha controls the opacity of the background tint (0.0–1.0).
 	BgAlpha float64 `toml:"bg_alpha"`
+	// MaxHistory caps the number of completed blocks retained per pane.
+	// Oldest blocks are evicted when the limit is exceeded. 0 = unlimited.
+	MaxHistory int `toml:"max_history"`
 }
 
 type Config struct {

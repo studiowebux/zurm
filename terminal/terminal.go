@@ -44,7 +44,7 @@ func New(cfg *config.Config) *Terminal {
 	titleCh := make(chan string, 4)
 	cwdCh := make(chan string, 4)
 	bellCh := make(chan struct{}, 4)
-	buf := NewScreenBuffer(cfg.Window.Rows, cfg.Window.Columns, cfg.Scrollback.Lines, fg, bg, palette)
+	buf := NewScreenBuffer(cfg.Window.Rows, cfg.Window.Columns, cfg.Scrollback.Lines, cfg.Blocks.MaxHistory, fg, bg, palette)
 	parser := NewParser(buf, titleCh, cwdCh, bellCh)
 
 	cur := NewCursor()
