@@ -102,11 +102,13 @@ var Defaults = Config{
 		Color:      "#F59E0B",
 	},
 	Voice: VoiceConfig{
-		Enabled: false,
-		VoiceID: "",
-		Rate:    0.5,
-		Pitch:   1.0,
-		Volume:  1.0,
+		Enabled:   false,
+		VoiceID:   "",
+		Rate:      0.5,
+		Pitch:     1.0,
+		Volume:    1.0,
+		Locale:    "en-US",
+		ReadLines: 10,
 	},
 	Blocks: BlocksConfig{
 		Enabled:      false,

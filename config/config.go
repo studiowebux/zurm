@@ -107,6 +107,8 @@ voice_id = ""      # AVSpeechSynthesisVoice identifier; empty = system default
 rate     = 0.5     # speech rate (0.0–1.0; 0.5 = normal)
 pitch    = 1.0     # pitch multiplier (0.5–2.0; 1.0 = normal)
 volume   = 1.0     # volume (0.0–1.0; 1.0 = full)
+locale     = "en-US" # speech recognition language
+read_lines = 10     # lines to read on bell or Cmd+Shift+U (recent buffer)
 
 [theme]
 name = ""   # theme file name without .toml (e.g. "dark", "light"); empty = no theme
@@ -302,6 +304,10 @@ type VoiceConfig struct {
 	Pitch float64 `toml:"pitch"`
 	// Volume is the speech volume (0.0–1.0; 1.0 = full).
 	Volume float64 `toml:"volume"`
+	// Locale is the SFSpeechRecognizer language (e.g. "en-US", "fr-CA").
+	Locale string `toml:"locale"`
+	// ReadLines is the number of recent buffer lines to read on bell or Cmd+Shift+U.
+	ReadLines int `toml:"read_lines"`
 }
 
 type ThemeConfig struct {

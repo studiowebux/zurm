@@ -67,6 +67,7 @@ func AllBindings() []KeyBinding {
 		{Category: "Recording", Key: "Cmd+Shift+S", Description: "Take screenshot (PNG)"},
 		{Category: "Recording", Key: "Cmd+Shift+.", Description: "Start / stop screen recording (MP4)"},
 		{Category: "Speech", Key: "Cmd+Shift+U", Description: "Read selection aloud"},
+		{Category: "Speech", Key: "Cmd+Shift+Space", Description: "Start dictation (STT)"},
 		{Category: "Speech", Key: "palette", Description: "Stop speaking"},
 		{Category: "Help", Key: "Cmd+/", Description: "Toggle keybindings"},
 		{Category: "Help", Key: "Cmd+P", Description: "Command palette"},

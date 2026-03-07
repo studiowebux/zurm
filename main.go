@@ -215,8 +215,15 @@ type Game struct {
 	// lastBellSound debounces system sound + dock badge to avoid spamming.
 	lastBellSound time.Time
 
-	// Text-to-speech via macOS `say` CLI.
+	// Text-to-speech via macOS AVSpeechSynthesizer.
 	speaker voice.Speaker
+
+	// Speech-to-text via macOS SFSpeechRecognizer.
+	listener              voice.Listener
+	dictationState        renderer.DictationState
+	dictationLastChange   time.Time // last time transcript text changed
+	dictationLastText     string    // previous transcript for change detection
+	dictationEnterAt      time.Time // when to send deferred Enter after text injection
 }
 
 func main() {
@@ -360,6 +367,8 @@ func main() {
 	game.renderer.BlocksEnabled = game.blocksEnabled
 	game.statusBarState.Version = version
 	game.speaker.Init()
+	game.listener.SetLocale(cfg.Voice.Locale)
+	game.listener.InitListener()
 	game.buildPalette()
 
 	// Seed focus history with the initial tab so Cmd+; can return to it.
@@ -405,6 +414,7 @@ func (g *Game) Update() error {
 	}
 
 	// Clear transient flash message once its expiry has passed.
+	// Keep the flash alive while STT is listening (persistent indicator).
 	if g.statusBarState.FlashMessage != "" && time.Now().After(g.flashExpiry) {
 		g.statusBarState.FlashMessage = ""
 		g.screenDirty = true
@@ -441,6 +451,41 @@ func (g *Game) Update() error {
 		}
 	} else if g.statusBarState.Recording {
 		g.statusBarState.Recording = false
+		g.screenDirty = true
+	}
+
+	// Poll STT transcript and update dictation overlay.
+	if sttText, sttFinal, sttNew := g.listener.GetTranscript(); sttNew && sttText != "" {
+		if g.dictationState.Open {
+			g.dictationState.Transcript = sttText
+			if sttFinal {
+				g.injectDictation(sttText)
+			} else {
+				g.dictationState.Status = "Listening…"
+				if sttText != g.dictationLastText {
+					g.dictationLastText = sttText
+					g.dictationLastChange = now
+				}
+			}
+		}
+		g.screenDirty = true
+	}
+	// Silence timeout: auto-inject after 2 s of unchanged transcript.
+	if g.dictationState.Open && g.dictationState.Transcript != "" &&
+		!g.dictationLastChange.IsZero() && now.Sub(g.dictationLastChange) >= 2*time.Second {
+		g.injectDictation(g.dictationState.Transcript)
+		g.screenDirty = true
+	}
+	// Deferred Enter after dictation text injection (debounce).
+	if !g.dictationEnterAt.IsZero() && now.After(g.dictationEnterAt) {
+		if g.focused != nil {
+			g.focused.Term.SendBytes([]byte("\r"))
+		}
+		g.dictationEnterAt = time.Time{}
+	}
+	listening := g.listener.IsListening()
+	g.statusBarState.Listening = listening
+	if listening && now.Unix() != g.recLastStatusSec {
 		g.screenDirty = true
 	}
 
@@ -587,7 +632,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	g.renderer.DrawAll(screen, g.tabs, g.activeTab, g.focused, g.zoomed,
 		&g.menuState, &g.overlayState, &g.confirmState, &g.searchState, &g.statusBarState, &g.tabSwitcherState,
-		&g.paletteState, g.paletteEntries, &g.fileExplorerState, &g.tabSearchState, &g.statsState, &g.tabHoverState)
+		&g.paletteState, g.paletteEntries, &g.fileExplorerState, &g.tabSearchState, &g.statsState, &g.tabHoverState,
+		&g.dictationState)
 	g.screenDirty = false
 	g.lastClockSec = time.Now().Unix()
 
@@ -657,6 +703,13 @@ func (g *Game) handleInput() {
 	if g.fileExplorerState.Open {
 		g.screenDirty = true
 		g.handleFileExplorerInput()
+		return
+	}
+
+	// When the dictation overlay is open, route input to dictation handling.
+	if g.dictationState.Open {
+		g.screenDirty = true
+		g.handleDictationInput()
 		return
 	}
 
@@ -923,6 +976,9 @@ func (g *Game) handleInput() {
 			case meta && shift && key == ebiten.KeyPeriod:
 				// Cmd+Shift+. — toggle screen recording.
 				g.toggleRecording()
+			case meta && shift && key == ebiten.KeySpace:
+				// Cmd+Shift+Space — start dictation (STT).
+				g.startDictation()
 
 			case meta && shift && key == ebiten.KeyU:
 				// Cmd+Shift+U — read selection aloud (TTS).
@@ -1376,7 +1432,7 @@ func (g *Game) drainBell() {
 			}
 			// TTS: speak recent output on bell (e.g., Claude Code waiting for input).
 			if g.cfg.Voice.Enabled && leaf.Pane == g.focused {
-				text := g.getRecentBufferText(10)
+				text := g.getRecentBufferText(g.cfg.Voice.ReadLines)
 				text = strings.TrimSpace(text)
 				if text != "" {
 					g.speaker.Speak(text, g.cfg.Voice.VoiceID, g.cfg.Voice.Rate, g.cfg.Voice.Pitch, g.cfg.Voice.Volume)
@@ -5008,6 +5064,9 @@ func (g *Game) buildPalette() {
 		g.pauseSpeaking,
 		g.continueSpeaking,
 		g.openVoiceSelector,
+		// Dictation
+		g.startDictation,
+		g.stopDictation,
 		// Help
 		g.toggleOverlay,
 		g.openPalette,
@@ -5441,7 +5500,7 @@ func (g *Game) speakSelection() {
 
 	text := g.extractSelectedText()
 	if text == "" {
-		text = g.getVisibleBufferText()
+		text = g.getRecentBufferText(g.cfg.Voice.ReadLines)
 	}
 	if text == "" {
 		g.flashStatus("Nothing to speak")
@@ -5482,6 +5541,73 @@ func (g *Game) openVoiceSelector() {
 	g.paletteState.Query = "Voice: "
 	g.paletteState.Cursor = 0
 	g.screenDirty = true
+}
+
+// injectDictation sends the transcript to the focused PTY and closes the overlay.
+func (g *Game) injectDictation(text string) {
+	if g.focused != nil && text != "" {
+		g.focused.Term.SendBytes([]byte(text))
+		g.dictationEnterAt = time.Now().Add(100 * time.Millisecond)
+	}
+	g.stopDictation()
+}
+
+// startDictation opens the dictation overlay and begins STT speech recognition.
+func (g *Game) startDictation() {
+	if g.dictationState.Open {
+		return
+	}
+	g.dictationState = renderer.DictationState{
+		Open:   true,
+		Status: "Initializing…",
+	}
+	g.dictationLastText = ""
+	g.dictationLastChange = time.Time{}
+	g.screenDirty = true
+
+	if !g.listener.IsAuthorized() {
+		g.dictationState.Status = "Requesting permission… grant both Speech and Microphone, then retry"
+		g.listener.RequestAuthorization()
+		return
+	}
+	g.listener.SetLocale(g.cfg.Voice.Locale)
+	g.listener.StartListening()
+	g.dictationState.Status = "Listening… speak now"
+}
+
+// stopDictation stops STT and closes the dictation overlay.
+func (g *Game) stopDictation() {
+	if g.listener.IsListening() {
+		g.listener.StopListening()
+	}
+	g.dictationState = renderer.DictationState{}
+	g.dictationLastText = ""
+	g.dictationLastChange = time.Time{}
+	g.screenDirty = true
+}
+
+// handleDictationInput processes keyboard input while the dictation overlay is open.
+func (g *Game) handleDictationInput() {
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.stopDictation()
+		g.prevKeys[ebiten.KeyEscape] = true
+		return
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
+		if g.dictationState.Transcript != "" {
+			g.injectDictation(g.dictationState.Transcript)
+			return
+		}
+		// Re-trigger start if permission was just granted or recognizer stopped.
+		if !g.listener.IsListening() && g.listener.IsAuthorized() {
+			g.listener.SetLocale(g.cfg.Voice.Locale)
+			g.listener.StartListening()
+			g.dictationState.Status = "Listening… speak now"
+			g.dictationState.Transcript = ""
+			g.dictationLastText = ""
+			g.dictationLastChange = time.Time{}
+		}
+	}
 }
 
 // extractSelectedText returns the selected text from the focused pane,
@@ -5584,7 +5710,7 @@ func (g *Game) getRecentBufferText(maxLines int) string {
 			line.WriteRune(ch)
 		}
 		trimmed := strings.TrimRight(line.String(), " ")
-		if trimmed != "" {
+		if trimmed != "" && hasAlphanumeric(trimmed) {
 			lines = append(lines, trimmed)
 		}
 	}
@@ -5594,6 +5720,16 @@ func (g *Game) getRecentBufferText(maxLines int) string {
 		lines[i], lines[j] = lines[j], lines[i]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// hasAlphanumeric returns true if s contains at least one ASCII letter or digit.
+func hasAlphanumeric(s string) bool {
+	for _, c := range s {
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+			return true
+		}
+	}
+	return false
 }
 
 // toggleRecording starts or stops a screen recording (FFMPEG → MP4).
