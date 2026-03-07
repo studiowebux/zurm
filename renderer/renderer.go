@@ -715,11 +715,6 @@ func (r *Renderer) drawDividers(node *pane.LayoutNode) {
 	r.drawDividers(node.Right)
 }
 
-// drawBorder draws a 1px rectangle border just inside rect on r.offscreen.
-func (r *Renderer) drawBorder(rect image.Rectangle, clr color.RGBA) {
-	r.drawBorderTo(r.offscreen, rect, clr)
-}
-
 // drawBorderTo draws a 1px rectangle border just inside rect on dst.
 func (r *Renderer) drawBorderTo(dst *ebiten.Image, rect image.Rectangle, clr color.RGBA) {
 	dst.SubImage(image.Rect(rect.Min.X, rect.Min.Y, rect.Max.X, rect.Min.Y+1)).(*ebiten.Image).Fill(clr)

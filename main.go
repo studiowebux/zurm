@@ -5714,35 +5714,6 @@ func (g *Game) extractSelectedText() string {
 	return text.String()
 }
 
-// getVisibleBufferText returns all text currently visible in the focused pane.
-func (g *Game) getVisibleBufferText() string {
-	g.focused.Term.Buf.RLock()
-	defer g.focused.Term.Buf.RUnlock()
-
-	rows := g.focused.Term.Buf.Rows
-	cols := g.focused.Term.Buf.Cols
-	var text strings.Builder
-	for r := 0; r < rows; r++ {
-		absRow := g.focused.Term.Buf.DisplayToAbsRow(r)
-		var line strings.Builder
-		for c := 0; c < cols; c++ {
-			ch := g.focused.Term.Buf.GetAbsCell(absRow, c).Char
-			if ch == 0 {
-				ch = ' '
-			}
-			line.WriteRune(ch)
-		}
-		trimmed := strings.TrimRight(line.String(), " ")
-		if trimmed != "" || r < rows-1 {
-			if r > 0 {
-				text.WriteByte('\n')
-			}
-			text.WriteString(trimmed)
-		}
-	}
-	return strings.TrimRight(text.String(), "\n ")
-}
-
 // getRecentBufferText returns the last maxLines non-empty lines from the
 // bottom of the visible buffer. Useful for bell-triggered TTS where only
 // the recent output matters (e.g., Claude Code's question).
