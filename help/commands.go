@@ -67,6 +67,9 @@ func AllCommands() []Command {
 		// Speech
 		{Name: "Read Selection Aloud", Shortcut: "Cmd+Shift+U"},
 		{Name: "Stop Speaking", Shortcut: ""},
+		{Name: "Pause Speaking", Shortcut: ""},
+		{Name: "Continue Speaking", Shortcut: ""},
+		{Name: "Select Voice", Shortcut: ""},
 		// Help
 		{Name: "Show Keybindings", Shortcut: "Cmd+/"},
 		{Name: "Command Palette", Shortcut: "Cmd+P"},

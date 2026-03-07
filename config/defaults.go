@@ -103,8 +103,10 @@ var Defaults = Config{
 	},
 	Voice: VoiceConfig{
 		Enabled: false,
-		Voice:   "",
-		Rate:    180,
+		VoiceID: "",
+		Rate:    0.5,
+		Pitch:   1.0,
+		Volume:  1.0,
 	},
 	Blocks: BlocksConfig{
 		Enabled:      false,

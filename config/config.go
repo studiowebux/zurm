@@ -102,9 +102,11 @@ bg_color      = ""        # optional hex background tint (empty = none)
 bg_alpha      = 0.0       # opacity of background tint (0.0–1.0)
 
 [voice]
-enabled = false   # enable TTS commands (Read Selection Aloud, auto-speak output)
-voice   = ""      # macOS voice name (e.g. "Samantha"); empty = system default
-rate    = 180     # speech rate in words per minute
+enabled  = false   # enable TTS commands (Read Selection Aloud, auto-speak output)
+voice_id = ""      # AVSpeechSynthesisVoice identifier; empty = system default
+rate     = 0.5     # speech rate (0.0–1.0; 0.5 = normal)
+pitch    = 1.0     # pitch multiplier (0.5–2.0; 1.0 = normal)
+volume   = 1.0     # volume (0.0–1.0; 1.0 = full)
 
 [theme]
 name = ""   # theme file name without .toml (e.g. "dark", "light"); empty = no theme
@@ -292,10 +294,14 @@ type BellConfig struct {
 type VoiceConfig struct {
 	// Enabled controls whether TTS commands are available.
 	Enabled bool `toml:"enabled"`
-	// Voice is the macOS voice name (e.g. "Samantha"). Empty = system default.
-	Voice string `toml:"voice"`
-	// Rate is the speech rate in words per minute for the `say` command.
-	Rate int `toml:"rate"`
+	// VoiceID is the AVSpeechSynthesisVoice identifier. Empty = system default.
+	VoiceID string `toml:"voice_id"`
+	// Rate is the speech rate (0.0–1.0; 0.5 = normal).
+	Rate float64 `toml:"rate"`
+	// Pitch is the pitch multiplier (0.5–2.0; 1.0 = normal).
+	Pitch float64 `toml:"pitch"`
+	// Volume is the speech volume (0.0–1.0; 1.0 = full).
+	Volume float64 `toml:"volume"`
 }
 
 type ThemeConfig struct {
@@ -394,6 +400,7 @@ func Load() (*Config, error) {
 	}
 
 	resolveShell(&cfg)
+	clampVoice(&cfg)
 	ApplyTheme(&cfg, meta)
 	return &cfg, nil
 }
@@ -412,6 +419,7 @@ func Reload() (*Config, error) {
 		return nil, fmt.Errorf("config reload: %w", err)
 	}
 	resolveShell(&cfg)
+	clampVoice(&cfg)
 	return &cfg, nil
 }
 
@@ -432,7 +440,30 @@ func LoadWithMeta() (*Config, toml.MetaData, error) {
 		return &cfg, meta, fmt.Errorf("config: %w", err)
 	}
 	resolveShell(&cfg)
+	clampVoice(&cfg)
 	return &cfg, meta, nil
+}
+
+// clampVoice migrates old WPM values and clamps voice parameters to valid ranges.
+func clampVoice(cfg *Config) {
+	if cfg.Voice.Rate > 1.0 {
+		cfg.Voice.Rate = 0.5
+	}
+	if cfg.Voice.Rate < 0.0 {
+		cfg.Voice.Rate = 0.0
+	}
+	if cfg.Voice.Pitch < 0.5 {
+		cfg.Voice.Pitch = 0.5
+	}
+	if cfg.Voice.Pitch > 2.0 {
+		cfg.Voice.Pitch = 2.0
+	}
+	if cfg.Voice.Volume < 0.0 {
+		cfg.Voice.Volume = 0.0
+	}
+	if cfg.Voice.Volume > 1.0 {
+		cfg.Voice.Volume = 1.0
+	}
 }
 
 // resolveShell fills in Shell.Program from $SHELL if not set.

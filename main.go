@@ -359,6 +359,7 @@ func main() {
 
 	game.renderer.BlocksEnabled = game.blocksEnabled
 	game.statusBarState.Version = version
+	game.speaker.Init()
 	game.buildPalette()
 
 	// Seed focus history with the initial tab so Cmd+; can return to it.
@@ -1378,7 +1379,7 @@ func (g *Game) drainBell() {
 				text := g.getRecentBufferText(10)
 				text = strings.TrimSpace(text)
 				if text != "" {
-					_ = g.speaker.Speak(text, g.cfg.Voice.Voice, g.cfg.Voice.Rate)
+					g.speaker.Speak(text, g.cfg.Voice.VoiceID, g.cfg.Voice.Rate, g.cfg.Voice.Pitch, g.cfg.Voice.Volume)
 				}
 			}
 			fired = true
@@ -1436,9 +1437,7 @@ func (g *Game) drainBlockDone() {
 			if g.cfg.Voice.Enabled && leaf.Pane == g.focused {
 				text = strings.TrimSpace(text)
 				if text != "" {
-					if err := g.speaker.Speak(text, g.cfg.Voice.Voice, g.cfg.Voice.Rate); err != nil {
-						g.flashStatus("Speech failed: " + err.Error())
-					}
+					g.speaker.Speak(text, g.cfg.Voice.VoiceID, g.cfg.Voice.Rate, g.cfg.Voice.Pitch, g.cfg.Voice.Volume)
 				}
 			}
 		default:
@@ -5006,6 +5005,9 @@ func (g *Game) buildPalette() {
 		// Speech
 		g.speakSelection,
 		g.stopSpeaking,
+		g.pauseSpeaking,
+		g.continueSpeaking,
+		g.openVoiceSelector,
 		// Help
 		g.toggleOverlay,
 		g.openPalette,
@@ -5020,6 +5022,13 @@ func (g *Game) buildPalette() {
 		themeName := name // capture for closure
 		entries = append(entries, renderer.PaletteEntry{Name: "Theme: " + themeName, Shortcut: ""})
 		actions = append(actions, func() { g.switchTheme(themeName) })
+	}
+
+	// Append dynamic voice entries from system voices.
+	for _, v := range g.speaker.ListVoices() {
+		vi := v // capture for closure
+		entries = append(entries, renderer.PaletteEntry{Name: "Voice: " + vi.Name + " (" + vi.Language + ")", Shortcut: ""})
+		actions = append(actions, func() { g.selectVoice(vi) })
 	}
 
 	g.paletteEntries = entries
@@ -5424,7 +5433,7 @@ func (g *Game) flashStatus(msg string) {
 }
 
 // speakSelection extracts the current selection (or visible buffer if no
-// selection) and reads it aloud via the macOS `say` command.
+// selection) and reads it aloud via AVSpeechSynthesizer.
 func (g *Game) speakSelection() {
 	if !g.cfg.Voice.Enabled {
 		return
@@ -5439,10 +5448,7 @@ func (g *Game) speakSelection() {
 		return
 	}
 
-	if err := g.speaker.Speak(text, g.cfg.Voice.Voice, g.cfg.Voice.Rate); err != nil {
-		g.flashStatus("Speech failed: " + err.Error())
-		return
-	}
+	g.speaker.Speak(text, g.cfg.Voice.VoiceID, g.cfg.Voice.Rate, g.cfg.Voice.Pitch, g.cfg.Voice.Volume)
 	g.flashStatus("Speaking…")
 }
 
@@ -5450,6 +5456,32 @@ func (g *Game) speakSelection() {
 func (g *Game) stopSpeaking() {
 	g.speaker.Stop()
 	g.flashStatus("Speech stopped")
+}
+
+// pauseSpeaking pauses active speech.
+func (g *Game) pauseSpeaking() {
+	g.speaker.Pause()
+	g.flashStatus("Speech paused")
+}
+
+// continueSpeaking resumes paused speech.
+func (g *Game) continueSpeaking() {
+	g.speaker.Continue()
+	g.flashStatus("Speech resumed")
+}
+
+// selectVoice sets the active voice by identifier.
+func (g *Game) selectVoice(v voice.VoiceInfo) {
+	g.cfg.Voice.VoiceID = v.ID
+	g.flashStatus("Voice: " + v.Name)
+}
+
+// openVoiceSelector opens the command palette pre-filtered to voice entries.
+func (g *Game) openVoiceSelector() {
+	g.paletteState.Open = true
+	g.paletteState.Query = "Voice: "
+	g.paletteState.Cursor = 0
+	g.screenDirty = true
 }
 
 // extractSelectedText returns the selected text from the focused pane,
