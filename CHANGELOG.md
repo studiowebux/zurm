@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Right-click tab context menu now targets the clicked tab, not the active tab
+- Scrollback scrolling blocked when alternate screen is active (fixes broken scrolling in TUI apps like Claude Code, nvim, htop)
 
 ### Changed
 

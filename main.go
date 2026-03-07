@@ -721,28 +721,36 @@ func (g *Game) handleInput() {
 	if halfPage < 1 {
 		halfPage = 1
 	}
+	// Block scrollback when alternate screen is active — TUI apps (Claude Code,
+	// nvim, htop) own the full viewport and scrollback makes no sense.
+	g.focused.Term.Buf.RLock()
+	altActive := g.focused.Term.Buf.IsAltActive()
+	g.focused.Term.Buf.RUnlock()
+
 	scrolled := false
-	for _, key := range allKeys {
-		if !ebiten.IsKeyPressed(key) || g.prevKeys[key] {
-			continue
-		}
-		switch {
-		case key == ebiten.KeyPageUp:
-			g.focused.Term.Buf.Lock()
-			g.focused.Term.Buf.ScrollViewUp(halfPage)
-			g.focused.Term.Buf.Unlock()
-			scrolled = true
-		case key == ebiten.KeyPageDown:
-			g.focused.Term.Buf.Lock()
-			g.focused.Term.Buf.ScrollViewDown(halfPage)
-			g.focused.Term.Buf.Unlock()
-			scrolled = true
-		case (meta || ctrl) && key == ebiten.KeyK:
-			g.focused.Term.Buf.Lock()
-			g.focused.Term.Buf.ClearScrollback()
-			g.focused.Term.Buf.ClearSelection()
-			g.focused.Term.Buf.Unlock()
-			scrolled = true
+	if !altActive {
+		for _, key := range allKeys {
+			if !ebiten.IsKeyPressed(key) || g.prevKeys[key] {
+				continue
+			}
+			switch {
+			case key == ebiten.KeyPageUp:
+				g.focused.Term.Buf.Lock()
+				g.focused.Term.Buf.ScrollViewUp(halfPage)
+				g.focused.Term.Buf.Unlock()
+				scrolled = true
+			case key == ebiten.KeyPageDown:
+				g.focused.Term.Buf.Lock()
+				g.focused.Term.Buf.ScrollViewDown(halfPage)
+				g.focused.Term.Buf.Unlock()
+				scrolled = true
+			case (meta || ctrl) && key == ebiten.KeyK:
+				g.focused.Term.Buf.Lock()
+				g.focused.Term.Buf.ClearScrollback()
+				g.focused.Term.Buf.ClearSelection()
+				g.focused.Term.Buf.Unlock()
+				scrolled = true
+			}
 		}
 	}
 
@@ -751,7 +759,7 @@ func (g *Game) handleInput() {
 		g.focused.Term.Buf.RLock()
 		mouseMode := g.focused.Term.Buf.MouseMode
 		g.focused.Term.Buf.RUnlock()
-		if mouseMode == 0 {
+		if mouseMode == 0 && !altActive {
 			// Accumulate fractional trackpad deltas — int truncation drops sub-pixel
 			// input and makes smooth-scroll feel janky.
 			g.scrollAccum += wy * float64(g.cfg.Scroll.WheelLinesPerTick)
@@ -2850,7 +2858,11 @@ func (g *Game) handleMouse() {
 	if wy != 0 {
 		// Shift+scroll bypasses PTY mouse mode and scrolls the terminal's own
 		// scrollback buffer (standard behaviour in iTerm2, kitty, etc.).
-		if ebiten.IsKeyPressed(ebiten.KeyShift) {
+		// Blocked in alt screen — TUI apps own the viewport.
+		g.focused.Term.Buf.RLock()
+		altShift := g.focused.Term.Buf.IsAltActive()
+		g.focused.Term.Buf.RUnlock()
+		if ebiten.IsKeyPressed(ebiten.KeyShift) && !altShift {
 			g.scrollAccum += wy * float64(g.cfg.Scroll.WheelLinesPerTick)
 			lines := int(g.scrollAccum)
 			if lines != 0 {
@@ -4637,6 +4649,14 @@ func (g *Game) reloadConfig() {
 	ebiten.SetTPS(newCfg.Performance.TPS)
 	g.blocksEnabled = newCfg.Blocks.Enabled
 	g.renderer.BlocksEnabled = g.blocksEnabled
+
+	// Always recompute layout — status bar height, padding, or divider width
+	// may have changed, which shifts pane rects.
+	for _, t := range g.tabs {
+		g.layout = t.Layout
+		g.recomputeLayout()
+	}
+	g.layout = g.tabs[g.activeTab].Layout
 
 	// Rebuild palette to pick up new theme files.
 	g.buildPalette()

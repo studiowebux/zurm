@@ -522,6 +522,7 @@ func (sb *ScreenBuffer) EnableAltScreen() {
 	sb.altCursorRow = 0
 	sb.altCursorCol = 0
 	sb.altActive = true
+	sb.ViewOffset = 0 // TUI apps need full viewport — no stale scroll position
 	sb.CursorRow = 0
 	sb.CursorCol = 0
 	sb.ScrollTop = 0
