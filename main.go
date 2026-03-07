@@ -6009,6 +6009,7 @@ func (g *Game) handleMarkdownViewerInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.mdViewerState = renderer.MarkdownViewerState{}
 		g.renderer.SetLayoutDirty()
+		g.screenDirty = true
 		g.prevKeys[ebiten.KeyEscape] = true
 		return
 	}
@@ -6018,6 +6019,7 @@ func (g *Game) handleMarkdownViewerInput() {
 	if meta && shift && inpututil.IsKeyJustPressed(ebiten.KeyM) {
 		g.mdViewerState = renderer.MarkdownViewerState{}
 		g.renderer.SetLayoutDirty()
+		g.screenDirty = true
 		return
 	}
 
