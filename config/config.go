@@ -102,7 +102,7 @@ bg_color      = ""        # optional hex background tint (empty = none)
 bg_alpha      = 0.0       # opacity of background tint (0.0–1.0)
 
 [voice]
-enabled = true    # enable TTS commands (Read Selection Aloud, Stop Speaking)
+enabled = false   # enable TTS commands (Read Selection Aloud, auto-speak output)
 voice   = ""      # macOS voice name (e.g. "Samantha"); empty = system default
 rate    = 180     # speech rate in words per minute
 

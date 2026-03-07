@@ -102,7 +102,7 @@ var Defaults = Config{
 		Color:      "#F59E0B",
 	},
 	Voice: VoiceConfig{
-		Enabled: true,
+		Enabled: false,
 		Voice:   "",
 		Rate:    180,
 	},
