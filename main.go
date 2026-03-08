@@ -958,9 +958,6 @@ func (g *Game) handleInput() {
 	}
 
 	if scrolled {
-		for _, key := range allKeys {
-			g.prevKeys[key] = ebiten.IsKeyPressed(key)
-		}
 		return
 	}
 
@@ -3368,62 +3365,10 @@ func (g *Game) wordSelection(row, col int) terminal.Selection {
 
 // copySelection copies the current selection text to the clipboard via pbcopy.
 func (g *Game) copySelection() {
-	g.focused.Term.Buf.RLock()
-	sel := g.focused.Term.Buf.Selection
-	cols := g.focused.Term.Buf.Cols
-
-	if !sel.Active {
-		g.focused.Term.Buf.RUnlock()
-		return
-	}
-
-	norm := sel.Normalize()
-	// Clamp to valid absolute row range.
-	maxAbsRow := g.focused.Term.Buf.ScrollbackLen() + g.focused.Term.Buf.Rows - 1
-	if norm.StartRow < 0 {
-		norm.StartRow = 0
-	}
-	if norm.EndRow > maxAbsRow {
-		norm.EndRow = maxAbsRow
-	}
-
-	var text strings.Builder
-	for r := norm.StartRow; r <= norm.EndRow; r++ {
-		if r > norm.StartRow && !g.focused.Term.Buf.IsAbsRowWrapped(r) {
-			text.WriteByte('\n')
-		}
-
-		colStart := 0
-		colEnd := cols - 1
-		if r == norm.StartRow {
-			colStart = norm.StartCol
-		}
-		if r == norm.EndRow {
-			colEnd = norm.EndCol
-		}
-
-		var line strings.Builder
-		for c := colStart; c <= colEnd && c < cols; c++ {
-			cell := g.focused.Term.Buf.GetAbsCell(r, c)
-			// Skip continuation cells (second half of wide char) to avoid duplicates.
-			if cell.Width == 0 {
-				continue
-			}
-			ch := cell.Char
-			if ch == 0 {
-				ch = ' '
-			}
-			line.WriteRune(ch)
-		}
-		text.WriteString(strings.TrimRight(line.String(), " "))
-	}
-	g.focused.Term.Buf.RUnlock()
-
-	result := text.String()
+	result := g.extractSelectedText()
 	if result == "" {
 		return
 	}
-
 	cmd := exec.Command("pbcopy")
 	cmd.Stdin = strings.NewReader(result)
 	_ = cmd.Run()
@@ -3505,7 +3450,9 @@ func (g *Game) closeActiveTab() {
 	for _, leaf := range g.tabs[g.activeTab].Layout.Leaves() {
 		leaf.Pane.Term.Close()
 	}
+	old := g.tabs
 	g.tabs = append(g.tabs[:g.activeTab], g.tabs[g.activeTab+1:]...)
+	old[len(old)-1] = nil // zero trailing slot to release Tab for GC
 	if len(g.tabs) == 0 {
 		g.layout = nil
 		g.focused = nil

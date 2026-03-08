@@ -1055,7 +1055,7 @@ func (sb *ScreenBuffer) SearchAll(query string) []SearchMatch {
 		if absRow < sb.scrollCount {
 			row = sb.scrollbackGet(absRow)
 		} else {
-			row = sb.Cells[absRow-sb.scrollCount]
+			row = sb.cells()[absRow-sb.scrollCount]
 		}
 
 		// Build text and colMap skipping continuation cells.
