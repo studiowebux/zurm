@@ -175,6 +175,9 @@ func (r *Renderer) SetSize(w, h int) {
 		if ow == w && oh == h {
 			return
 		}
+		r.offscreen.Deallocate()
+		r.blocksLayer.Deallocate()
+		r.modalLayer.Deallocate()
 	}
 	r.offscreen = ebiten.NewImage(w, h)
 	r.blocksLayer = ebiten.NewImage(w, h)

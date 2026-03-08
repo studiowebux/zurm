@@ -3514,6 +3514,7 @@ func (g *Game) closeActiveTab() {
 	if g.activeTab >= len(g.tabs) {
 		g.activeTab = len(g.tabs) - 1
 	}
+	g.renderer.ClearPaneCache()
 	g.renderer.SetLayoutDirty()
 	g.syncActive()
 }
