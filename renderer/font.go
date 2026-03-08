@@ -24,6 +24,10 @@ type FontRenderer struct {
 
 	// drawOpts is reused across DrawGlyph/DrawString calls to avoid per-glyph heap allocation.
 	drawOpts text.DrawOptions
+
+	// runeStr caches string(rune) conversions for ASCII to avoid per-glyph heap allocation.
+	// Index 32..126 covers printable ASCII. Non-ASCII runes fall back to string(ch).
+	runeStr [127]string
 }
 
 // NewFontRenderer loads the embedded TTF and calculates cell metrics.
@@ -53,14 +57,27 @@ func NewFontRenderer(ttfData []byte, size float64) (*FontRenderer, error) {
 	// Baseline: approximately 80% of cell height is a reasonable default.
 	baseline := int(float64(cellH)*0.80 + 0.5)
 
-	return &FontRenderer{
+	f := &FontRenderer{
 		face:     face,
 		src:      src,
 		size:     size,
 		CellW:    cellW,
 		CellH:    cellH,
 		Baseline: baseline,
-	}, nil
+	}
+	// Pre-compute string(rune) for printable ASCII to avoid per-glyph allocation.
+	for r := rune(32); r < 127; r++ {
+		f.runeStr[r] = string(r)
+	}
+	return f, nil
+}
+
+// runeString returns a cached string for ASCII runes, avoiding per-call allocation.
+func (f *FontRenderer) runeString(ch rune) string {
+	if ch >= 32 && ch < 127 {
+		return f.runeStr[ch]
+	}
+	return string(ch)
 }
 
 // DrawGlyph renders a single character onto dst at pixel position (x, y) — top-left of cell.
@@ -80,7 +97,7 @@ func (f *FontRenderer) DrawGlyph(dst *ebiten.Image, ch rune, x, y int, fg, bg co
 	f.drawOpts.ColorScale.Reset()
 	f.drawOpts.ColorScale.ScaleWithColor(fg)
 
-	text.Draw(dst, string(ch), f.face, &f.drawOpts)
+	text.Draw(dst, f.runeString(ch), f.face, &f.drawOpts)
 
 	if underline {
 		dst.SubImage(image.Rect(x, y+f.CellH-2, x+f.CellW, y+f.CellH)).(*ebiten.Image).Fill(fg)
@@ -131,7 +148,7 @@ func (f *FontRenderer) DrawString(dst *ebiten.Image, s string, x, y int, clr col
 			f.drawOpts.GeoM.Translate(float64(x), float64(y))
 			f.drawOpts.ColorScale.Reset()
 			f.drawOpts.ColorScale.ScaleWithColor(clr)
-			text.Draw(dst, string(ch), f.face, &f.drawOpts)
+			text.Draw(dst, f.runeString(ch), f.face, &f.drawOpts)
 		}
 		x += w * f.CellW
 	}

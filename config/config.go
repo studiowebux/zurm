@@ -263,6 +263,12 @@ type PerformanceConfig struct {
 	// TPS is the Ebitengine tick rate (Update calls per second).
 	// Lower values reduce idle CPU. 30 is sufficient for a terminal.
 	TPS int `toml:"tps"`
+	// Pprof enables the net/http/pprof endpoint on localhost for runtime
+	// memory and goroutine profiling. Access via:
+	//   go tool pprof http://localhost:<pprof_port>/debug/pprof/heap
+	Pprof bool `toml:"pprof"`
+	// PprofPort is the localhost port for the pprof HTTP server.
+	PprofPort int `toml:"pprof_port"`
 }
 
 type SessionConfig struct {
@@ -338,6 +344,9 @@ type BlocksConfig struct {
 	BgColor string `toml:"bg_color"`
 	// BgAlpha controls the opacity of the background tint (0.0–1.0).
 	BgAlpha float64 `toml:"bg_alpha"`
+	// MaxHistory caps the number of completed blocks retained per pane.
+	// Oldest blocks are evicted when the limit is exceeded. 0 = unlimited.
+	MaxHistory int `toml:"max_history"`
 }
 
 type Config struct {

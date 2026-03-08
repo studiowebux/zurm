@@ -71,6 +71,7 @@ func AllBindings() []KeyBinding {
 		{Category: "Speech", Key: "palette", Description: "Stop speaking"},
 		{Category: "Help", Key: "Cmd+/", Description: "Toggle keybindings"},
 		{Category: "Help", Key: "Cmd+P", Description: "Command palette"},
+		{Category: "Help", Key: "Cmd+Shift+M", Description: "Markdown reader mode"},
 		{Category: "Help", Key: "? button", Description: "Status bar shortcut"},
 		{Category: "App", Key: "Cmd+I", Description: "Toggle stats overlay"},
 		{Category: "App", Key: "Cmd+=", Description: "Increase font size"},

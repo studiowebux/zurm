@@ -2,12 +2,16 @@ package main
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"flag"
 	"fmt"
 	"image"
 	"io/fs"
 	"log"
+	"net"
+	"net/http"
+	_ "net/http/pprof" // #nosec G108 — opt-in via config, localhost-only
 	"os"
 	"os/exec"
 	"runtime"
@@ -22,6 +26,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/studiowebux/zurm/config"
 	"github.com/studiowebux/zurm/fileexplorer"
+	"github.com/studiowebux/zurm/markdown"
 	"github.com/studiowebux/zurm/help"
 	"github.com/studiowebux/zurm/pane"
 	"github.com/studiowebux/zurm/recorder"
@@ -82,6 +87,10 @@ type Game struct {
 	// prevFocused tracks window focus state for mode-1004 focus events.
 	prevFocused bool
 
+	// Idle suspension — reduce TPS when window is unfocused to save CPU/memory.
+	unfocusedAt time.Time // when focus was lost; zero = focused
+	suspended   bool      // true when TPS has been reduced
+
 	// Key repeat state for special keys.
 	repeatKey    ebiten.Key
 	repeatSeq    []byte // exact bytes to resend on repeat; nil uses KeyEventToBytes
@@ -135,7 +144,8 @@ type Game struct {
 
 	// Status bar state.
 	statusBarState renderer.StatusBarState
-	gitInfoCh chan gitInfo // receives async git status results
+	gitInfoCh     chan gitInfo     // receives async git status results
+	gitInfoCancel context.CancelFunc // cancels the previous git info goroutine
 
 	// Tab switcher overlay state (pin-style).
 	tabSwitcherState renderer.TabSwitcherState
@@ -217,6 +227,9 @@ type Game struct {
 
 	// Text-to-speech via macOS AVSpeechSynthesizer.
 	speaker voice.Speaker
+
+	// Markdown viewer overlay state (Cmd+Shift+M).
+	mdViewerState renderer.MarkdownViewerState
 
 	// Speech-to-text via macOS SFSpeechRecognizer.
 	listener              voice.Listener
@@ -374,6 +387,21 @@ func main() {
 	// Seed focus history with the initial tab so Cmd+; can return to it.
 	game.focusHistory = []focusEntry{{tabIdx: initialActive, pane: initialTabs[initialActive].Focused}}
 	initialTabs[initialActive].SnapshotGen()
+
+	// Start pprof server for runtime memory profiling when enabled.
+	if cfg.Performance.Pprof {
+		addr := fmt.Sprintf("localhost:%d", cfg.Performance.PprofPort)
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			log.Fatalf("pprof: cannot bind %s: %v", addr, err)
+		}
+		log.Printf("pprof: http://%s/debug/pprof/", addr)
+		go func() {
+			if err := http.Serve(ln, nil); err != nil { // #nosec G114 — pprof is localhost-only, no timeout needed
+				log.Printf("pprof server: %v", err)
+			}
+		}()
+	}
 
 	ebiten.SetWindowSize(logW, logH)
 	ebiten.SetWindowTitle("zurm")
@@ -633,7 +661,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.renderer.DrawAll(screen, g.tabs, g.activeTab, g.focused, g.zoomed,
 		&g.menuState, &g.overlayState, &g.confirmState, &g.searchState, &g.statusBarState, &g.tabSwitcherState,
 		&g.paletteState, g.paletteEntries, &g.fileExplorerState, &g.tabSearchState, &g.statsState, &g.tabHoverState,
-		&g.dictationState)
+		&g.dictationState, &g.mdViewerState)
 	g.screenDirty = false
 	g.lastClockSec = time.Now().Unix()
 
@@ -738,6 +766,13 @@ func (g *Game) handleInput() {
 	if g.pinMode {
 		g.screenDirty = true
 		g.handlePinInput()
+		return
+	}
+
+	// When the markdown viewer is open, route input to markdown viewer handling.
+	if g.mdViewerState.Open {
+		g.screenDirty = true
+		g.handleMarkdownViewerInput()
 		return
 	}
 
@@ -983,6 +1018,10 @@ func (g *Game) handleInput() {
 			case meta && shift && key == ebiten.KeyU:
 				// Cmd+Shift+U — read selection aloud (TTS).
 				g.speakSelection()
+
+			case meta && shift && key == ebiten.KeyM:
+				// Cmd+Shift+M — markdown reader mode.
+				g.openMarkdownViewer()
 
 			// Tab management.
 			case meta && shift && key == ebiten.KeyT:
@@ -1237,10 +1276,37 @@ func altPrintableSeq(key ebiten.Key) []byte {
 
 // handleFocus sends mode-1004 focus events when the window focus state changes.
 // On focus regain, resets input state so stale prevKeys don't swallow the first keystrokes.
+// Also manages idle suspension: after 5 seconds unfocused, TPS drops to 1 and
+// terminal polling goroutines are paused to minimize CPU and allocation pressure.
 func (g *Game) handleFocus() {
 	focused := ebiten.IsFocused()
+
+	// Idle suspension: reduce TPS after 5 seconds unfocused.
+	if !focused && !g.suspended && !g.unfocusedAt.IsZero() &&
+		time.Since(g.unfocusedAt) > 5*time.Second {
+		ebiten.SetTPS(1)
+		g.suspended = true
+		for _, t := range g.tabs {
+			for _, leaf := range t.Layout.Leaves() {
+				leaf.Pane.Term.SetPaused(true)
+			}
+		}
+	}
+
 	if focused != g.prevFocused {
 		if focused {
+			// Wake from suspension.
+			if g.suspended {
+				ebiten.SetTPS(g.cfg.Performance.TPS)
+				g.suspended = false
+				for _, t := range g.tabs {
+					for _, leaf := range t.Layout.Leaves() {
+						leaf.Pane.Term.SetPaused(false)
+					}
+				}
+			}
+			g.unfocusedAt = time.Time{}
+
 			// Reset edge-detection state: snapshot current physical key state so the
 			// next frame sees correct "was pressed" values. Without this, keys held
 			// during the blur (e.g. Cmd from Cmd+Tab) appear as stale presses and
@@ -1265,6 +1331,9 @@ func (g *Game) handleFocus() {
 					leaf.Pane.Term.Buf.Unlock()
 				}
 			}
+		} else {
+			// Record when focus was lost.
+			g.unfocusedAt = time.Now()
 		}
 		g.prevFocused = focused
 		g.focused.Term.SendFocusEvent(focused)
@@ -1415,13 +1484,20 @@ func (g *Game) drainCwd() {
 			g.statusBarState.GitAhead = 0
 			g.statusBarState.GitBehind = 0
 			if g.cfg.StatusBar.ShowGit {
+				// Cancel any in-flight git query before starting a new one.
+				if g.gitInfoCancel != nil {
+					g.gitInfoCancel()
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				g.gitInfoCancel = cancel
 				g.gitInfoCh = make(chan gitInfo, 1)
 				ch := g.gitInfoCh
 				go func() {
+					defer cancel()
 					info := gitInfo{}
 
 					// Branch name.
-					if out, err := exec.Command("git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil { // #nosec G204
+					if out, err := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil { // #nosec G204
 						info.Branch = strings.TrimSpace(string(out))
 					} else {
 						ch <- info
@@ -1429,12 +1505,12 @@ func (g *Game) drainCwd() {
 					}
 
 					// Short commit hash.
-					if out, err := exec.Command("git", "-C", cwd, "rev-parse", "--short", "HEAD").Output(); err == nil { // #nosec G204
+					if out, err := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse", "--short", "HEAD").Output(); err == nil { // #nosec G204
 						info.Commit = strings.TrimSpace(string(out))
 					}
 
 					// Dirty and staged counts from porcelain status.
-					if out, err := exec.Command("git", "-C", cwd, "status", "--porcelain").Output(); err == nil { // #nosec G204
+					if out, err := exec.CommandContext(ctx, "git", "-C", cwd, "status", "--porcelain").Output(); err == nil { // #nosec G204
 						for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
 							if len(line) < 2 {
 								continue
@@ -1451,7 +1527,7 @@ func (g *Game) drainCwd() {
 					}
 
 					// Ahead/behind upstream.
-					if out, err := exec.Command("git", "-C", cwd, "rev-list", "--left-right", "--count", "HEAD...@{upstream}").Output(); err == nil { // #nosec G204
+					if out, err := exec.CommandContext(ctx, "git", "-C", cwd, "rev-list", "--left-right", "--count", "HEAD...@{upstream}").Output(); err == nil { // #nosec G204
 						parts := strings.Fields(strings.TrimSpace(string(out)))
 						if len(parts) == 2 {
 							fmt.Sscanf(parts[0], "%d", &info.Ahead)
@@ -5146,6 +5222,7 @@ func (g *Game) buildPalette() {
 		// Help
 		g.toggleOverlay,
 		g.openPalette,
+		g.openMarkdownViewer,
 		// Config
 		g.reloadConfig,
 		// App
@@ -5913,5 +5990,127 @@ func resolveShellPath() {
 	}
 	if len(added) > 0 {
 		os.Setenv("PATH", currentPath+":"+strings.Join(added, ":"))
+	}
+}
+
+// openMarkdownViewer captures terminal content and opens the markdown viewer overlay.
+func (g *Game) openMarkdownViewer() {
+	content := g.captureMarkdownContent()
+	if content == "" {
+		g.flashStatus("No content to render")
+		return
+	}
+	g.openMarkdownViewerWithContent(content, "Markdown Viewer")
+}
+
+// openMarkdownViewerWithContent opens the markdown viewer with arbitrary content.
+// Reuse point for future llms.txt browser.
+func (g *Game) openMarkdownViewerWithContent(content, title string) {
+	// Derive wrap columns from the actual panel pixel width and cell width.
+	// Panel is 80% of window width; subtract padding (2 * cellW) and scrollbar (4px).
+	physW := int(float64(g.winW) * g.dpi)
+	panelW := physW * 80 / 100
+	cw := g.font.CellW
+	wrapCols := (panelW - 2*cw - 4) / cw
+	if wrapCols < 40 {
+		wrapCols = 40
+	}
+
+	lines := markdown.Parse(content, wrapCols)
+	g.mdViewerState = renderer.MarkdownViewerState{
+		Open:  true,
+		Title: title,
+		Lines: lines,
+	}
+	g.screenDirty = true
+}
+
+// captureMarkdownContent extracts text from the terminal for markdown viewing.
+// Priority: last block output > active selection > visible screen.
+func (g *Game) captureMarkdownContent() string {
+	if g.focused == nil {
+		return ""
+	}
+
+	buf := g.focused.Term.Buf
+	buf.RLock()
+	defer buf.RUnlock()
+
+	// Priority 1: last completed block output.
+	if g.blocksEnabled && len(buf.Blocks) > 0 {
+		// Find the last block with valid output range.
+		for i := len(buf.Blocks) - 1; i >= 0; i-- {
+			b := buf.Blocks[i]
+			if b.AbsCmdRow >= 0 && b.AbsEndRow > b.AbsCmdRow {
+				return buf.TextRange(b.AbsCmdRow, b.AbsEndRow)
+			}
+		}
+	}
+
+	// Priority 2: active selection.
+	sel := buf.Selection
+	if sel.Active {
+		norm := sel.Normalize()
+		return buf.TextRange(norm.StartRow, norm.EndRow)
+	}
+
+	// Priority 3: visible screen.
+	sbLen := buf.ScrollbackLen()
+	viewStart := sbLen + buf.ViewOffset
+	viewEnd := viewStart + buf.Rows - 1
+	return buf.TextRange(viewStart, viewEnd)
+}
+
+// handleMarkdownViewerInput processes keyboard input while the markdown viewer is open.
+func (g *Game) handleMarkdownViewerInput() {
+	// ESC or Cmd+Shift+M: close viewer.
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.mdViewerState = renderer.MarkdownViewerState{}
+		g.renderer.SetLayoutDirty()
+		g.screenDirty = true
+		g.prevKeys[ebiten.KeyEscape] = true
+		return
+	}
+
+	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	shift := ebiten.IsKeyPressed(ebiten.KeyShift)
+	if meta && shift && inpututil.IsKeyJustPressed(ebiten.KeyM) {
+		g.mdViewerState = renderer.MarkdownViewerState{}
+		g.renderer.SetLayoutDirty()
+		g.screenDirty = true
+		return
+	}
+
+	edgeKeys := []ebiten.Key{
+		ebiten.KeyArrowUp, ebiten.KeyArrowDown,
+		ebiten.KeyJ, ebiten.KeyK,
+		ebiten.KeyPageUp, ebiten.KeyPageDown,
+		ebiten.KeyHome, ebiten.KeyEnd,
+	}
+
+	for _, key := range edgeKeys {
+		pressed := ebiten.IsKeyPressed(key)
+		wasPressed := g.prevKeys[key]
+		if pressed && !wasPressed {
+			rowH := g.mdViewerState.RowH
+			if rowH == 0 {
+				rowH = 16
+			}
+			switch key {
+			case ebiten.KeyArrowUp, ebiten.KeyK:
+				g.mdViewerState.ScrollOffset -= rowH
+			case ebiten.KeyArrowDown, ebiten.KeyJ:
+				g.mdViewerState.ScrollOffset += rowH
+			case ebiten.KeyPageUp:
+				g.mdViewerState.ScrollOffset -= 10 * rowH
+			case ebiten.KeyPageDown:
+				g.mdViewerState.ScrollOffset += 10 * rowH
+			case ebiten.KeyHome:
+				g.mdViewerState.ScrollOffset = 0
+			case ebiten.KeyEnd:
+				g.mdViewerState.ScrollOffset = g.mdViewerState.MaxScroll
+			}
+		}
+		g.prevKeys[key] = pressed
 	}
 }

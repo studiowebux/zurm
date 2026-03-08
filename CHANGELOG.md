@@ -7,13 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-03-07
+
+### Fixed
+
+- Unbounded memory growth in command blocks slice — capped with copy+reslice eviction
+- Scrollback buffer O(n) shifting replaced with pre-allocated ring buffer
+- Per-frame allocations reduced — cached Leaves() on LayoutNode, ASCII rune-to-string lookup table
+- Stale git status goroutines leak on CWD change — now cancelled with context + 5s timeout
+- Upgrade Go from 1.25.8 to 1.26.1 (fixes GO-2026-4599 and GO-2026-4600 in crypto/x509)
+
+### Added
+
+- Optional pprof HTTP endpoint for runtime profiling (`pprof.enabled = true`)
+- Suspend game loop after 5s unfocused — TPS drops to 1, terminal polling paused
+
+## [0.16.0] - 2026-03-07
+
+### Added
+
+- Markdown viewer overlay (Cmd+Shift+M) — reader mode for terminal markdown content
+
+### Fixed
+
+- Markdown viewer not redrawing on close (missing screenDirty flag)
+- Markdown viewer wrap columns derived from panel pixel width instead of hardcoded value
+
+## [0.15.0] - 2026-03-07
+
+### Fixed
+
+- Arrow key repeat firing inconsistently in terminal
+- Block rendering improvements for command output regions
+
+## [0.14.0] - 2026-03-07
+
 ### Added
 
 - Text-to-speech: read selection aloud via macOS `say` command (Cmd+Shift+U)
 - TTS auto-speak: automatically reads command output aloud when enabled (requires OSC 133 shell hooks)
-- "Read Selection Aloud" and "Stop Speaking" command palette entries
+- Bell-triggered TTS and stop-on-keypress
 - `[voice]` config section: `enabled`, `voice`, `rate` (words per minute)
 - Falls back to visible buffer text when no selection is active
+- Speech-to-text: dictation overlay via macOS SFSpeechRecognizer
+- Git branch display in status bar
+
+### Fixed
+
+- Default `voice.enabled` to false (opt-in)
+- Remove unused functions flagged by staticcheck
 
 ## [0.12.0] - 2026-03-06
 
@@ -288,7 +330,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Block timer sourced from OSC C (command enter) for accurate execution duration
 - Block background tint uses premultiplied alpha for correct Ebitengine blending
 
-[Unreleased]: https://github.com/studiowebux/zurm/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/studiowebux/zurm/compare/v0.16.1...HEAD
+[0.16.1]: https://github.com/studiowebux/zurm/compare/v0.16.0...v0.16.1
+[0.16.0]: https://github.com/studiowebux/zurm/compare/v0.15.0...v0.16.0
+[0.15.0]: https://github.com/studiowebux/zurm/compare/v0.14.0...v0.15.0
+[0.14.0]: https://github.com/studiowebux/zurm/compare/v0.12.0...v0.14.0
+[0.12.0]: https://github.com/studiowebux/zurm/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/studiowebux/zurm/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/studiowebux/zurm/compare/v0.9.0...v0.10.0
+[0.8.2]: https://github.com/studiowebux/zurm/compare/v0.8.1...v0.8.2
+[0.8.1]: https://github.com/studiowebux/zurm/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/studiowebux/zurm/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/studiowebux/zurm/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/studiowebux/zurm/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/studiowebux/zurm/compare/v0.5.2...v0.5.3

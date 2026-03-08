@@ -86,7 +86,9 @@ var Defaults = Config{
 		WheelLinesPerTick: 3,
 	},
 	Performance: PerformanceConfig{
-		TPS: 30,
+		TPS:       30,
+		Pprof:     false,
+		PprofPort: 6060,
 	},
 	Session: SessionConfig{
 		Enabled:         true,
@@ -117,6 +119,7 @@ var Defaults = Config{
 		Enabled:      false,
 		ShowDuration: true,
 		BorderWidth:  3,
+		MaxHistory:   1000,
 		BorderColor:  "#1C1C2E",
 		SuccessColor: "#34D399",
 		FailColor:    "#F87171",
