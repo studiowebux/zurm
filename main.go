@@ -198,6 +198,12 @@ type Game struct {
 	lastPtySeq   uint64
 	lastClockSec int64
 
+	// Event-driven status bar polling — replaces fixed-interval tickers.
+	// Polls only fire when PTY output arrives and enough time has passed.
+	lastPollSeq  uint64
+	lastCwdPoll  time.Time
+	lastFgPoll   time.Time
+
 	// blocksEnabled is the runtime toggle for command block rendering.
 	// Initialized from cfg.Blocks.Enabled; toggled via command palette.
 	blocksEnabled bool
@@ -569,6 +575,7 @@ func (g *Game) Update() error {
 	g.drainBlockDone()
 	g.drainGitBranch()
 	g.drainForeground()
+	g.pollStatusOnOutput()
 	g.recomputeSearch()
 
 	for _, leaf := range g.layout.Leaves() {
@@ -631,7 +638,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			screen.ReadPixels(g.recBuf)
 			frame := make([]byte, needed)
 			copy(frame, g.recBuf)
-			go g.recorder.AddFrame(frame)
+			g.recorder.AddFrame(frame)
 		}
 	}
 
@@ -1682,6 +1689,32 @@ func (g *Game) drainForeground() {
 				}
 			}
 		default:
+		}
+	}
+}
+
+// pollStatusOnOutput triggers CWD and foreground process queries when PTY
+// output arrives, replacing the old fixed-interval ticker goroutines.
+// CWD polls at most every 2s, foreground at most every 1s.
+func (g *Game) pollStatusOnOutput() {
+	seq := terminal.RenderSeq()
+	if seq == g.lastPollSeq {
+		return
+	}
+	g.lastPollSeq = seq
+	now := time.Now()
+
+	if now.Sub(g.lastCwdPoll) >= 2*time.Second {
+		g.lastCwdPoll = now
+		if g.focused != nil {
+			go g.focused.Term.QueryCWD()
+		}
+	}
+
+	if g.cfg.StatusBar.ShowProcess && now.Sub(g.lastFgPoll) >= 1*time.Second {
+		g.lastFgPoll = now
+		for _, leaf := range g.tabs[g.activeTab].Layout.Leaves() {
+			go leaf.Pane.Term.QueryForeground()
 		}
 	}
 }
@@ -6066,6 +6099,15 @@ func (g *Game) captureMarkdownContent() string {
 
 // handleMarkdownViewerInput processes keyboard input while the markdown viewer is open.
 func (g *Game) handleMarkdownViewerInput() {
+	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	shift := ebiten.IsKeyPressed(ebiten.KeyShift)
+
+	// Search mode: text input takes priority.
+	if g.mdViewerState.SearchOpen {
+		g.handleMarkdownSearchInput()
+		return
+	}
+
 	// ESC or Cmd+Shift+M: close viewer.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.mdViewerState = renderer.MarkdownViewerState{}
@@ -6076,14 +6118,34 @@ func (g *Game) handleMarkdownViewerInput() {
 		return
 	}
 
-	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
-	shift := ebiten.IsKeyPressed(ebiten.KeyShift)
 	if meta && shift && inpututil.IsKeyJustPressed(ebiten.KeyM) {
 		g.mdViewerState = renderer.MarkdownViewerState{}
 		g.renderer.SetLayoutDirty()
 		g.renderer.ClearPaneCache()
 		g.screenDirty = true
 		return
+	}
+
+	// Cmd+F or / — open search.
+	if (meta && inpututil.IsKeyJustPressed(ebiten.KeyF)) || (!meta && inpututil.IsKeyJustPressed(ebiten.KeySlash)) {
+		g.mdViewerState.SearchOpen = true
+		g.mdViewerState.SearchQuery = ""
+		g.mdViewerState.SearchMatches = nil
+		g.mdViewerState.SearchIdx = -1
+		g.screenDirty = true
+		return
+	}
+
+	// n/N — jump to next/previous match (when matches exist from a previous search).
+	if len(g.mdViewerState.SearchMatches) > 0 {
+		if !meta && inpututil.IsKeyJustPressed(ebiten.KeyN) {
+			if shift {
+				g.mdViewerSearchPrev()
+			} else {
+				g.mdViewerSearchNext()
+			}
+			return
+		}
 	}
 
 	rowH := g.mdViewerState.RowH
@@ -6140,7 +6202,6 @@ func (g *Game) handleMarkdownViewerInput() {
 		g.screenDirty = true
 	}
 	if !ctrl && inpututil.IsKeyJustPressed(ebiten.KeyG) {
-		shift := ebiten.IsKeyPressed(ebiten.KeyShift)
 		if shift {
 			// Shift+G → bottom
 			g.mdViewerState.ScrollOffset = g.mdViewerState.MaxScroll
@@ -6165,7 +6226,114 @@ func (g *Game) handleMarkdownViewerInput() {
 		g.screenDirty = true
 	}
 
-	// Clamp scroll offset.
+	g.clampMdViewerScroll()
+}
+
+// handleMarkdownSearchInput processes keyboard input while the search bar is active.
+func (g *Game) handleMarkdownSearchInput() {
+	// ESC — close search bar.
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.mdViewerState.SearchOpen = false
+		g.screenDirty = true
+		return
+	}
+
+	// Enter — jump to next match; Shift+Enter — previous.
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
+		if ebiten.IsKeyPressed(ebiten.KeyShift) {
+			g.mdViewerSearchPrev()
+		} else {
+			g.mdViewerSearchNext()
+		}
+		return
+	}
+
+	// Backspace — delete last character.
+	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) {
+		if len(g.mdViewerState.SearchQuery) > 0 {
+			runes := []rune(g.mdViewerState.SearchQuery)
+			g.mdViewerState.SearchQuery = string(runes[:len(runes)-1])
+			g.mdViewerUpdateSearch()
+		}
+		g.screenDirty = true
+		return
+	}
+
+	// Text input.
+	runes := ebiten.AppendInputChars(nil)
+	if len(runes) > 0 {
+		g.mdViewerState.SearchQuery += string(runes)
+		g.mdViewerUpdateSearch()
+		g.screenDirty = true
+	}
+}
+
+// mdViewerUpdateSearch rebuilds the match list for the current search query.
+func (g *Game) mdViewerUpdateSearch() {
+	q := strings.ToLower(g.mdViewerState.SearchQuery)
+	g.mdViewerState.SearchMatches = nil
+	g.mdViewerState.SearchIdx = -1
+
+	if q == "" {
+		return
+	}
+
+	for i, line := range g.mdViewerState.Lines {
+		for _, span := range line.Spans {
+			if strings.Contains(strings.ToLower(span.Text), q) {
+				g.mdViewerState.SearchMatches = append(g.mdViewerState.SearchMatches, i)
+				break
+			}
+		}
+	}
+
+	// Auto-scroll to first match.
+	if len(g.mdViewerState.SearchMatches) > 0 {
+		g.mdViewerState.SearchIdx = 0
+		g.mdViewerScrollToMatch()
+	}
+}
+
+// mdViewerSearchNext jumps to the next search match.
+func (g *Game) mdViewerSearchNext() {
+	if len(g.mdViewerState.SearchMatches) == 0 {
+		return
+	}
+	g.mdViewerState.SearchIdx = (g.mdViewerState.SearchIdx + 1) % len(g.mdViewerState.SearchMatches)
+	g.mdViewerScrollToMatch()
+	g.screenDirty = true
+}
+
+// mdViewerSearchPrev jumps to the previous search match.
+func (g *Game) mdViewerSearchPrev() {
+	if len(g.mdViewerState.SearchMatches) == 0 {
+		return
+	}
+	g.mdViewerState.SearchIdx--
+	if g.mdViewerState.SearchIdx < 0 {
+		g.mdViewerState.SearchIdx = len(g.mdViewerState.SearchMatches) - 1
+	}
+	g.mdViewerScrollToMatch()
+	g.screenDirty = true
+}
+
+// mdViewerScrollToMatch scrolls the viewer so the current match is visible.
+func (g *Game) mdViewerScrollToMatch() {
+	if g.mdViewerState.SearchIdx < 0 || g.mdViewerState.SearchIdx >= len(g.mdViewerState.SearchMatches) {
+		return
+	}
+	rowH := g.mdViewerState.RowH
+	if rowH == 0 {
+		rowH = 16
+	}
+	lineIdx := g.mdViewerState.SearchMatches[g.mdViewerState.SearchIdx]
+	targetOffset := lineIdx * rowH
+	g.mdViewerState.ScrollOffset = targetOffset
+	g.clampMdViewerScroll()
+}
+
+// clampMdViewerScroll keeps the scroll offset within valid bounds.
+func (g *Game) clampMdViewerScroll() {
 	if g.mdViewerState.ScrollOffset < 0 {
 		g.mdViewerState.ScrollOffset = 0
 	}
