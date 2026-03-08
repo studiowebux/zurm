@@ -6117,7 +6117,7 @@ func loadFontFallbacks(fc config.FontConfig) [][]byte {
 		if p == "" {
 			continue
 		}
-		data, err := os.ReadFile(p)
+		data, err := os.ReadFile(p) // #nosec G304 -- desktop app loading user-configured font paths
 		if err != nil {
 			log.Printf("fallback font %q not found, skipping: %v", p, err)
 			continue
@@ -6402,8 +6402,9 @@ func (g *Game) handleMarkdownViewerInput() {
 			g.screenDirty = true
 			return
 		}
-		// Check for letter key press (a-z).
-		for _, r := range ebiten.AppendInputChars(nil) {
+		// Check for letter key press (a-z). Only the first input char matters.
+		if chars := ebiten.AppendInputChars(nil); len(chars) > 0 {
+			r := chars[0]
 			if r >= 'a' && r <= 'z' {
 				for _, hint := range g.mdViewerState.LinkHints {
 					if hint.Label == r {
