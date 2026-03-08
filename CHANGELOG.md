@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-03-08
+
+### Fixed
+
+- C1 control byte handler (0x80-0x9F) intercepting UTF-8 continuation bytes mid-sequence, breaking all multi-byte Unicode rendering (icons, arrows, CJK, Nerd Font glyphs)
+
 ## [1.0.0] - 2026-03-08
 
 ### Fixed
@@ -439,7 +445,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Block timer sourced from OSC C (command enter) for accurate execution duration
 - Block background tint uses premultiplied alpha for correct Ebitengine blending
 
-[Unreleased]: https://github.com/studiowebux/zurm/compare/v0.16.1...HEAD
+[Unreleased]: https://github.com/studiowebux/zurm/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/studiowebux/zurm/compare/v1.0.0...v1.0.2
 [0.16.1]: https://github.com/studiowebux/zurm/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/studiowebux/zurm/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/studiowebux/zurm/compare/v0.14.0...v0.15.0
