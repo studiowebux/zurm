@@ -1,0 +1,122 @@
+title: zurm
+description: A GPU-rendered terminal emulator for macOS, written in Go.
+base_url: https://zurm.dev
+author: Studio Webux
+theme: default
+dark_mode: true
+enable_search: true
+enable_llms: true
+clean_urls: false
+
+landing:
+  enabled: true
+  nav:
+    - text: "Docs"
+      url: "/getting-started/installation.html"
+    - text: "GitHub"
+      url: "https://github.com/studiowebux/zurm"
+    - text: "Discord"
+      url: "https://discord.gg/BG5Erm9fNv"
+  hero:
+    title: "feel the hum."
+    subtitle: "A GPU-rendered terminal emulator for macOS, written in Go. Fast, configurable, and built for developers who live in the terminal."
+    buttons:
+      - text: "Download"
+        url: "https://github.com/studiowebux/zurm/releases"
+        primary: true
+      - text: "View on GitHub"
+        url: "https://github.com/studiowebux/zurm"
+        primary: false
+  features:
+    title: "Features"
+    items:
+      - emoji: "~"
+        title: "GPU Rendered"
+        description: "Ebitengine-powered compositing at native Retina resolution with dirty-flag redraw."
+      - emoji: "~"
+        title: "Panes & Tabs"
+        description: "Binary tree splits, drag-resize, zoom, detach/move, pins, notes, hover preview."
+      - emoji: "~"
+        title: "Font Fallback Chain"
+        description: "Multiple fonts tried in order. Latin, CJK, Nerd Font symbols, and monochrome emoji."
+      - emoji: "~"
+        title: "TOML Config"
+        description: "Hot-reload with Cmd+comma. External theme system. Font size adjust on the fly."
+      - emoji: "~"
+        title: "Session Persistence"
+        description: "Tabs, panes, layout, CWDs, pins, notes. All saved and restored automatically."
+      - emoji: "~"
+        title: "OSC 133 Blocks"
+        description: "Command prompt/output tracking with elapsed time, success/fail coloring, and hover copy."
+      - emoji: "~"
+        title: "Markdown Viewer"
+        description: "Reader mode with goldmark rendering, search, and Vim-style navigation."
+      - emoji: "~"
+        title: "llms.txt Browser"
+        description: "Fetch and browse llms.txt from any domain. Hint-mode links and send-to-pane."
+      - emoji: "~"
+        title: "Speech"
+        description: "Text-to-speech via macOS AVSpeechSynthesizer and speech-to-text via SFSpeechRecognizer."
+  links:
+    title: "Resources"
+    items:
+      - icon: "github"
+        title: "GitHub"
+        description: "Source code, issues, and releases"
+        url: "https://github.com/studiowebux/zurm"
+      - icon: "discord"
+        title: "Community"
+        description: "Join the discussion on Discord"
+        url: "https://discord.gg/BG5Erm9fNv"
+  opensource:
+    title: "Open Source"
+    description: "MIT License. Built by Studio Webux."
+    links:
+      - text: "GitHub Repository"
+        url: "https://github.com/studiowebux/zurm"
+      - text: "Releases"
+        url: "https://github.com/studiowebux/zurm/releases"
+
+changelog:
+  enabled: true
+  title: "Changelog"
+  path: "changelog"
+  rss_enabled: true
+  repository: "https://github.com/studiowebux/zurm"
+
+stale_warning:
+  enabled: true
+  threshold_days: 365
+  show_update_date: true
+
+social_links:
+  - name: GitHub
+    url: https://github.com/studiowebux/zurm
+    icon: github
+  - name: Discord
+    url: https://discord.gg/BG5Erm9fNv
+    icon: discord
+
+footer:
+  copyright: "2026 Studio Webux. MIT."
+  links:
+    - title: "Project"
+      items:
+        - text: "GitHub"
+          url: "https://github.com/studiowebux/zurm"
+        - text: "Issues"
+          url: "https://github.com/studiowebux/zurm/issues"
+        - text: "Releases"
+          url: "https://github.com/studiowebux/zurm/releases"
+    - title: "Community"
+      items:
+        - text: "Discord"
+          url: "https://discord.gg/BG5Erm9fNv"
+        - text: "Buy Me a Coffee"
+          url: "https://buymeacoffee.com/studiowebux"
+    - title: "Funding"
+      items:
+        - text: "GitHub Sponsors"
+          url: "https://github.com/sponsors/studiowebux"
+        - text: "Patreon"
+          url: "https://patreon.com/studiowebux"
