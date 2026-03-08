@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-03-08
+
+### Fixed
+
+- Parser oscBuf/dcsBuf capped at 4096 bytes to prevent unbounded growth
+- CSI params clamped to 65535 (VT spec ceiling) instead of silently overflowing
+- Scroll early-return no longer drops simultaneous keystrokes
+- closeActiveTab zeroes trailing slice slot to prevent Tab/pane GC leak
+- CUU/CUD respect scroll region boundaries (clamp to ScrollTop/ScrollBottom)
+- SearchAll searches active screen (alt when active) instead of always primary
+
+### Changed
+
+- Deduplicated copySelection/extractSelectedText into single helper
+
 ## [0.20.1] - 2026-03-08
 
 ### Fixed
