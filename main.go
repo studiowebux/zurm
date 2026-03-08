@@ -246,6 +246,8 @@ type Game struct {
 	llmsFull         string // cached /llms-full.txt content
 	llmsDomain       string // domain of the last fetch
 	llmsViewingFull  bool   // true when showing /llms-full.txt
+	llmsHistory      []llmsHistoryEntry // back stack
+	llmsForward      []llmsHistoryEntry // forward stack
 
 	// Key repeat state for URL input backspace.
 	urlRepeatKey    ebiten.Key
@@ -1527,6 +1529,15 @@ type llmsFetchResult struct {
 	Full   string // /llms-full.txt content (may be empty)
 	Domain string
 	Err    error
+}
+
+// llmsHistoryEntry captures one visited page for back/forward navigation.
+type llmsHistoryEntry struct {
+	Domain       string
+	Short        string
+	Full         string
+	ViewingFull  bool
+	ScrollOffset int
 }
 
 // drainCwd reads the latest CWD from the focused pane's OSC 7 channel.
@@ -4160,6 +4171,10 @@ func (g *Game) mergePaneToTab(targetIdx int) {
 		if srcIdx < targetIdx {
 			targetIdx--
 		}
+		// Clamp activeTab to prevent out-of-bounds access inside switchTabNoHistory.
+		if g.activeTab >= len(g.tabs) {
+			g.activeTab = len(g.tabs) - 1
+		}
 		g.switchTabNoHistory(targetIdx)
 		// Recompute the target tab's layout.
 		setPaneHeaders(g.layout, g.font.CellH)
@@ -5311,6 +5326,7 @@ func (g *Game) buildPalette() {
 		g.openPalette,
 		g.openMarkdownViewer,
 		g.openURLInput,
+		g.sendViewerToPane,
 		// Config
 		g.reloadConfig,
 		// App
@@ -6298,6 +6314,9 @@ func (g *Game) drainLLMSFetch() {
 		}
 		g.openMarkdownViewerWithContent(content, title)
 		g.mdViewerState.HasAlt = result.Short != "" && result.Full != ""
+		g.mdViewerState.IsLLMS = true
+		g.mdViewerState.HistoryLen = len(g.llmsHistory)
+		g.mdViewerState.ForwardLen = len(g.llmsForward)
 	default:
 	}
 }
@@ -6345,6 +6364,35 @@ func (g *Game) handleMarkdownViewerInput() {
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
 	shift := ebiten.IsKeyPressed(ebiten.KeyShift)
 
+	// Follow-link mode: letter keys follow, Esc cancels.
+	if g.mdViewerState.FollowMode {
+		if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+			g.mdViewerState.FollowMode = false
+			g.mdViewerState.LinkHints = nil
+			g.screenDirty = true
+			return
+		}
+		// Check for letter key press (a-z).
+		for _, r := range ebiten.AppendInputChars(nil) {
+			if r >= 'a' && r <= 'z' {
+				for _, hint := range g.mdViewerState.LinkHints {
+					if hint.Label == r {
+						g.mdViewerState.FollowMode = false
+						g.mdViewerState.LinkHints = nil
+						g.llmsFollowLink(hint.URL)
+						return
+					}
+				}
+			}
+			// Any non-matching key cancels follow mode.
+			g.mdViewerState.FollowMode = false
+			g.mdViewerState.LinkHints = nil
+			g.screenDirty = true
+			return
+		}
+		return
+	}
+
 	// Search mode: text input takes priority.
 	if g.mdViewerState.SearchOpen {
 		g.handleMarkdownSearchInput()
@@ -6369,6 +6417,23 @@ func (g *Game) handleMarkdownViewerInput() {
 		return
 	}
 
+	// Cmd+Enter — send viewer content to a pane.
+	if meta && inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
+		g.sendViewerToPane()
+		return
+	}
+
+	// f — enter follow-link mode.
+	if !meta && !shift && inpututil.IsKeyJustPressed(ebiten.KeyF) {
+		hints := g.collectVisibleLinkHints()
+		if len(hints) > 0 {
+			g.mdViewerState.FollowMode = true
+			g.mdViewerState.LinkHints = hints
+			g.screenDirty = true
+		}
+		return
+	}
+
 	// Tab — switch between llms.txt and llms-full.txt when both are available.
 	if inpututil.IsKeyJustPressed(ebiten.KeyTab) && g.llmsShort != "" && g.llmsFull != "" {
 		g.llmsViewingFull = !g.llmsViewingFull
@@ -6378,7 +6443,26 @@ func (g *Game) handleMarkdownViewerInput() {
 			g.openMarkdownViewerWithContent(g.llmsShort, "llms.txt — "+g.llmsDomain)
 		}
 		g.mdViewerState.HasAlt = true
+		g.mdViewerState.IsLLMS = true
+		g.mdViewerState.HistoryLen = len(g.llmsHistory)
+		g.mdViewerState.ForwardLen = len(g.llmsForward)
 		return
+	}
+
+	// Backspace or Shift+H — navigate back in llms.txt history.
+	if g.mdViewerState.IsLLMS && len(g.llmsHistory) > 0 {
+		if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) || (shift && inpututil.IsKeyJustPressed(ebiten.KeyH)) {
+			g.llmsNavigateBack()
+			return
+		}
+	}
+
+	// Shift+L — navigate forward in llms.txt history.
+	if g.mdViewerState.IsLLMS && len(g.llmsForward) > 0 {
+		if shift && inpututil.IsKeyJustPressed(ebiten.KeyL) {
+			g.llmsNavigateForward()
+			return
+		}
 	}
 
 	// Cmd+F or / — open search.
@@ -6543,12 +6627,23 @@ func (g *Game) mdViewerUpdateSearch() {
 		return
 	}
 
-	for i, line := range g.mdViewerState.Lines {
+	qLen := len([]rune(q))
+	for lineIdx, line := range g.mdViewerState.Lines {
+		// Concatenate span text to find matches across span boundaries.
+		col := 0
 		for _, span := range line.Spans {
-			if strings.Contains(strings.ToLower(span.Text), q) {
-				g.mdViewerState.SearchMatches = append(g.mdViewerState.SearchMatches, i)
-				break
+			lower := strings.ToLower(span.Text)
+			runes := []rune(lower)
+			for j := 0; j <= len(runes)-qLen; j++ {
+				if strings.ToLower(string(runes[j:j+qLen])) == q {
+					g.mdViewerState.SearchMatches = append(g.mdViewerState.SearchMatches, renderer.SearchMatch{
+						LineIdx: lineIdx,
+						Col:     col + j,
+						Len:     qLen,
+					})
+				}
 			}
+			col += len(runes)
 		}
 	}
 
@@ -6591,8 +6686,8 @@ func (g *Game) mdViewerScrollToMatch() {
 	if rowH == 0 {
 		rowH = 16
 	}
-	lineIdx := g.mdViewerState.SearchMatches[g.mdViewerState.SearchIdx]
-	targetOffset := lineIdx * rowH
+	m := g.mdViewerState.SearchMatches[g.mdViewerState.SearchIdx]
+	targetOffset := m.LineIdx * rowH
 	g.mdViewerState.ScrollOffset = targetOffset
 	g.clampMdViewerScroll()
 }
@@ -6605,4 +6700,276 @@ func (g *Game) clampMdViewerScroll() {
 	if g.mdViewerState.MaxScroll > 0 && g.mdViewerState.ScrollOffset > g.mdViewerState.MaxScroll {
 		g.mdViewerState.ScrollOffset = g.mdViewerState.MaxScroll
 	}
+}
+
+// spanToANSI converts a markdown span to ANSI-colored text for terminal display.
+func spanToANSI(span markdown.Span) string {
+	const reset = "\033[0m"
+	switch span.Style {
+	case markdown.StyleHeading1:
+		return "\033[1;97m" + span.Text + reset // bold bright white
+	case markdown.StyleHeading2:
+		return "\033[1;36m" + span.Text + reset // bold cyan
+	case markdown.StyleHeading3:
+		return "\033[2;37m" + span.Text + reset // dim white
+	case markdown.StyleBold:
+		return "\033[1;97m" + span.Text + reset // bold bright white
+	case markdown.StyleItalic:
+		return "\033[3;37m" + span.Text + reset // italic dim
+	case markdown.StyleInlineCode:
+		return "\033[7;33m" + span.Text + reset // reverse yellow
+	case markdown.StyleCodeBlock:
+		return "\033[32m" + span.Text + reset // green
+	case markdown.StyleLink:
+		if span.Extra != "" {
+			return "\033[4;36m" + span.Text + reset + "\033[2m (" + span.Extra + ")" + reset
+		}
+		return "\033[4;36m" + span.Text + reset // underline cyan
+	case markdown.StyleBlockquote:
+		return "\033[2;37m" + span.Text + reset // dim
+	case markdown.StyleListItem:
+		return "\033[36m" + span.Text + reset // cyan marker
+	case markdown.StyleTableHeader:
+		return "\033[1;97m" + span.Text + reset // bold white
+	case markdown.StyleTableCell:
+		return span.Text
+	case markdown.StyleTableSeparator, markdown.StyleHRule:
+		return "\033[2m────────────────────────────────────────" + reset
+	case markdown.StyleStrikethrough:
+		return "\033[9;2m" + span.Text + reset // strikethrough dim
+	case markdown.StyleImage:
+		return "\033[35m" + span.Text + reset // magenta
+	case markdown.StyleCheckboxChecked:
+		return "\033[32m" + span.Text + reset // green
+	case markdown.StyleCheckboxUnchecked:
+		return "\033[2m" + span.Text + reset // dim
+	default:
+		return span.Text
+	}
+}
+
+// collectVisibleLinkHints scans visible lines for StyleLink spans and assigns
+// letter badges (a-z). Returns at most 26 hints.
+func (g *Game) collectVisibleLinkHints() []renderer.LinkHint {
+	rowH := g.mdViewerState.RowH
+	if rowH == 0 {
+		rowH = 16
+	}
+
+	// Approximate visible area height from panel dimensions (80% of window height).
+	physH := int(float64(g.winH) * g.dpi)
+	visibleH := physH * 80 / 100
+
+	var hints []renderer.LinkHint
+	label := 'a'
+	for lineIdx, line := range g.mdViewerState.Lines {
+		lineY := lineIdx*rowH - g.mdViewerState.ScrollOffset
+		// Only include lines visible in the content area.
+		if lineY+rowH < 0 {
+			continue
+		}
+		if lineY > visibleH {
+			break // past visible area
+		}
+
+		for spanIdx, span := range line.Spans {
+			if span.Style == markdown.StyleLink && span.Extra != "" {
+				hints = append(hints, renderer.LinkHint{
+					LineIdx: lineIdx,
+					SpanIdx: spanIdx,
+					URL:     span.Extra,
+					Label:   label,
+				})
+				label++
+				if label > 'z' {
+					return hints
+				}
+			}
+		}
+	}
+	return hints
+}
+
+// llmsPushHistory saves the current llms state onto the back stack.
+func (g *Game) llmsPushHistory() {
+	g.llmsHistory = append(g.llmsHistory, llmsHistoryEntry{
+		Domain:       g.llmsDomain,
+		Short:        g.llmsShort,
+		Full:         g.llmsFull,
+		ViewingFull:  g.llmsViewingFull,
+		ScrollOffset: g.mdViewerState.ScrollOffset,
+	})
+}
+
+// llmsNavigateBack pops from the back stack and pushes current to forward.
+func (g *Game) llmsNavigateBack() {
+	if len(g.llmsHistory) == 0 {
+		return
+	}
+	// Push current to forward stack.
+	g.llmsForward = append(g.llmsForward, llmsHistoryEntry{
+		Domain:       g.llmsDomain,
+		Short:        g.llmsShort,
+		Full:         g.llmsFull,
+		ViewingFull:  g.llmsViewingFull,
+		ScrollOffset: g.mdViewerState.ScrollOffset,
+	})
+	// Pop from history.
+	entry := g.llmsHistory[len(g.llmsHistory)-1]
+	g.llmsHistory = g.llmsHistory[:len(g.llmsHistory)-1]
+	g.llmsRestoreEntry(entry)
+}
+
+// llmsNavigateForward pops from the forward stack and pushes current to back.
+func (g *Game) llmsNavigateForward() {
+	if len(g.llmsForward) == 0 {
+		return
+	}
+	// Push current to back stack.
+	g.llmsHistory = append(g.llmsHistory, llmsHistoryEntry{
+		Domain:       g.llmsDomain,
+		Short:        g.llmsShort,
+		Full:         g.llmsFull,
+		ViewingFull:  g.llmsViewingFull,
+		ScrollOffset: g.mdViewerState.ScrollOffset,
+	})
+	// Pop from forward.
+	entry := g.llmsForward[len(g.llmsForward)-1]
+	g.llmsForward = g.llmsForward[:len(g.llmsForward)-1]
+	g.llmsRestoreEntry(entry)
+}
+
+// llmsRestoreEntry restores the viewer to a history entry's state.
+func (g *Game) llmsRestoreEntry(entry llmsHistoryEntry) {
+	g.llmsDomain = entry.Domain
+	g.llmsShort = entry.Short
+	g.llmsFull = entry.Full
+	g.llmsViewingFull = entry.ViewingFull
+
+	content := entry.Short
+	title := "llms.txt — " + entry.Domain
+	if entry.ViewingFull {
+		content = entry.Full
+		title = "llms-full.txt — " + entry.Domain
+	}
+	g.openMarkdownViewerWithContent(content, title)
+	g.mdViewerState.HasAlt = entry.Short != "" && entry.Full != ""
+	g.mdViewerState.IsLLMS = true
+	g.mdViewerState.ScrollOffset = entry.ScrollOffset
+	g.mdViewerState.HistoryLen = len(g.llmsHistory)
+	g.mdViewerState.ForwardLen = len(g.llmsForward)
+}
+
+// llmsFollowLink handles following a link from the markdown viewer.
+// If the URL looks like an llms.txt-capable domain, fetch it; otherwise open in browser.
+func (g *Game) llmsFollowLink(url string) {
+	// Check if this is an HTTP(S) URL we can try to fetch llms.txt from.
+	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+		// Push current state to history and clear forward stack.
+		g.llmsPushHistory()
+		g.llmsForward = nil
+		g.startLLMSFetch(url)
+		return
+	}
+	// Non-HTTP URL or relative path — open in system browser.
+	exec.Command("open", url).Start() // #nosec G204 — user-initiated URL open
+}
+
+// sendViewerToPane writes the current viewer content to a temp file and opens
+// it in a new pane running `less`.
+func (g *Game) sendViewerToPane() {
+	if !g.mdViewerState.Open {
+		return
+	}
+
+	// Capture state before clearing.
+	lines := g.mdViewerState.Lines
+	paneName := g.mdViewerState.Title
+	if g.llmsDomain != "" {
+		paneName = "llms — " + g.llmsDomain
+	}
+
+	// Build ANSI-colored text from styled lines for rich rendering in less -R.
+	var buf strings.Builder
+	for _, line := range lines {
+		// Indent.
+		for i := 0; i < line.Indent; i++ {
+			buf.WriteByte(' ')
+		}
+		for _, span := range line.Spans {
+			buf.WriteString(spanToANSI(span))
+		}
+		// Heading underlines.
+		if len(line.Spans) > 0 {
+			switch line.Spans[0].Style {
+			case markdown.StyleHeading1:
+				textLen := 0
+				for _, s := range line.Spans {
+					textLen += len([]rune(s.Text))
+				}
+				buf.WriteByte('\n')
+				buf.WriteString("\033[97m")
+				buf.WriteString(strings.Repeat("━", textLen))
+				buf.WriteString("\033[0m")
+			case markdown.StyleHeading2:
+				textLen := 0
+				for _, s := range line.Spans {
+					textLen += len([]rune(s.Text))
+				}
+				buf.WriteByte('\n')
+				buf.WriteString("\033[36m")
+				buf.WriteString(strings.Repeat("─", textLen))
+				buf.WriteString("\033[0m")
+			}
+		}
+		buf.WriteByte('\n')
+	}
+
+	// Write to temp file.
+	tmpFile, err := os.CreateTemp("", "zurm-llms-*.md")
+	if err != nil {
+		g.flashStatus("Failed to create temp file: " + err.Error())
+		return
+	}
+	if _, err := tmpFile.WriteString(buf.String()); err != nil {
+		tmpFile.Close()
+		g.flashStatus("Failed to write temp file: " + err.Error())
+		return
+	}
+	tmpFile.Close()
+
+	// Close the viewer.
+	g.mdViewerState = renderer.MarkdownViewerState{}
+	g.renderer.SetLayoutDirty()
+	g.renderer.ClearPaneCache()
+
+	// Create a new tab with a pane running `less -R <tmpfile>`.
+	physW := int(float64(g.winW) * g.dpi)
+	physH := int(float64(g.winH) * g.dpi)
+	tabBarH := g.renderer.TabBarHeight()
+	statusBarH := g.renderer.StatusBarHeight()
+	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
+
+	term := terminal.New(g.cfg)
+	term.StartCmd("less", []string{"-R", tmpFile.Name()}, "")
+	p := &pane.Pane{
+		Term:       term,
+		Rect:       paneRect,
+		Cols:       (paneRect.Dx() - g.cfg.Window.Padding*2) / g.font.CellW,
+		Rows:       (paneRect.Dy() - g.cfg.Window.Padding*2) / g.font.CellH,
+		CustomName: paneName,
+	}
+
+	layout := pane.NewLeaf(p)
+	layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
+	term.Resize(p.Cols, p.Rows)
+
+	t := &tab.Tab{
+		Layout:  layout,
+		Focused: p,
+		Title:   p.CustomName,
+	}
+	g.tabs = append(g.tabs, t)
+	g.switchTab(len(g.tabs) - 1)
+	g.screenDirty = true
 }

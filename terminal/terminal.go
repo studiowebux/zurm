@@ -90,6 +90,18 @@ func (t *Terminal) Start(dir string) error {
 	return nil
 }
 
+// StartCmd launches a specific command (instead of the user's shell) in the PTY.
+func (t *Terminal) StartCmd(program string, args []string, dir string) error {
+	env := buildEnv(t.cfg.Window.Columns, t.cfg.Window.Rows)
+	pty, err := NewPTYManager(program, args, t.cfg.Window.Columns, t.cfg.Window.Rows, env, dir)
+	if err != nil {
+		return fmt.Errorf("terminal start cmd: %w", err)
+	}
+	t.pty = pty
+	t.pty.StartReader(t.parser, t.Buf)
+	return nil
+}
+
 // SendBytes writes raw bytes to the PTY stdin.
 func (t *Terminal) SendBytes(b []byte) {
 	if t.pty != nil && len(b) > 0 {

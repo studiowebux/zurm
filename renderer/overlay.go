@@ -40,6 +40,21 @@ type URLInputState struct {
 	Loading bool
 }
 
+// SearchMatch stores the position of a search hit within a styled line.
+type SearchMatch struct {
+	LineIdx int // which StyledLine
+	Col     int // rune offset within the concatenated line text
+	Len     int // rune length of the match
+}
+
+// LinkHint is a follow-mode badge mapping a letter to a link span.
+type LinkHint struct {
+	LineIdx int
+	SpanIdx int
+	URL     string
+	Label   rune
+}
+
 // MarkdownViewerState holds the rendering state for the markdown reader overlay.
 type MarkdownViewerState struct {
 	Open         bool
@@ -52,12 +67,23 @@ type MarkdownViewerState struct {
 	// Search state (Cmd+F / /).
 	SearchOpen    bool
 	SearchQuery   string
-	SearchMatches []int // line indices that contain a match
-	SearchIdx     int   // current match index (-1 = none)
+	SearchMatches []SearchMatch // matches with position info
+	SearchIdx     int           // current match index (-1 = none)
 
 	// HasAlt is true when an alternate view is available (e.g. llms.txt ↔ llms-full.txt).
 	// When set, the hint bar shows "Tab switch".
 	HasAlt bool
+
+	// Follow-link mode (f key).
+	FollowMode bool
+	LinkHints  []LinkHint
+
+	// IsLLMS marks this viewer as browsing llms.txt content (enables history nav).
+	IsLLMS bool
+
+	// HistoryLen / ForwardLen control hint bar display of back/forward availability.
+	HistoryLen int
+	ForwardLen int
 }
 
 // categoryGroup groups bindings under one category for rendering.
@@ -515,15 +541,35 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	titleX := panelX + (panelW-len([]rune(title))*cw)/2
 	r.font.DrawString(r.modalLayer, title, titleX, titleY, r.ui.Accent)
 
+	// Breadcrumb for history navigation.
+	if state.IsLLMS && state.HistoryLen > 0 {
+		breadcrumb := fmt.Sprintf("< %d", state.HistoryLen)
+		r.font.DrawString(r.modalLayer, breadcrumb, panelX+panelPad, titleY, r.ui.Dim)
+	}
+
 	hint := "/ search  Esc close"
-	if state.HasAlt {
-		hint = "Tab switch  " + hint
-	}
-	if state.MaxScroll > 0 {
-		hint = "j/k scroll  " + hint
-	}
-	if len(state.SearchMatches) > 0 {
-		hint = "n/N match  " + hint
+	if state.FollowMode {
+		hint = "a-z follow  Esc cancel"
+	} else {
+		if state.IsLLMS {
+			hint = "f follow  " + hint
+			if state.ForwardLen > 0 {
+				hint = "L fwd  " + hint
+			}
+			if state.HistoryLen > 0 {
+				hint = "H back  " + hint
+			}
+		}
+		hint = "Cmd+Ret pane  " + hint
+		if state.HasAlt {
+			hint = "Tab switch  " + hint
+		}
+		if state.MaxScroll > 0 {
+			hint = "j/k scroll  " + hint
+		}
+		if len(state.SearchMatches) > 0 {
+			hint = "n/N match  " + hint
+		}
 	}
 	hintX := panelRect.Max.X - panelPad - len([]rune(hint))*cw
 	r.font.DrawString(r.modalLayer, hint, hintX, titleY, r.ui.Dim)
@@ -542,47 +588,48 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	contentLeft := panelX + panelPad
 	contentRight := panelX + panelW - panelPad
 
-	// Bright white for bold text.
+	// Heading and emphasis colors.
 	boldColor := color.RGBA{0xFF, 0xFF, 0xFF, 0xFF}
+	h1Color := color.RGBA{0xFF, 0xFF, 0xFF, 0xFF}   // bright white
+	h2Color := r.ui.Accent                            // theme accent
+	h3Color := r.ui.Dim                               // subdued
+	codeFg := color.RGBA{0xA0, 0xD0, 0x80, 0xFF}     // soft green for code
+	codeBorder := color.RGBA{0x60, 0x60, 0x60, 0xFF}  // dim border for code blocks
+	tableBorder := color.RGBA{0x50, 0x50, 0x50, 0xFF} // dim border for table grid
 
-	// Build match set for highlight rendering.
-	matchSet := make(map[int]bool, len(state.SearchMatches))
-	for _, idx := range state.SearchMatches {
-		matchSet[idx] = true
+	// Index search matches by line for the per-line drawing loop.
+	matchBg := color.RGBA{0x80, 0x80, 0x00, 0x60}
+	currentBg := color.RGBA{0xFF, 0xCC, 0x00, 0x80}
+	matchesByLine := map[int][]int{} // lineIdx -> match indices
+	for i, m := range state.SearchMatches {
+		matchesByLine[m.LineIdx] = append(matchesByLine[m.LineIdx], i)
 	}
-	currentMatchLine := -1
-	if state.SearchIdx >= 0 && state.SearchIdx < len(state.SearchMatches) {
-		currentMatchLine = state.SearchMatches[state.SearchIdx]
-	}
-	matchBg := color.RGBA{0x80, 0x80, 0x00, 0x60}   // dim yellow for matches
-	currentBg := color.RGBA{0xFF, 0xCC, 0x00, 0x80}  // bright yellow for current match
 
-	for lineIdx, line := range state.Lines {
+	lineIdx := 0
+	for _, line := range state.Lines {
 		// HRule or table separator: draw a horizontal line.
 		if len(line.Spans) == 1 && (line.Spans[0].Style == markdown.StyleHRule || line.Spans[0].Style == markdown.StyleTableSeparator) {
 			lineY := drawY + rowH/2
 			contentImg.SubImage(image.Rect(contentLeft, lineY, contentRight, lineY+1)).(*ebiten.Image).Fill(r.ui.Border)
 			drawY += rowH
+			lineIdx++
 			continue
-		}
-
-		// Search match highlight.
-		if matchSet[lineIdx] {
-			bg := matchBg
-			if lineIdx == currentMatchLine {
-				bg = currentBg
-			}
-			hlRect := image.Rect(contentLeft, drawY, contentRight, drawY+rowH)
-			contentImg.SubImage(hlRect).(*ebiten.Image).Fill(bg)
 		}
 
 		x := contentLeft + line.Indent*cw
 
-		// Code block lines get full-width background.
+		// Code block lines get full-width background + left border stripe.
 		isCodeLine := len(line.Spans) > 0 && line.Spans[0].Style == markdown.StyleCodeBlock
 		if isCodeLine {
 			bgRect := image.Rect(contentLeft, drawY, contentRight, drawY+rowH)
 			contentImg.SubImage(bgRect).(*ebiten.Image).Fill(r.ui.HoverBg)
+			contentImg.SubImage(image.Rect(contentLeft, drawY, contentLeft+2, drawY+rowH)).(*ebiten.Image).Fill(codeBorder)
+		}
+
+		// Table row lines get a subtle bottom border.
+		isTableLine := len(line.Spans) > 0 && (line.Spans[0].Style == markdown.StyleTableHeader || line.Spans[0].Style == markdown.StyleTableCell)
+		if isTableLine {
+			contentImg.SubImage(image.Rect(contentLeft, drawY+rowH-1, contentRight, drawY+rowH)).(*ebiten.Image).Fill(tableBorder)
 		}
 
 		// Blockquote accent stripe.
@@ -591,12 +638,35 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 			contentImg.SubImage(image.Rect(stripeX, drawY, stripeX+2, drawY+rowH)).(*ebiten.Image).Fill(r.ui.Accent)
 		}
 
+		// Search highlights — after backgrounds, before text.
+		if matches, ok := matchesByLine[lineIdx]; ok {
+			hlBase := x
+			if isCodeLine {
+				hlBase += cw
+			}
+			for _, mi := range matches {
+				m := state.SearchMatches[mi]
+				bg := matchBg
+				if mi == state.SearchIdx {
+					bg = currentBg
+				}
+				hlX := hlBase + m.Col*cw
+				hlW := m.Len * cw
+				hlRect := image.Rect(hlX, drawY, hlX+hlW, drawY+rowH)
+				contentImg.SubImage(hlRect).(*ebiten.Image).Fill(bg)
+			}
+		}
+
 		for _, span := range line.Spans {
 			textW := len([]rune(span.Text)) * cw
 
 			switch span.Style {
-			case markdown.StyleHeading1, markdown.StyleHeading2, markdown.StyleHeading3:
-				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
+			case markdown.StyleHeading1:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, h1Color)
+			case markdown.StyleHeading2:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, h2Color)
+			case markdown.StyleHeading3:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, h3Color)
 			case markdown.StyleBold:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, boldColor)
 			case markdown.StyleItalic:
@@ -606,7 +676,7 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 				contentImg.SubImage(bgRect).(*ebiten.Image).Fill(r.ui.HoverBg)
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.KeyName)
 			case markdown.StyleCodeBlock:
-				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Fg)
+				r.font.DrawString(contentImg, span.Text, x+cw, drawY+1, codeFg)
 			case markdown.StyleLink:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
 			case markdown.StyleBlockquote:
@@ -632,7 +702,50 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 			x += textW
 		}
 
+		// Heading underlines after the line is drawn.
+		if len(line.Spans) > 0 {
+			switch line.Spans[0].Style {
+			case markdown.StyleHeading1:
+				ulY := drawY + rowH - 2
+				contentImg.SubImage(image.Rect(contentLeft, ulY, contentRight, ulY+1)).(*ebiten.Image).Fill(h1Color)
+			case markdown.StyleHeading2:
+				ulY := drawY + rowH - 2
+				contentImg.SubImage(image.Rect(contentLeft, ulY, x, ulY+1)).(*ebiten.Image).Fill(h2Color)
+			}
+		}
+
 		drawY += rowH
+		lineIdx++
+	}
+
+	// Follow-mode link badges: draw letter labels over link spans.
+	if state.FollowMode && len(state.LinkHints) > 0 {
+		badgeBg := color.RGBA{0xFF, 0xCC, 0x00, 0xFF}  // bright yellow badge
+		badgeFg := color.RGBA{0x00, 0x00, 0x00, 0xFF}  // black text on badge
+		for _, hint := range state.LinkHints {
+			if hint.LineIdx >= len(state.Lines) {
+				continue
+			}
+			lineY := hint.LineIdx*rowH - state.ScrollOffset + contentTop
+			if lineY+rowH < contentTop || lineY > contentTop+visibleContentH {
+				continue // off-screen
+			}
+			// Calculate X position of the link span.
+			line := state.Lines[hint.LineIdx]
+			sx := contentLeft + line.Indent*cw
+			for si := 0; si < hint.SpanIdx && si < len(line.Spans); si++ {
+				sx += len([]rune(line.Spans[si].Text)) * cw
+			}
+			// Draw badge: [letter] before the link text.
+			badgeStr := string(hint.Label)
+			bx := sx - 2*cw
+			if bx < contentLeft {
+				bx = sx // fallback: draw at span start
+			}
+			badgeRect := image.Rect(bx, lineY, bx+cw+2, lineY+rowH)
+			r.modalLayer.SubImage(badgeRect).(*ebiten.Image).Fill(badgeBg)
+			r.font.DrawString(r.modalLayer, badgeStr, bx+1, lineY+1, badgeFg)
+		}
 	}
 
 	// Scrollbar.

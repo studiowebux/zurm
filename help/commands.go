@@ -78,6 +78,7 @@ func AllCommands() []Command {
 		{Name: "Command Palette", Shortcut: "Cmd+P"},
 		{Name: "Markdown Reader Mode", Shortcut: "Cmd+Shift+M"},
 		{Name: "Open llms.txt", Shortcut: "Cmd+L"},
+		{Name: "Send Viewer to Pane", Shortcut: "Cmd+Enter"},
 		// Config
 		{Name: "Reload Config", Shortcut: "Cmd+,"},
 		// App
