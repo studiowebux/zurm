@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync/atomic"
-	"time"
 
 	"github.com/studiowebux/zurm/config"
 )
@@ -88,10 +87,6 @@ func (t *Terminal) Start(dir string) error {
 	}
 	t.pty = pty
 	t.pty.StartReader(t.parser, t.Buf)
-	go t.pollCWD()
-	if t.cfg.StatusBar.ShowProcess {
-		go t.pollForeground()
-	}
 	return nil
 }
 
@@ -296,72 +291,46 @@ func (t *Terminal) Pid() int {
 // Called by the game loop when the window becomes idle or regains focus.
 func (t *Terminal) SetPaused(p bool) { t.paused.Store(p) }
 
-// pollCWD runs in a background goroutine, querying the shell process CWD
-// via lsof every 2 seconds. This is the fallback for shells that do not
-// send OSC 7. Results are sent to CwdCh; OSC 7 updates take priority
-// because they arrive immediately on cd.
-func (t *Terminal) pollCWD() {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	dead := t.Dead()
-	for {
-		select {
-		case <-dead:
-			return
-		case <-ticker.C:
-			if t.paused.Load() {
-				continue
-			}
-			pid := t.Pid()
-			if pid <= 0 {
-				continue
-			}
-			out, err := exec.Command("lsof", "-a", "-p", // #nosec G204 — fixed binary, only argument is numeric PID
-				fmt.Sprintf("%d", pid), "-d", "cwd", "-Fn").Output()
-			if err != nil {
-				continue
-			}
-			for _, line := range strings.Split(string(out), "\n") {
-				if strings.HasPrefix(line, "n") {
-					cwd := line[1:]
-					if cwd != "" {
-						select {
-						case t.CwdCh <- cwd:
-						default:
-						}
-					}
-					break
+// QueryCWD performs a one-shot CWD query via lsof and sends the result
+// to CwdCh. Safe to call from a goroutine. This is the fallback for shells
+// that do not send OSC 7.
+func (t *Terminal) QueryCWD() {
+	if t.paused.Load() {
+		return
+	}
+	pid := t.Pid()
+	if pid <= 0 {
+		return
+	}
+	out, err := exec.Command("lsof", "-a", "-p", // #nosec G204 — fixed binary, only argument is numeric PID
+		fmt.Sprintf("%d", pid), "-d", "cwd", "-Fn").Output()
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "n") {
+			cwd := line[1:]
+			if cwd != "" {
+				select {
+				case t.CwdCh <- cwd:
+				default:
 				}
 			}
+			break
 		}
 	}
 }
 
-// pollForeground runs in a background goroutine, querying the foreground
-// process group via TIOCGPGRP every second and resolving its name via ps.
-// Results are sent to ForegroundProcCh when the name changes.
-func (t *Terminal) pollForeground() {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-	dead := t.Dead()
-	var lastName string
-	for {
-		select {
-		case <-dead:
-			return
-		case <-ticker.C:
-			if t.paused.Load() {
-				continue
-			}
-			name := t.foregroundProcessName()
-			if name != lastName {
-				lastName = name
-				select {
-				case t.ForegroundProcCh <- name:
-				default:
-				}
-			}
-		}
+// QueryForeground performs a one-shot foreground process query and sends
+// the result to ForegroundProcCh if it changed. Safe to call from a goroutine.
+func (t *Terminal) QueryForeground() {
+	if t.paused.Load() {
+		return
+	}
+	name := t.foregroundProcessName()
+	select {
+	case t.ForegroundProcCh <- name:
+	default:
 	}
 }
 

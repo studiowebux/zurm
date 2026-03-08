@@ -3,7 +3,6 @@ package recorder
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,17 +12,34 @@ import (
 
 // Recorder pipes raw RGBA frames to ffmpeg and produces an MP4 file.
 // Pattern: adapter — wraps ffmpeg subprocess behind a simple Start/Stop/AddFrame API.
+// Frames are sent via a buffered channel and written by a dedicated goroutine,
+// ensuring all in-flight frames are flushed before ffmpeg stdin is closed.
 type Recorder struct {
 	mu        sync.Mutex
 	active    bool
 	cmd       *exec.Cmd
-	stdin     io.WriteCloser
 	stderrBuf bytes.Buffer
 	outPath   string
 	start     time.Time
 	width     int
 	height    int
+
+	// Channel-based frame pipeline. AddFrame sends to frames, the writer
+	// goroutine drains it. Stop() closes the channel, the writer finishes
+	// writing remaining frames, then signals via writerDone.
+	frames     chan []byte
+	writerDone chan struct{}
+
+	// Frame timing — tracks when the last frame was sent so AddFrame can
+	// insert duplicate frames to fill timing gaps and keep playback speed
+	// aligned with wall-clock time.
+	lastFrameTime time.Time
 }
+
+const (
+	frameDuration = 33 * time.Millisecond // ~30fps
+	frameBufferSz = 60                    // 2 seconds of buffered frames
+)
 
 // New creates a Recorder for the given frame dimensions.
 func New(width, height int) *Recorder {
@@ -71,6 +87,7 @@ func (r *Recorder) Start() error {
 		"-c:v", "libx264",
 		"-preset", "ultrafast",
 		"-pix_fmt", "yuv420p",
+		"-r", "30",
 		r.outPath,
 	)
 
@@ -79,8 +96,7 @@ func (r *Recorder) Start() error {
 	r.stderrBuf.Reset()
 	r.cmd.Stderr = &r.stderrBuf
 
-	var err error
-	r.stdin, err = r.cmd.StdinPipe()
+	stdin, err := r.cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("stdin pipe: %w", err)
 	}
@@ -89,26 +105,42 @@ func (r *Recorder) Start() error {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
 
+	r.frames = make(chan []byte, frameBufferSz)
+	r.writerDone = make(chan struct{})
 	r.start = time.Now()
+	r.lastFrameTime = r.start
 	r.active = true
+
+	// Writer goroutine: drains frames channel → ffmpeg stdin.
+	// Exits when the channel is closed and fully drained.
+	go func() {
+		defer close(r.writerDone)
+		for frame := range r.frames {
+			_, _ = stdin.Write(frame)
+		}
+		_ = stdin.Close()
+	}()
+
 	return nil
 }
 
-// Stop closes the ffmpeg stdin (signaling EOF), waits for the process to
-// finish, and returns the output file path. This may block for several
-// seconds while ffmpeg finalizes the MP4 container.
+// Stop signals the writer to flush remaining frames, waits for ffmpeg to
+// finalize the MP4 container, and returns the output file path.
 func (r *Recorder) Stop() (string, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if !r.active {
+		r.mu.Unlock()
 		return "", fmt.Errorf("not recording")
 	}
 	r.active = false
+	ch := r.frames
+	done := r.writerDone
+	r.mu.Unlock()
 
-	if err := r.stdin.Close(); err != nil {
-		return "", fmt.Errorf("close stdin: %w", err)
-	}
+	// Close the channel — the writer goroutine will drain any remaining
+	// frames and then close stdin, signaling EOF to ffmpeg.
+	close(ch)
+	<-done // wait for writer to finish
 
 	if err := r.cmd.Wait(); err != nil {
 		stderr := r.stderrBuf.String()
@@ -154,7 +186,9 @@ func (r *Recorder) OutputSize() int64 {
 	return info.Size()
 }
 
-// AddFrame writes one raw RGBA frame to the ffmpeg pipe.
+// AddFrame sends one raw RGBA frame to the writer goroutine.
+// If the frame interval exceeds one frame duration, duplicate frames are
+// inserted to keep playback speed aligned with wall-clock time.
 // Frames with incorrect size (e.g. after window resize) are silently dropped.
 // Safe to call from any goroutine.
 func (r *Recorder) AddFrame(raw []byte) {
@@ -168,10 +202,30 @@ func (r *Recorder) AddFrame(raw []byte) {
 		r.mu.Unlock()
 		return
 	}
-	w := r.stdin
+	ch := r.frames
+	now := time.Now()
+	elapsed := now.Sub(r.lastFrameTime)
+	r.lastFrameTime = now
 	r.mu.Unlock()
 
-	_, _ = w.Write(raw)
+	// Calculate how many frames this interval represents.
+	// If >1 frame duration has passed, insert duplicates to fill the gap.
+	copies := int(elapsed / frameDuration)
+	if copies < 1 {
+		copies = 1
+	}
+	if copies > 10 {
+		copies = 10 // cap to avoid flooding after long pauses
+	}
+
+	for i := 0; i < copies; i++ {
+		select {
+		case ch <- raw:
+		default:
+			// Channel full — drop frame rather than blocking Draw().
+			return
+		}
+	}
 }
 
 // recordingDir returns the directory where recordings are saved.

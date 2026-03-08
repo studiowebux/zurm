@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 
@@ -40,6 +41,12 @@ type MarkdownViewerState struct {
 	ScrollOffset int
 	MaxScroll    int // written by renderer each frame
 	RowH         int // written by renderer each frame
+
+	// Search state (Cmd+F / /).
+	SearchOpen    bool
+	SearchQuery   string
+	SearchMatches []int // line indices that contain a match
+	SearchIdx     int   // current match index (-1 = none)
 }
 
 // categoryGroup groups bindings under one category for rendering.
@@ -497,9 +504,12 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	titleX := panelX + (panelW-len([]rune(title))*cw)/2
 	r.font.DrawString(r.modalLayer, title, titleX, titleY, r.ui.Accent)
 
-	hint := "Esc close"
+	hint := "/ search  Esc close"
 	if state.MaxScroll > 0 {
 		hint = "j/k scroll  " + hint
+	}
+	if len(state.SearchMatches) > 0 {
+		hint = "n/N match  " + hint
 	}
 	hintX := panelRect.Max.X - panelPad - len([]rune(hint))*cw
 	r.font.DrawString(r.modalLayer, hint, hintX, titleY, r.ui.Dim)
@@ -521,13 +531,35 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	// Bright white for bold text.
 	boldColor := color.RGBA{0xFF, 0xFF, 0xFF, 0xFF}
 
-	for _, line := range state.Lines {
+	// Build match set for highlight rendering.
+	matchSet := make(map[int]bool, len(state.SearchMatches))
+	for _, idx := range state.SearchMatches {
+		matchSet[idx] = true
+	}
+	currentMatchLine := -1
+	if state.SearchIdx >= 0 && state.SearchIdx < len(state.SearchMatches) {
+		currentMatchLine = state.SearchMatches[state.SearchIdx]
+	}
+	matchBg := color.RGBA{0x80, 0x80, 0x00, 0x60}   // dim yellow for matches
+	currentBg := color.RGBA{0xFF, 0xCC, 0x00, 0x80}  // bright yellow for current match
+
+	for lineIdx, line := range state.Lines {
 		// HRule or table separator: draw a horizontal line.
 		if len(line.Spans) == 1 && (line.Spans[0].Style == markdown.StyleHRule || line.Spans[0].Style == markdown.StyleTableSeparator) {
 			lineY := drawY + rowH/2
 			contentImg.SubImage(image.Rect(contentLeft, lineY, contentRight, lineY+1)).(*ebiten.Image).Fill(r.ui.Border)
 			drawY += rowH
 			continue
+		}
+
+		// Search match highlight.
+		if matchSet[lineIdx] {
+			bg := matchBg
+			if lineIdx == currentMatchLine {
+				bg = currentBg
+			}
+			hlRect := image.Rect(contentLeft, drawY, contentRight, drawY+rowH)
+			contentImg.SubImage(hlRect).(*ebiten.Image).Fill(bg)
 		}
 
 		x := contentLeft + line.Indent*cw
@@ -600,6 +632,34 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 		}
 		thumbY := sbTrackY + (sbTrackH-thumbH)*state.ScrollOffset/state.MaxScroll
 		r.modalLayer.SubImage(image.Rect(sbX, thumbY, sbX+3, thumbY+thumbH)).(*ebiten.Image).Fill(r.ui.Dim)
+	}
+
+	// Search bar at bottom of panel.
+	if state.SearchOpen {
+		barH := ch + 8
+		barY := panelRect.Max.Y - barH
+		barRect := image.Rect(panelX, barY, panelX+panelW, panelRect.Max.Y)
+		r.modalLayer.SubImage(barRect).(*ebiten.Image).Fill(r.ui.PanelBg)
+		// Top border.
+		r.modalLayer.SubImage(image.Rect(panelX, barY, panelX+panelW, barY+1)).(*ebiten.Image).Fill(r.ui.Border)
+
+		// Search label and query.
+		label := "/"
+		r.font.DrawString(r.modalLayer, label, panelX+panelPad, barY+4, r.ui.Dim)
+		queryX := panelX + panelPad + cw*2
+		query := state.SearchQuery + "_" // cursor
+		r.font.DrawString(r.modalLayer, query, queryX, barY+4, r.ui.Fg)
+
+		// Match count.
+		if len(state.SearchMatches) > 0 {
+			countStr := fmt.Sprintf("%d/%d", state.SearchIdx+1, len(state.SearchMatches))
+			countX := panelRect.Max.X - panelPad - len([]rune(countStr))*cw
+			r.font.DrawString(r.modalLayer, countStr, countX, barY+4, r.ui.Dim)
+		} else if state.SearchQuery != "" {
+			noMatch := "no matches"
+			nmX := panelRect.Max.X - panelPad - len([]rune(noMatch))*cw
+			r.font.DrawString(r.modalLayer, noMatch, nmX, barY+4, r.ui.Dim)
+		}
 	}
 }
 
