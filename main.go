@@ -11,7 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
-	_ "net/http/pprof"
+	_ "net/http/pprof" // #nosec G108 — opt-in via config, localhost-only
 	"os"
 	"os/exec"
 	"runtime"
@@ -397,7 +397,7 @@ func main() {
 		}
 		log.Printf("pprof: http://%s/debug/pprof/", addr)
 		go func() {
-			if err := http.Serve(ln, nil); err != nil {
+			if err := http.Serve(ln, nil); err != nil { // #nosec G114 — pprof is localhost-only, no timeout needed
 				log.Printf("pprof server: %v", err)
 			}
 		}()
