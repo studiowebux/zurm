@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-03-08
+
 ### Added
 
 - llms.txt browser: link following hint mode (f key) — letter badges on visible links, follows llms.txt links inline or opens external URLs in system browser
@@ -14,7 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - llms.txt browser: Cmd+Enter sends viewer content to a persistent pane running less
 - llms.txt browser: "Send Viewer to Pane" command palette entry
 - Browser category in keybindings overlay with all new shortcuts
-- terminal.StartCmd() for launching panes with custom commands (not the user's shell)
+- Markdown viewer: improved styling for h1/h2/h3 headings, code blocks (green + border), table row borders
+- ANSI-styled output for send-to-pane (renders with less -R)
+- Precise x/y search match highlighting in markdown viewer
+
+### Fixed
+
+- Search highlights drawn over text making it unreadable — now uses three-layer approach (backgrounds → highlights → text)
+- Search highlight misaligned on code blocks (missing +cw offset)
+- Panic in mergePaneToTab when source is the last tab
 
 ## [0.17.0] - 2026-03-08
 
