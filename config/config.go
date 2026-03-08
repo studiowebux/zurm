@@ -19,6 +19,29 @@ const configTemplate = `# zurm configuration
 family = "JetBrains Mono"
 size   = 15
 # file = "/Users/you/Library/Fonts/JetBrainsMonoNerdFont-Regular.ttf"  # overrides embedded font
+#
+# Font fallback chain — tried in order for missing glyphs.
+# Use "fallbacks" (list) for multiple fonts, or "fallback" (string) for a single one.
+# fallbacks = [
+#   "/Users/you/Library/Fonts/NotoSansMonoCJKsc-Regular.otf",   # CJK characters
+#   "/Users/you/Library/Fonts/NotoEmoji-Regular.ttf",           # monochrome emoji
+#   "/Users/you/Library/Fonts/SymbolsNerdFontMono-Regular.ttf", # powerline + devicons
+#   "/Users/you/Library/Fonts/NotoSansSymbols2-Regular.ttf",    # braille + extra symbols
+# ]
+#
+# Download fallback fonts (one-time):
+#   # CJK (~16 MB):
+#   curl -sL "https://github.com/googlefonts/noto-cjk/raw/main/Sans/Mono/NotoSansMonoCJKsc-Regular.otf" \
+#     -o ~/Library/Fonts/NotoSansMonoCJKsc-Regular.otf
+#   # Monochrome emoji (~2 MB):
+#   curl -sL "https://github.com/google/fonts/raw/main/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf" \
+#     -o ~/Library/Fonts/NotoEmoji-Regular.ttf
+#   # Nerd Font symbols (~2.4 MB) — check https://www.nerdfonts.com for latest version:
+#   curl -sL "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.4.0/NerdFontsSymbolsOnly.tar.xz" \
+#     | tar xJ -C ~/Library/Fonts/ SymbolsNerdFontMono-Regular.ttf
+#   # Braille + extra symbols (~1.2 MB):
+#   curl -sL "https://github.com/google/fonts/raw/main/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf" \
+#     -o ~/Library/Fonts/NotoSansSymbols2-Regular.ttf
 
 [window]
 columns = 120
@@ -140,10 +163,11 @@ bright_white   = "#E8E8F0"
 `
 
 type FontConfig struct {
-	Family   string  `toml:"family"`
-	Size     float64 `toml:"size"`
-	File     string  `toml:"file"`     // path to a TTF/OTF; overrides embedded JetBrains Mono
-	Fallback string  `toml:"fallback"` // path to a fallback TTF/OTF for missing glyphs (e.g. CJK)
+	Family    string   `toml:"family"`
+	Size      float64  `toml:"size"`
+	File      string   `toml:"file"`      // path to a TTF/OTF; overrides embedded JetBrains Mono
+	Fallback  string   `toml:"fallback"`  // single fallback font (backward compat; use fallbacks instead)
+	Fallbacks []string `toml:"fallbacks"` // ordered list of fallback font paths (CJK, emoji, nerd font, etc.)
 }
 
 type WindowConfig struct {

@@ -297,20 +297,11 @@ func main() {
 			log.Printf("font file %q not found, using embedded font: %v", cfg.Font.File, err)
 		}
 	}
-	var fallbackBytes []byte
-	if cfg.Font.Fallback != "" {
-		if data, err := os.ReadFile(cfg.Font.Fallback); err == nil {
-			fallbackBytes = data
-		} else {
-			log.Printf("fallback font %q not found, skipping: %v", cfg.Font.Fallback, err)
-		}
-	}
-	fontR, err := renderer.NewFontRenderer(fontBytes, cfg.Font.Size*dpi, fallbackBytes)
+	fallbackSlice := loadFontFallbacks(cfg.Font)
+	fontR, err := renderer.NewFontRenderer(fontBytes, cfg.Font.Size*dpi, fallbackSlice...)
 	if err != nil {
 		log.Fatalf("font load: %v", err)
 	}
-	// Emoji fonts are not supported by Ebiten - see docs/emoji-limitations.md
-	// Color glyphs cannot be rendered due to golang.org/x/image/font limitations
 
 	// Compute tab bar and status bar heights first so they're included in the window size budget.
 	rend := renderer.NewRenderer(fontR, cfg)
@@ -5140,13 +5131,8 @@ func (g *Game) adjustFontSize(delta float64) {
 			fontBytes = data
 		}
 	}
-	var fbBytes []byte
-	if g.cfg.Font.Fallback != "" {
-		if data, loadErr := os.ReadFile(g.cfg.Font.Fallback); loadErr == nil {
-			fbBytes = data
-		}
-	}
-	fontR, err := renderer.NewFontRenderer(fontBytes, newSize*g.dpi, fbBytes)
+	fbSlice := loadFontFallbacks(g.cfg.Font)
+	fontR, err := renderer.NewFontRenderer(fontBytes, newSize*g.dpi, fbSlice...)
 	if err != nil {
 		g.flashStatus("Font resize failed: " + err.Error())
 		return
@@ -5195,13 +5181,8 @@ func (g *Game) reloadConfig() {
 				fontBytes = data
 			}
 		}
-		var fbBytes []byte
-		if newCfg.Font.Fallback != "" {
-			if data, loadErr := os.ReadFile(newCfg.Font.Fallback); loadErr == nil {
-				fbBytes = data
-			}
-		}
-		fontR, fontErr := renderer.NewFontRenderer(fontBytes, newCfg.Font.Size*g.dpi, fbBytes)
+		fbSlice := loadFontFallbacks(newCfg.Font)
+		fontR, fontErr := renderer.NewFontRenderer(fontBytes, newCfg.Font.Size*g.dpi, fbSlice...)
 		if fontErr == nil {
 			g.font = fontR
 			g.renderer.SetFont(fontR)
@@ -6155,6 +6136,30 @@ func resolveShellPath() {
 	if len(added) > 0 {
 		os.Setenv("PATH", currentPath+":"+strings.Join(added, ":"))
 	}
+}
+
+// loadFontFallbacks reads all configured fallback font files from a FontConfig.
+// It merges the legacy single Fallback field with the Fallbacks list,
+// returning a slice of raw font bytes suitable for NewFontRenderer.
+func loadFontFallbacks(fc config.FontConfig) [][]byte {
+	var paths []string
+	if fc.Fallback != "" {
+		paths = append(paths, fc.Fallback)
+	}
+	paths = append(paths, fc.Fallbacks...)
+	var result [][]byte
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			log.Printf("fallback font %q not found, skipping: %v", p, err)
+			continue
+		}
+		result = append(result, data)
+	}
+	return result
 }
 
 // openMarkdownViewer captures terminal content and opens the markdown viewer overlay.

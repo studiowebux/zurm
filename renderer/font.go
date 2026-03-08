@@ -62,15 +62,25 @@ func NewFontRenderer(ttfData []byte, size float64, fallbackData ...[]byte) (*Fon
 	// Baseline: approximately 80% of cell height is a reasonable default.
 	baseline := int(float64(cellH)*0.80 + 0.5)
 
-	// Build the effective face: primary alone or MultiFace with fallback.
+	// Build the effective face: primary alone or MultiFace with fallback chain.
 	var face text.Face = primary
-	if len(fallbackData) > 0 && fallbackData[0] != nil {
-		fbSrc, fbErr := text.NewGoTextFaceSource(bytes.NewReader(fallbackData[0]))
-		if fbErr == nil {
-			fbFace := &text.GoTextFace{Source: fbSrc, Size: size}
-			if multi, mErr := text.NewMultiFace(primary, fbFace); mErr == nil {
-				face = multi
-			}
+	var fbFaces []text.Face
+	for _, fbData := range fallbackData {
+		if fbData == nil {
+			continue
+		}
+		fbSrc, fbErr := text.NewGoTextFaceSource(bytes.NewReader(fbData))
+		if fbErr != nil {
+			continue
+		}
+		fbFaces = append(fbFaces, &text.GoTextFace{Source: fbSrc, Size: size})
+	}
+	if len(fbFaces) > 0 {
+		allFaces := make([]text.Face, 0, 1+len(fbFaces))
+		allFaces = append(allFaces, primary)
+		allFaces = append(allFaces, fbFaces...)
+		if multi, mErr := text.NewMultiFace(allFaces...); mErr == nil {
+			face = multi
 		}
 	}
 

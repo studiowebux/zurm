@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Multiple font fallback chain: configure `fallbacks` in config.toml with ordered list of fonts (CJK, emoji, Nerd Font)
 - Wide character support: CJK, fullwidth forms, and wide emoji render correctly across 2 terminal columns
 - Cell Width field (0=continuation, 1=normal, 2=wide) for precise wide character tracking
 - `terminal.RuneWidth()` — single source of truth for character width calculation
