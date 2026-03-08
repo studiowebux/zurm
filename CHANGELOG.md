@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-03-08
+
 ### Added
 
 - Multiple font fallback chain: configure `fallbacks` in config.toml with ordered list of fonts (CJK, emoji, Nerd Font)
