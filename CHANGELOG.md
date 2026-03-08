@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Wide character support: CJK, fullwidth forms, and wide emoji render correctly across 2 terminal columns
+- Cell Width field (0=continuation, 1=normal, 2=wide) for precise wide character tracking
+- `terminal.RuneWidth()` — single source of truth for character width calculation
+- 15 table-driven tests for wide char placement, erase, resize, and width detection
+
+### Fixed
+
+- Erase operations (EraseInLine, EraseInDisplay, InsertChars, DeleteChars) handle wide char boundaries correctly
+- Selection copy skips continuation cells — no duplicate characters in clipboard
+- Mouse click and drag snap to parent cell when landing on wide char continuation
+- Word selection expands correctly across wide characters
+- Search highlights span the correct columns for wide characters (colMap pattern)
+- URL detection handles wide characters in surrounding text
+- Resize fixes truncated wide chars at boundaries and orphaned continuation cells
+
 ## [0.19.0] - 2026-03-08
 
 ### Added

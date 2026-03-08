@@ -3147,13 +3147,18 @@ func (g *Game) handleMouse() {
 
 			g.focused.Term.Buf.Lock()
 			absRow := g.focused.Term.Buf.DisplayToAbsRow(row)
+			// Snap col to parent cell if clicking on a wide char continuation.
+			snapCol := col
+			if snapCol >= 0 && snapCol < g.focused.Term.Buf.Cols && g.focused.Term.Buf.GetDisplayCell(row, snapCol).Width == 0 && snapCol > 0 {
+				snapCol--
+			}
 			switch g.clickCount {
 			case 1:
 				g.selDragging = true
 				g.focused.Term.Buf.Selection = terminal.Selection{
 					Active:   true,
-					StartRow: absRow, StartCol: col,
-					EndRow:   absRow, EndCol: col,
+					StartRow: absRow, StartCol: snapCol,
+					EndRow:   absRow, EndCol: snapCol,
 				}
 			case 2:
 				g.selDragging = false
@@ -3189,7 +3194,12 @@ func (g *Game) handleMouse() {
 				g.focused.Term.Buf.SetViewOffset(vo)
 			}
 			g.focused.Term.Buf.Selection.EndRow = g.focused.Term.Buf.DisplayToAbsRow(row)
-			g.focused.Term.Buf.Selection.EndCol = col
+			// Snap to parent cell if dragging onto a continuation cell.
+			dragCol := col
+			if dragCol >= 0 && dragCol < g.focused.Term.Buf.Cols && g.focused.Term.Buf.GetDisplayCell(row, dragCol).Width == 0 && dragCol > 0 {
+				dragCol--
+			}
+			g.focused.Term.Buf.Selection.EndCol = dragCol
 			g.focused.Term.Buf.BumpRenderGen()
 			g.focused.Term.Buf.Unlock()
 			g.screenDirty = true
@@ -3301,14 +3311,26 @@ func (g *Game) wordSelection(row, col int) terminal.Selection {
 	}
 
 	absRow := buf.DisplayToAbsRow(row)
+
+	// Snap to parent cell if clicking on a continuation cell.
 	cell := buf.GetDisplayCell(row, col)
+	if cell.Width == 0 && col > 0 {
+		col--
+		cell = buf.GetDisplayCell(row, col)
+	}
+
 	if !isWordChar(cell.Char) {
 		return terminal.Selection{Active: true, StartRow: absRow, StartCol: col, EndRow: absRow, EndCol: col}
 	}
 
 	startCol := col
 	for startCol > 0 {
-		if !isWordChar(buf.GetDisplayCell(row, startCol-1).Char) {
+		prev := buf.GetDisplayCell(row, startCol-1)
+		if prev.Width == 0 {
+			startCol--
+			continue
+		}
+		if !isWordChar(prev.Char) {
 			break
 		}
 		startCol--
@@ -3316,7 +3338,12 @@ func (g *Game) wordSelection(row, col int) terminal.Selection {
 
 	endCol := col
 	for endCol < buf.Cols-1 {
-		if !isWordChar(buf.GetDisplayCell(row, endCol+1).Char) {
+		next := buf.GetDisplayCell(row, endCol+1)
+		if next.Width == 0 {
+			endCol++
+			continue
+		}
+		if !isWordChar(next.Char) {
 			break
 		}
 		endCol++
@@ -3363,7 +3390,12 @@ func (g *Game) copySelection() {
 
 		var line strings.Builder
 		for c := colStart; c <= colEnd && c < cols; c++ {
-			ch := g.focused.Term.Buf.GetAbsCell(r, c).Char
+			cell := g.focused.Term.Buf.GetAbsCell(r, c)
+			// Skip continuation cells (second half of wide char) to avoid duplicates.
+			if cell.Width == 0 {
+				continue
+			}
+			ch := cell.Char
 			if ch == 0 {
 				ch = ' '
 			}
@@ -5903,7 +5935,11 @@ func (g *Game) extractSelectedText() string {
 		}
 		var line strings.Builder
 		for c := colStart; c <= colEnd && c < cols; c++ {
-			ch := g.focused.Term.Buf.GetAbsCell(r, c).Char
+			cell := g.focused.Term.Buf.GetAbsCell(r, c)
+			if cell.Width == 0 {
+				continue
+			}
+			ch := cell.Char
 			if ch == 0 {
 				ch = ' '
 			}
