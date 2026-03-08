@@ -4171,6 +4171,10 @@ func (g *Game) mergePaneToTab(targetIdx int) {
 		if srcIdx < targetIdx {
 			targetIdx--
 		}
+		// Clamp activeTab to prevent out-of-bounds access inside switchTabNoHistory.
+		if g.activeTab >= len(g.tabs) {
+			g.activeTab = len(g.tabs) - 1
+		}
 		g.switchTabNoHistory(targetIdx)
 		// Recompute the target tab's layout.
 		setPaneHeaders(g.layout, g.font.CellH)
