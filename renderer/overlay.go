@@ -522,8 +522,8 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	boldColor := color.RGBA{0xFF, 0xFF, 0xFF, 0xFF}
 
 	for _, line := range state.Lines {
-		// HRule: draw a horizontal line instead of text.
-		if len(line.Spans) == 1 && line.Spans[0].Style == markdown.StyleHRule {
+		// HRule or table separator: draw a horizontal line.
+		if len(line.Spans) == 1 && (line.Spans[0].Style == markdown.StyleHRule || line.Spans[0].Style == markdown.StyleTableSeparator) {
 			lineY := drawY + rowH/2
 			contentImg.SubImage(image.Rect(contentLeft, lineY, contentRight, lineY+1)).(*ebiten.Image).Fill(r.ui.Border)
 			drawY += rowH
@@ -567,6 +567,18 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Dim)
 			case markdown.StyleListItem:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
+			case markdown.StyleTableHeader:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, boldColor)
+			case markdown.StyleTableCell:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Fg)
+			case markdown.StyleStrikethrough:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Dim)
+			case markdown.StyleImage:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
+			case markdown.StyleCheckboxChecked:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
+			case markdown.StyleCheckboxUnchecked:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Dim)
 			default:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Fg)
 			}

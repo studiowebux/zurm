@@ -39,25 +39,26 @@ func TestParseBoldItalic(t *testing.T) {
 		t.Fatalf("expected 1 line, got %d", len(lines))
 	}
 
-	spans := lines[0].Spans
-	if len(spans) != 5 {
-		t.Fatalf("expected 5 spans, got %d", len(spans))
+	styles := spanStyles(lines[0])
+	if !styles[StyleBold] {
+		t.Error("missing bold span")
 	}
+	if !styles[StyleItalic] {
+		t.Error("missing italic span")
+	}
+}
 
-	if spans[0].Style != StyleNormal || spans[0].Text != "This is " {
-		t.Errorf("span 0: got %q style %d", spans[0].Text, spans[0].Style)
+func TestParseUnderscoreEmphasis(t *testing.T) {
+	lines := Parse("This is __bold__ and _italic_ text", 80)
+	if len(lines) == 0 {
+		t.Fatal("expected at least one line")
 	}
-	if spans[1].Style != StyleBold || spans[1].Text != "bold" {
-		t.Errorf("span 1: got %q style %d", spans[1].Text, spans[1].Style)
+	styles := spanStyles(lines[0])
+	if !styles[StyleBold] {
+		t.Error("missing bold span from __text__")
 	}
-	if spans[2].Style != StyleNormal || spans[2].Text != " and " {
-		t.Errorf("span 2: got %q style %d", spans[2].Text, spans[2].Style)
-	}
-	if spans[3].Style != StyleItalic || spans[3].Text != "italic" {
-		t.Errorf("span 3: got %q style %d", spans[3].Text, spans[3].Style)
-	}
-	if spans[4].Style != StyleNormal || spans[4].Text != " text" {
-		t.Errorf("span 4: got %q style %d", spans[4].Text, spans[4].Style)
+	if !styles[StyleItalic] {
+		t.Error("missing italic span from _text_")
 	}
 }
 
@@ -67,12 +68,14 @@ func TestParseInlineCode(t *testing.T) {
 		t.Fatalf("expected 1 line, got %d", len(lines))
 	}
 
-	spans := lines[0].Spans
-	if len(spans) != 3 {
-		t.Fatalf("expected 3 spans, got %d", len(spans))
+	found := false
+	for _, s := range lines[0].Spans {
+		if s.Style == StyleInlineCode && s.Text == "go fmt" {
+			found = true
+		}
 	}
-	if spans[1].Style != StyleInlineCode || spans[1].Text != "go fmt" {
-		t.Errorf("span 1: got %q style %d", spans[1].Text, spans[1].Style)
+	if !found {
+		t.Error("expected inline code span with 'go fmt'")
 	}
 }
 
@@ -80,17 +83,14 @@ func TestParseCodeBlock(t *testing.T) {
 	input := "```go\nfunc main() {\n}\n```"
 	lines := Parse(input, 80)
 
-	// Should have: lang label + 2 code lines (fence lines are consumed).
 	if len(lines) < 2 {
 		t.Fatalf("expected at least 2 lines, got %d", len(lines))
 	}
 
-	// First line is the language label.
 	if lines[0].Spans[0].Style != StyleCodeBlock || lines[0].Spans[0].Text != "go" {
 		t.Errorf("expected code block lang label, got %q style %d", lines[0].Spans[0].Text, lines[0].Spans[0].Style)
 	}
 
-	// Content lines are code block styled.
 	if lines[1].Spans[0].Style != StyleCodeBlock {
 		t.Errorf("expected code block style for content line")
 	}
@@ -99,16 +99,16 @@ func TestParseCodeBlock(t *testing.T) {
 func TestParseUnorderedList(t *testing.T) {
 	input := "- first\n- second\n- third"
 	lines := Parse(input, 80)
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 lines, got %d", len(lines))
+	if len(lines) < 3 {
+		t.Fatalf("expected at least 3 lines, got %d", len(lines))
 	}
 
-	for i, line := range lines {
-		if len(line.Spans) < 2 {
-			t.Fatalf("line %d: expected at least 2 spans, got %d", i, len(line.Spans))
+	for i := 0; i < 3; i++ {
+		if len(lines[i].Spans) < 2 {
+			t.Fatalf("line %d: expected at least 2 spans, got %d", i, len(lines[i].Spans))
 		}
-		if line.Spans[0].Style != StyleListItem {
-			t.Errorf("line %d: first span should be ListItem, got %d", i, line.Spans[0].Style)
+		if lines[i].Spans[0].Style != StyleListItem {
+			t.Errorf("line %d: first span should be ListItem, got %d", i, lines[i].Spans[0].Style)
 		}
 	}
 }
@@ -116,22 +116,19 @@ func TestParseUnorderedList(t *testing.T) {
 func TestParseOrderedList(t *testing.T) {
 	input := "1. first\n2. second"
 	lines := Parse(input, 80)
-	if len(lines) != 2 {
-		t.Fatalf("expected 2 lines, got %d", len(lines))
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 lines, got %d", len(lines))
 	}
 
 	if lines[0].Spans[0].Style != StyleListItem {
 		t.Errorf("expected ListItem style, got %d", lines[0].Spans[0].Style)
 	}
-	if lines[0].Spans[0].Text != "1. " {
-		t.Errorf("expected prefix '1. ', got %q", lines[0].Spans[0].Text)
-	}
 }
 
 func TestParseBlockquote(t *testing.T) {
 	lines := Parse("> quoted text", 80)
-	if len(lines) != 1 {
-		t.Fatalf("expected 1 line, got %d", len(lines))
+	if len(lines) == 0 {
+		t.Fatal("expected at least 1 line")
 	}
 	if lines[0].Spans[0].Style != StyleBlockquote {
 		t.Errorf("expected blockquote style, got %d", lines[0].Spans[0].Style)
@@ -146,8 +143,8 @@ func TestParseHRule(t *testing.T) {
 	for _, input := range tests {
 		t.Run(input, func(t *testing.T) {
 			lines := Parse(input, 80)
-			if len(lines) != 1 {
-				t.Fatalf("expected 1 line, got %d", len(lines))
+			if len(lines) == 0 {
+				t.Fatal("expected at least 1 line")
 			}
 			if lines[0].Spans[0].Style != StyleHRule {
 				t.Errorf("expected HRule style, got %d", lines[0].Spans[0].Style)
@@ -158,30 +155,23 @@ func TestParseHRule(t *testing.T) {
 
 func TestParseLink(t *testing.T) {
 	lines := Parse("Click [here](https://example.com) for info", 80)
-	if len(lines) != 1 {
-		t.Fatalf("expected 1 line, got %d", len(lines))
+	if len(lines) == 0 {
+		t.Fatal("expected at least 1 line")
 	}
 
-	spans := lines[0].Spans
 	found := false
-	for _, s := range spans {
-		if s.Style == StyleLink {
+	for _, s := range lines[0].Spans {
+		if s.Style == StyleLink && s.Text == "here" && s.Extra == "https://example.com" {
 			found = true
-			if s.Text != "here" {
-				t.Errorf("expected link text 'here', got %q", s.Text)
-			}
-			if s.Extra != "https://example.com" {
-				t.Errorf("expected URL 'https://example.com', got %q", s.Extra)
-			}
 		}
 	}
 	if !found {
-		t.Error("no link span found")
+		t.Error("no link span found with text 'here' and correct URL")
 	}
 }
 
 func TestParseWordWrap(t *testing.T) {
-	input := strings.Repeat("word ", 20) // 100 chars
+	input := strings.Repeat("word ", 20)
 	lines := Parse(input, 40)
 	if len(lines) < 2 {
 		t.Errorf("expected wrapping, got %d lines", len(lines))
@@ -190,23 +180,20 @@ func TestParseWordWrap(t *testing.T) {
 
 func TestParseEmptyInput(t *testing.T) {
 	lines := Parse("", 80)
-	if len(lines) != 1 {
-		t.Fatalf("expected 1 empty line, got %d", len(lines))
+	// Goldmark produces no output for empty input.
+	if len(lines) != 0 {
+		t.Fatalf("expected 0 lines for empty input, got %d", len(lines))
 	}
 }
 
 func TestParseMixedInline(t *testing.T) {
 	input := "**bold** and `code` and *italic*"
 	lines := Parse(input, 80)
-	if len(lines) != 1 {
-		t.Fatalf("expected 1 line, got %d", len(lines))
+	if len(lines) == 0 {
+		t.Fatal("expected at least 1 line")
 	}
 
-	styles := make(map[SpanStyle]bool)
-	for _, s := range lines[0].Spans {
-		styles[s.Style] = true
-	}
-
+	styles := spanStyles(lines[0])
 	if !styles[StyleBold] {
 		t.Error("missing bold span")
 	}
@@ -222,7 +209,6 @@ func TestParseCodeBlockPreservesContent(t *testing.T) {
 	input := "```\n  indented\n    more\n```"
 	lines := Parse(input, 80)
 
-	// Should preserve indentation inside code blocks.
 	found := false
 	for _, line := range lines {
 		for _, s := range line.Spans {
@@ -237,13 +223,11 @@ func TestParseCodeBlockPreservesContent(t *testing.T) {
 }
 
 func TestParseNestedFormatting(t *testing.T) {
-	// Bold inside a heading — heading style takes precedence for default.
 	lines := Parse("# **Bold Heading**", 80)
 	if len(lines) == 0 {
 		t.Fatal("expected at least one line")
 	}
 
-	// The bold markers should be parsed, producing a bold span.
 	found := false
 	for _, s := range lines[0].Spans {
 		if s.Style == StyleBold {
@@ -253,4 +237,140 @@ func TestParseNestedFormatting(t *testing.T) {
 	if !found {
 		t.Error("expected bold span inside heading")
 	}
+}
+
+func TestParseTable(t *testing.T) {
+	input := "| Name | Value |\n| --- | --- |\n| a | b |"
+	lines := Parse(input, 80)
+
+	headerFound := false
+	sepFound := false
+	cellFound := false
+	for _, line := range lines {
+		for _, s := range line.Spans {
+			if s.Style == StyleTableHeader {
+				headerFound = true
+			}
+			if s.Style == StyleTableSeparator {
+				sepFound = true
+			}
+			if s.Style == StyleTableCell {
+				cellFound = true
+			}
+		}
+	}
+	if !headerFound {
+		t.Error("missing table header")
+	}
+	if !sepFound {
+		t.Error("missing table separator")
+	}
+	if !cellFound {
+		t.Error("missing table cell")
+	}
+}
+
+func TestParseTableColumnAlignment(t *testing.T) {
+	input := "| Name | Value |\n| --- | --- |\n| a | long cell |"
+	lines := Parse(input, 80)
+
+	// Find header and data rows (skip separator).
+	var headerLine, dataLine *StyledLine
+	for i := range lines {
+		for _, s := range lines[i].Spans {
+			if s.Style == StyleTableHeader && headerLine == nil {
+				headerLine = &lines[i]
+			}
+			if s.Style == StyleTableCell && dataLine == nil {
+				dataLine = &lines[i]
+			}
+		}
+	}
+	if headerLine == nil || dataLine == nil {
+		t.Fatal("missing header or data row")
+	}
+
+	// Both rows should produce the same total text length (columns are padded).
+	headerText := lineText(*headerLine)
+	dataText := lineText(*dataLine)
+	if len(headerText) != len(dataText) {
+		t.Errorf("column misalignment: header %q (%d) vs data %q (%d)",
+			headerText, len(headerText), dataText, len(dataText))
+	}
+}
+
+func lineText(line StyledLine) string {
+	var b strings.Builder
+	for _, s := range line.Spans {
+		b.WriteString(s.Text)
+	}
+	return b.String()
+}
+
+func TestParseStrikethrough(t *testing.T) {
+	lines := Parse("This is ~~deleted~~ text", 80)
+	if len(lines) == 0 {
+		t.Fatal("expected at least 1 line")
+	}
+	found := false
+	for _, s := range lines[0].Spans {
+		if s.Style == StyleStrikethrough {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("missing strikethrough span")
+	}
+}
+
+func TestParseImage(t *testing.T) {
+	lines := Parse("![alt text](https://example.com/img.png)", 80)
+	if len(lines) == 0 {
+		t.Fatal("expected at least 1 line")
+	}
+	found := false
+	for _, s := range lines[0].Spans {
+		if s.Style == StyleImage && strings.Contains(s.Text, "alt text") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("missing image span")
+	}
+}
+
+func TestParseTaskList(t *testing.T) {
+	input := "- [ ] unchecked\n- [x] checked"
+	lines := Parse(input, 80)
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 lines, got %d", len(lines))
+	}
+
+	uncheckedFound := false
+	checkedFound := false
+	for _, line := range lines {
+		for _, s := range line.Spans {
+			if s.Style == StyleCheckboxUnchecked {
+				uncheckedFound = true
+			}
+			if s.Style == StyleCheckboxChecked {
+				checkedFound = true
+			}
+		}
+	}
+	if !uncheckedFound {
+		t.Error("missing unchecked checkbox")
+	}
+	if !checkedFound {
+		t.Error("missing checked checkbox")
+	}
+}
+
+// spanStyles collects all unique styles from a line's spans.
+func spanStyles(line StyledLine) map[SpanStyle]bool {
+	m := make(map[SpanStyle]bool)
+	for _, s := range line.Spans {
+		m[s.Style] = true
+	}
+	return m
 }

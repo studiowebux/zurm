@@ -1,33 +1,47 @@
 package markdown
 
 import (
+	"bytes"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	east "github.com/yuin/goldmark/extension/ast"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/text"
 )
 
 // SpanStyle identifies visual styling for a text span.
 type SpanStyle int
 
 const (
-	StyleNormal     SpanStyle = iota
-	StyleHeading1             // #
-	StyleHeading2             // ##
-	StyleHeading3             // ### and deeper
-	StyleBold                 // **text**
-	StyleItalic               // *text*
-	StyleInlineCode           // `text`
-	StyleCodeBlock            // fenced ``` lines
-	StyleLink                 // [text](url)
-	StyleBlockquote           // > text
-	StyleListItem             // - item / 1. item
-	StyleHRule                // ---
+	StyleNormal            SpanStyle = iota
+	StyleHeading1                    // #
+	StyleHeading2                    // ##
+	StyleHeading3                    // ### and deeper
+	StyleBold                        // **text** / __text__
+	StyleItalic                      // *text* / _text_
+	StyleInlineCode                  // `text`
+	StyleCodeBlock                   // fenced ``` lines
+	StyleLink                        // [text](url)
+	StyleBlockquote                  // > text
+	StyleListItem                    // - item / 1. item
+	StyleHRule                       // ---
+	StyleStrikethrough               // ~~text~~
+	StyleImage                       // ![alt](url)
+	StyleCheckboxChecked             // - [x]
+	StyleCheckboxUnchecked           // - [ ]
+	StyleTableHeader                 // table header cells
+	StyleTableSeparator              // table separator row
+	StyleTableCell                   // table data cells
 )
 
 // Span is a contiguous run of text with one style.
 type Span struct {
 	Text  string
 	Style SpanStyle
-	Extra string // URL for StyleLink
+	Extra string // URL for StyleLink / StyleImage
 }
 
 // StyledLine is a visual line (post word-wrap) with its spans and indent.
@@ -37,288 +51,356 @@ type StyledLine struct {
 }
 
 // Parse converts raw markdown text into styled lines, word-wrapping at maxCols.
-func Parse(text string, maxCols int) []StyledLine {
+func Parse(rawText string, maxCols int) []StyledLine {
 	if maxCols < 10 {
 		maxCols = 10
 	}
-	rawLines := strings.Split(text, "\n")
 
-	var result []StyledLine
-	inCodeBlock := false
-	codeFenceLang := ""
+	md := goldmark.New(
+		goldmark.WithExtensions(extension.GFM),
+	)
+	src := []byte(rawText)
+	reader := text.NewReader(src)
+	doc := md.Parser().Parse(reader)
 
-	for _, raw := range rawLines {
-		// Code fence toggle.
-		trimmed := strings.TrimSpace(raw)
-		if strings.HasPrefix(trimmed, "```") {
-			if inCodeBlock {
-				inCodeBlock = false
-				codeFenceLang = ""
-				continue
-			}
-			inCodeBlock = true
-			codeFenceLang = strings.TrimSpace(strings.TrimPrefix(trimmed, "```"))
-			if codeFenceLang != "" {
-				result = append(result, StyledLine{
-					Spans: []Span{{Text: codeFenceLang, Style: StyleCodeBlock}},
-				})
-			}
-			continue
-		}
+	w := &walker{
+		src:     src,
+		maxCols: maxCols,
+	}
+	w.walkBlock(doc)
+	return w.lines
+}
 
-		if inCodeBlock {
-			// Preserve code lines as-is, word-wrap at hard boundary.
-			wrapped := wrapPlain(raw, maxCols)
-			for _, w := range wrapped {
-				result = append(result, StyledLine{
-					Spans: []Span{{Text: w, Style: StyleCodeBlock}},
-				})
-			}
-			continue
-		}
+type walker struct {
+	src     []byte
+	maxCols int
+	lines   []StyledLine
 
-		// Horizontal rule: ---, ***, ___ (at least 3 chars, nothing else).
-		if isHRule(trimmed) {
-			result = append(result, StyledLine{
-				Spans: []Span{{Text: "", Style: StyleHRule}},
-			})
-			continue
-		}
+	// Accumulator for inline spans within a block.
+	spans      []Span
+	blockStyle SpanStyle
+	indent     int
+}
 
-		// Headings.
-		if level, body := parseHeading(trimmed); level > 0 {
+// emit flushes accumulated spans as word-wrapped lines.
+func (w *walker) emit() {
+	if len(w.spans) == 0 {
+		return
+	}
+	wrapped := wrapSpans(w.spans, w.maxCols, w.indent)
+	w.lines = append(w.lines, wrapped...)
+	w.spans = nil
+}
+
+// emitBlank adds an empty line.
+func (w *walker) emitBlank() {
+	w.lines = append(w.lines, StyledLine{})
+}
+
+// walkBlock recursively walks block-level AST nodes.
+func (w *walker) walkBlock(n ast.Node) {
+	for child := n.FirstChild(); child != nil; child = child.NextSibling() {
+		switch node := child.(type) {
+		case *ast.Heading:
 			style := StyleHeading1
-			if level == 2 {
+			if node.Level == 2 {
 				style = StyleHeading2
-			} else if level >= 3 {
+			} else if node.Level >= 3 {
 				style = StyleHeading3
 			}
-			spans := parseInline(body, style)
-			wrapped := wrapSpans(spans, maxCols, 0)
-			result = append(result, wrapped...)
-			continue
-		}
+			w.blockStyle = style
+			w.walkInline(node)
+			w.emit()
+			w.blockStyle = StyleNormal
 
-		// Blockquote: > text
-		if strings.HasPrefix(trimmed, "> ") || trimmed == ">" {
-			body := strings.TrimPrefix(trimmed, "> ")
-			if body == ">" {
-				body = ""
+		case *ast.Paragraph:
+			// Check if inside a blockquote or list — parent handles style.
+			w.walkInline(node)
+			w.emit()
+
+		case *ast.ThematicBreak:
+			w.lines = append(w.lines, StyledLine{
+				Spans: []Span{{Text: "", Style: StyleHRule}},
+			})
+
+		case *ast.FencedCodeBlock:
+			// Language label.
+			lang := string(node.Language(w.src))
+			if lang != "" {
+				w.lines = append(w.lines, StyledLine{
+					Spans: []Span{{Text: lang, Style: StyleCodeBlock}},
+				})
 			}
-			spans := []Span{{Text: body, Style: StyleBlockquote}}
-			wrapped := wrapSpans(spans, maxCols, 2)
-			result = append(result, wrapped...)
-			continue
-		}
-
-		// Unordered list: - item, * item, + item
-		if indent, body, ok := parseUnorderedList(trimmed); ok {
-			spans := parseInline(body, StyleNormal)
-			indentCells := indent + 2
-			wrapped := wrapSpans(spans, maxCols, indentCells)
-			// Prepend bullet to first line.
-			if len(wrapped) > 0 && len(wrapped[0].Spans) > 0 {
-				wrapped[0].Spans = append([]Span{{Text: "- ", Style: StyleListItem}}, wrapped[0].Spans...)
-			}
-			result = append(result, wrapped...)
-			continue
-		}
-
-		// Ordered list: 1. item, 2. item, etc.
-		if indent, prefix, body, ok := parseOrderedList(trimmed); ok {
-			spans := parseInline(body, StyleNormal)
-			indentCells := indent + len(prefix)
-			wrapped := wrapSpans(spans, maxCols, indentCells)
-			if len(wrapped) > 0 && len(wrapped[0].Spans) > 0 {
-				wrapped[0].Spans = append([]Span{{Text: prefix, Style: StyleListItem}}, wrapped[0].Spans...)
-			}
-			result = append(result, wrapped...)
-			continue
-		}
-
-		// Empty line.
-		if trimmed == "" {
-			result = append(result, StyledLine{})
-			continue
-		}
-
-		// Regular paragraph — parse inline styles and wrap.
-		spans := parseInline(trimmed, StyleNormal)
-		wrapped := wrapSpans(spans, maxCols, 0)
-		result = append(result, wrapped...)
-	}
-
-	return result
-}
-
-// parseHeading returns (level, body) if the line is a heading, or (0, "") otherwise.
-func parseHeading(line string) (int, string) {
-	level := 0
-	for _, ch := range line {
-		if ch == '#' {
-			level++
-		} else {
-			break
-		}
-	}
-	if level == 0 || level > 6 {
-		return 0, ""
-	}
-	body := strings.TrimSpace(line[level:])
-	return level, body
-}
-
-// isHRule checks if line is a horizontal rule (---, ***, ___).
-func isHRule(line string) bool {
-	if len(line) < 3 {
-		return false
-	}
-	ch := line[0]
-	if ch != '-' && ch != '*' && ch != '_' {
-		return false
-	}
-	for i := range line {
-		if line[i] != ch {
-			return false
-		}
-	}
-	return true
-}
-
-// parseUnorderedList checks for "- item", "* item", "+ item" with optional indent.
-func parseUnorderedList(line string) (indent int, body string, ok bool) {
-	indent = 0
-	for _, ch := range line {
-		if ch == ' ' || ch == '\t' {
-			indent++
-		} else {
-			break
-		}
-	}
-	rest := line[indent:]
-	if len(rest) >= 2 && (rest[0] == '-' || rest[0] == '*' || rest[0] == '+') && rest[1] == ' ' {
-		return indent, rest[2:], true
-	}
-	return 0, "", false
-}
-
-// parseOrderedList checks for "1. item" style with optional indent.
-func parseOrderedList(line string) (indent int, prefix, body string, ok bool) {
-	indent = 0
-	for _, ch := range line {
-		if ch == ' ' || ch == '\t' {
-			indent++
-		} else {
-			break
-		}
-	}
-	rest := line[indent:]
-	dotIdx := strings.Index(rest, ". ")
-	if dotIdx < 1 || dotIdx > 4 {
-		return 0, "", "", false
-	}
-	num := rest[:dotIdx]
-	for _, ch := range num {
-		if ch < '0' || ch > '9' {
-			return 0, "", "", false
-		}
-	}
-	return indent, rest[:dotIdx+2], rest[dotIdx+2:], true
-}
-
-// parseInline parses inline markdown (bold, italic, code, links) within text.
-// defaultStyle is applied to unstyled text.
-func parseInline(text string, defaultStyle SpanStyle) []Span {
-	var spans []Span
-	i := 0
-	runes := []rune(text)
-	n := len(runes)
-
-	flush := func(start, end int) {
-		if end > start {
-			spans = append(spans, Span{Text: string(runes[start:end]), Style: defaultStyle})
-		}
-	}
-
-	segStart := 0
-	for i < n {
-		// Inline code: `text`
-		if runes[i] == '`' {
-			end := indexRune(runes, '`', i+1)
-			if end > i+1 {
-				flush(segStart, i)
-				spans = append(spans, Span{Text: string(runes[i+1 : end]), Style: StyleInlineCode})
-				i = end + 1
-				segStart = i
-				continue
-			}
-		}
-
-		// Bold: **text**
-		if i+1 < n && runes[i] == '*' && runes[i+1] == '*' {
-			end := indexRuneDouble(runes, '*', i+2)
-			if end > i+2 {
-				flush(segStart, i)
-				spans = append(spans, Span{Text: string(runes[i+2 : end]), Style: StyleBold})
-				i = end + 2
-				segStart = i
-				continue
-			}
-		}
-
-		// Italic: *text* (single asterisk, not preceded by another *)
-		if runes[i] == '*' && (i+1 < n && runes[i+1] != '*') {
-			end := indexRune(runes, '*', i+1)
-			if end > i+1 {
-				flush(segStart, i)
-				spans = append(spans, Span{Text: string(runes[i+1 : end]), Style: StyleItalic})
-				i = end + 1
-				segStart = i
-				continue
-			}
-		}
-
-		// Link: [text](url)
-		if runes[i] == '[' {
-			closeBracket := indexRune(runes, ']', i+1)
-			if closeBracket > i+1 && closeBracket+1 < n && runes[closeBracket+1] == '(' {
-				closeParen := indexRune(runes, ')', closeBracket+2)
-				if closeParen > closeBracket+2 {
-					flush(segStart, i)
-					linkText := string(runes[i+1 : closeBracket])
-					linkURL := string(runes[closeBracket+2 : closeParen])
-					spans = append(spans, Span{Text: linkText, Style: StyleLink, Extra: linkURL})
-					i = closeParen + 1
-					segStart = i
-					continue
+			// Code lines.
+			lines := node.Lines()
+			for i := 0; i < lines.Len(); i++ {
+				seg := lines.At(i)
+				line := string(seg.Value(w.src))
+				// Trim trailing newline.
+				if len(line) > 0 && line[len(line)-1] == '\n' {
+					line = line[:len(line)-1]
+				}
+				for _, wl := range wrapPlain(line, w.maxCols) {
+					w.lines = append(w.lines, StyledLine{
+						Spans: []Span{{Text: wl, Style: StyleCodeBlock}},
+					})
 				}
 			}
+
+		case *ast.CodeBlock:
+			lines := node.Lines()
+			for i := 0; i < lines.Len(); i++ {
+				seg := lines.At(i)
+				line := string(seg.Value(w.src))
+				if len(line) > 0 && line[len(line)-1] == '\n' {
+					line = line[:len(line)-1]
+				}
+				for _, wl := range wrapPlain(line, w.maxCols) {
+					w.lines = append(w.lines, StyledLine{
+						Spans: []Span{{Text: wl, Style: StyleCodeBlock}},
+					})
+				}
+			}
+
+		case *ast.Blockquote:
+			saved := w.blockStyle
+			savedIndent := w.indent
+			w.blockStyle = StyleBlockquote
+			w.indent = savedIndent + 2
+			w.walkBlock(node)
+			w.blockStyle = saved
+			w.indent = savedIndent
+
+		case *ast.List:
+			w.walkBlock(node)
+
+		case *ast.ListItem:
+			savedIndent := w.indent
+			// Collect inline text from the list item's paragraph children.
+			w.indent = savedIndent + 2
+
+			// Check for task checkbox (first grandchild of any block child).
+			hasCheckbox := false
+			for ic := node.FirstChild(); ic != nil; ic = ic.NextSibling() {
+				if fc := ic.FirstChild(); fc != nil {
+					if cb, ok := fc.(*east.TaskCheckBox); ok {
+						hasCheckbox = true
+						if cb.IsChecked {
+							w.spans = append(w.spans, Span{Text: "[x] ", Style: StyleCheckboxChecked})
+						} else {
+							w.spans = append(w.spans, Span{Text: "[ ] ", Style: StyleCheckboxUnchecked})
+						}
+					}
+				}
+			}
+
+			if !hasCheckbox {
+				// Determine marker: ordered or unordered.
+				if list, ok := node.Parent().(*ast.List); ok && list.IsOrdered() {
+					w.spans = append(w.spans, Span{Text: "1. ", Style: StyleListItem})
+				} else {
+					w.spans = append(w.spans, Span{Text: "- ", Style: StyleListItem})
+				}
+			}
+
+			// Walk children: inline content is collected, nested lists recurse.
+			for ic := node.FirstChild(); ic != nil; ic = ic.NextSibling() {
+				if _, ok := ic.(*ast.List); ok {
+					w.emit()
+					w.walkBlock(ic)
+				} else {
+					w.walkInline(ic)
+					w.emit()
+				}
+			}
+			w.indent = savedIndent
+
+		case *east.Table:
+			w.walkTable(node)
+
+		default:
+			// Unknown block — recurse.
+			if child.HasChildren() {
+				w.walkBlock(child)
+			}
+			// Blank line between blocks.
+			if child.NextSibling() != nil {
+				w.emitBlank()
+			}
+			continue
 		}
 
-		i++
+		// Blank line between top-level blocks (not inside lists/blockquotes).
+		if child.NextSibling() != nil && child.Parent() == n && n.Kind() == ast.KindDocument {
+			w.emitBlank()
+		}
 	}
-	flush(segStart, n)
-	return spans
 }
 
-// indexRune finds the next occurrence of ch in runes starting at from.
-func indexRune(runes []rune, ch rune, from int) int {
-	for j := from; j < len(runes); j++ {
-		if runes[j] == ch {
-			return j
-		}
-	}
-	return -1
+// tableRow holds pre-collected cell text and its style for a single row.
+type tableRow struct {
+	cells []string
+	style SpanStyle // StyleTableHeader or StyleTableCell
 }
 
-// indexRuneDouble finds the next occurrence of chch (double char) in runes starting at from.
-func indexRuneDouble(runes []rune, ch rune, from int) int {
-	for j := from; j+1 < len(runes); j++ {
-		if runes[j] == ch && runes[j+1] == ch {
-			return j
+// walkTable handles GFM table nodes with column-aligned output.
+// Two passes: collect all cell texts to compute max column widths,
+// then emit padded cells.
+func (w *walker) walkTable(table *east.Table) {
+	var rows []tableRow
+	var numCols int
+
+	// Pass 1: collect all rows.
+	for child := table.FirstChild(); child != nil; child = child.NextSibling() {
+		switch node := child.(type) {
+		case *east.TableHeader:
+			var cells []string
+			for cell := node.FirstChild(); cell != nil; cell = cell.NextSibling() {
+				cells = append(cells, w.collectText(cell))
+			}
+			if len(cells) > numCols {
+				numCols = len(cells)
+			}
+			rows = append(rows, tableRow{cells: cells, style: StyleTableHeader})
+		case *east.TableRow:
+			var cells []string
+			for cell := node.FirstChild(); cell != nil; cell = cell.NextSibling() {
+				cells = append(cells, w.collectText(cell))
+			}
+			if len(cells) > numCols {
+				numCols = len(cells)
+			}
+			rows = append(rows, tableRow{cells: cells, style: StyleTableCell})
 		}
 	}
-	return -1
+
+	if numCols == 0 {
+		return
+	}
+
+	// Compute max width per column.
+	colWidths := make([]int, numCols)
+	for _, row := range rows {
+		for i, cell := range row.cells {
+			runeLen := utf8.RuneCountInString(cell)
+			if runeLen > colWidths[i] {
+				colWidths[i] = runeLen
+			}
+		}
+	}
+
+	// Pass 2: emit padded rows.
+	for ri, row := range rows {
+		var spans []Span
+		for ci := 0; ci < numCols; ci++ {
+			if ci > 0 {
+				spans = append(spans, Span{Text: " | ", Style: StyleNormal})
+			}
+			cell := ""
+			if ci < len(row.cells) {
+				cell = row.cells[ci]
+			}
+			padded := cell + strings.Repeat(" ", colWidths[ci]-utf8.RuneCountInString(cell))
+			spans = append(spans, Span{Text: padded, Style: row.style})
+		}
+		w.lines = append(w.lines, StyledLine{Spans: spans})
+
+		// Separator line after header row.
+		if row.style == StyleTableHeader && ri == 0 {
+			w.lines = append(w.lines, StyledLine{
+				Spans: []Span{{Text: "", Style: StyleTableSeparator}},
+			})
+		}
+	}
+}
+
+// collectText extracts plain text from a node and its children.
+func (w *walker) collectText(n ast.Node) string {
+	var buf bytes.Buffer
+	w.collectTextRec(n, &buf)
+	return buf.String()
+}
+
+func (w *walker) collectTextRec(n ast.Node, buf *bytes.Buffer) {
+	if t, ok := n.(*ast.Text); ok {
+		buf.Write(t.Segment.Value(w.src))
+		if t.SoftLineBreak() {
+			buf.WriteByte(' ')
+		}
+		return
+	}
+	if cs, ok := n.(*ast.CodeSpan); ok {
+		for ic := cs.FirstChild(); ic != nil; ic = ic.NextSibling() {
+			w.collectTextRec(ic, buf)
+		}
+		return
+	}
+	for child := n.FirstChild(); child != nil; child = child.NextSibling() {
+		w.collectTextRec(child, buf)
+	}
+}
+
+// walkInline recursively walks inline-level AST nodes, accumulating spans.
+func (w *walker) walkInline(n ast.Node) {
+	for child := n.FirstChild(); child != nil; child = child.NextSibling() {
+		switch node := child.(type) {
+		case *ast.Text:
+			style := w.blockStyle
+			if style == StyleNormal {
+				style = StyleNormal
+			}
+			txt := string(node.Segment.Value(w.src))
+			w.spans = append(w.spans, Span{Text: txt, Style: style})
+			if node.SoftLineBreak() {
+				w.spans = append(w.spans, Span{Text: " ", Style: style})
+			}
+
+		case *ast.CodeSpan:
+			txt := w.collectText(node)
+			w.spans = append(w.spans, Span{Text: txt, Style: StyleInlineCode})
+
+		case *ast.Emphasis:
+			style := StyleItalic
+			if node.Level == 2 {
+				style = StyleBold
+			}
+			saved := w.blockStyle
+			w.blockStyle = style
+			w.walkInline(node)
+			w.blockStyle = saved
+
+		case *ast.Link:
+			linkText := w.collectText(node)
+			url := string(node.Destination)
+			w.spans = append(w.spans, Span{Text: linkText, Style: StyleLink, Extra: url})
+
+		case *ast.Image:
+			altText := w.collectText(node)
+			url := string(node.Destination)
+			label := "[image: " + altText + "]"
+			w.spans = append(w.spans, Span{Text: label, Style: StyleImage, Extra: url})
+
+		case *ast.AutoLink:
+			url := string(node.URL(w.src))
+			w.spans = append(w.spans, Span{Text: url, Style: StyleLink, Extra: url})
+
+		case *east.Strikethrough:
+			txt := w.collectText(node)
+			w.spans = append(w.spans, Span{Text: txt, Style: StyleStrikethrough})
+
+		case *east.TaskCheckBox:
+			// Handled at ListItem level — skip here.
+
+		case *ast.String:
+			w.spans = append(w.spans, Span{Text: string(node.Value), Style: w.blockStyle})
+
+		default:
+			// Unknown inline — recurse.
+			if child.HasChildren() {
+				w.walkInline(child)
+			}
+		}
+	}
 }
 
 // wrapPlain splits a plain string into lines of at most maxCols runes.
@@ -343,7 +425,6 @@ func wrapSpans(spans []Span, maxCols, indent int) []StyledLine {
 		return []StyledLine{{Indent: indent}}
 	}
 
-	// Flatten all text to measure total width.
 	totalLen := 0
 	for _, s := range spans {
 		totalLen += utf8.RuneCountInString(s.Text)
@@ -354,12 +435,10 @@ func wrapSpans(spans []Span, maxCols, indent int) []StyledLine {
 		usable = 5
 	}
 
-	// Fast path: fits on one line.
 	if totalLen <= usable {
 		return []StyledLine{{Spans: spans, Indent: indent}}
 	}
 
-	// Slow path: split spans across lines.
 	var lines []StyledLine
 	var curSpans []Span
 	col := 0
