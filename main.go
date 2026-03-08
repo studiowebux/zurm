@@ -987,7 +987,8 @@ func (g *Game) handleInput() {
 					g.collectStats()
 					g.flashStatus("Stats: on")
 				} else {
-					g.renderer.SetLayoutDirty() // clear stale overlay pixels from offscreen
+					g.renderer.SetLayoutDirty()
+					g.renderer.ClearPaneCache()
 					g.flashStatus("Stats: off")
 				}
 
@@ -5236,6 +5237,7 @@ func (g *Game) buildPalette() {
 				g.flashStatus("Stats: on")
 			} else {
 				g.renderer.SetLayoutDirty()
+				g.renderer.ClearPaneCache()
 				g.flashStatus("Stats: off")
 			}
 		},
