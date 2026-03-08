@@ -12,10 +12,13 @@ import (
 
 // FontRenderer manages font face loading and glyph rendering.
 // It uses Ebitengine's text/v2 package with a Go freetype face.
+// When a fallback font is configured, a MultiFace is used so missing glyphs
+// (e.g. CJK characters absent from JetBrains Mono) fall through to the
+// secondary font automatically.
 //
 // Pattern: cache — glyphs are pre-measured; Ebitengine handles atlas internally.
 type FontRenderer struct {
-	face     *text.GoTextFace
+	face     text.Face // primary GoTextFace or MultiFace with fallback
 	src      *text.GoTextFaceSource
 	size     float64
 	CellW    int // width of a single monospace cell in pixels
@@ -30,21 +33,23 @@ type FontRenderer struct {
 	runeStr [127]string
 }
 
-// NewFontRenderer loads the embedded TTF and calculates cell metrics.
-func NewFontRenderer(ttfData []byte, size float64) (*FontRenderer, error) {
+// NewFontRenderer loads the primary TTF and calculates cell metrics.
+// If fallbackData is non-nil, a MultiFace is created so glyphs missing from
+// the primary font (e.g. CJK) are rendered from the fallback.
+func NewFontRenderer(ttfData []byte, size float64, fallbackData ...[]byte) (*FontRenderer, error) {
 	src, err := text.NewGoTextFaceSource(bytes.NewReader(ttfData))
 	if err != nil {
 		return nil, err
 	}
 
-	face := &text.GoTextFace{
+	primary := &text.GoTextFace{
 		Source: src,
 		Size:   size,
 	}
 
 	// Measure a reference character to get cell dimensions.
 	// 'M' is the standard reference for monospace width.
-	w, h := text.Measure("M", face, 0)
+	w, h := text.Measure("M", primary, 0)
 	cellW := int(w + 0.5)
 	cellH := int(h + 0.5)
 	if cellW < 1 {
@@ -56,6 +61,18 @@ func NewFontRenderer(ttfData []byte, size float64) (*FontRenderer, error) {
 
 	// Baseline: approximately 80% of cell height is a reasonable default.
 	baseline := int(float64(cellH)*0.80 + 0.5)
+
+	// Build the effective face: primary alone or MultiFace with fallback.
+	var face text.Face = primary
+	if len(fallbackData) > 0 && fallbackData[0] != nil {
+		fbSrc, fbErr := text.NewGoTextFaceSource(bytes.NewReader(fallbackData[0]))
+		if fbErr == nil {
+			fbFace := &text.GoTextFace{Source: fbSrc, Size: size}
+			if multi, mErr := text.NewMultiFace(primary, fbFace); mErr == nil {
+				face = multi
+			}
+		}
+	}
 
 	f := &FontRenderer{
 		face:     face,

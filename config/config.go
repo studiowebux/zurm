@@ -140,9 +140,10 @@ bright_white   = "#E8E8F0"
 `
 
 type FontConfig struct {
-	Family string  `toml:"family"`
-	Size   float64 `toml:"size"`
-	File   string  `toml:"file"` // path to a TTF/OTF; overrides embedded JetBrains Mono
+	Family   string  `toml:"family"`
+	Size     float64 `toml:"size"`
+	File     string  `toml:"file"`     // path to a TTF/OTF; overrides embedded JetBrains Mono
+	Fallback string  `toml:"fallback"` // path to a fallback TTF/OTF for missing glyphs (e.g. CJK)
 }
 
 type WindowConfig struct {

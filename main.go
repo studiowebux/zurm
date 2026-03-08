@@ -297,7 +297,15 @@ func main() {
 			log.Printf("font file %q not found, using embedded font: %v", cfg.Font.File, err)
 		}
 	}
-	fontR, err := renderer.NewFontRenderer(fontBytes, cfg.Font.Size*dpi)
+	var fallbackBytes []byte
+	if cfg.Font.Fallback != "" {
+		if data, err := os.ReadFile(cfg.Font.Fallback); err == nil {
+			fallbackBytes = data
+		} else {
+			log.Printf("fallback font %q not found, skipping: %v", cfg.Font.Fallback, err)
+		}
+	}
+	fontR, err := renderer.NewFontRenderer(fontBytes, cfg.Font.Size*dpi, fallbackBytes)
 	if err != nil {
 		log.Fatalf("font load: %v", err)
 	}
@@ -5132,7 +5140,13 @@ func (g *Game) adjustFontSize(delta float64) {
 			fontBytes = data
 		}
 	}
-	fontR, err := renderer.NewFontRenderer(fontBytes, newSize*g.dpi)
+	var fbBytes []byte
+	if g.cfg.Font.Fallback != "" {
+		if data, loadErr := os.ReadFile(g.cfg.Font.Fallback); loadErr == nil {
+			fbBytes = data
+		}
+	}
+	fontR, err := renderer.NewFontRenderer(fontBytes, newSize*g.dpi, fbBytes)
 	if err != nil {
 		g.flashStatus("Font resize failed: " + err.Error())
 		return
@@ -5181,7 +5195,13 @@ func (g *Game) reloadConfig() {
 				fontBytes = data
 			}
 		}
-		fontR, fontErr := renderer.NewFontRenderer(fontBytes, newCfg.Font.Size*g.dpi)
+		var fbBytes []byte
+		if newCfg.Font.Fallback != "" {
+			if data, loadErr := os.ReadFile(newCfg.Font.Fallback); loadErr == nil {
+				fbBytes = data
+			}
+		}
+		fontR, fontErr := renderer.NewFontRenderer(fontBytes, newCfg.Font.Size*g.dpi, fbBytes)
 		if fontErr == nil {
 			g.font = fontR
 			g.renderer.SetFont(fontR)
