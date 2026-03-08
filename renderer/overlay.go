@@ -40,6 +40,14 @@ type URLInputState struct {
 	Loading bool
 }
 
+// LinkHint is a follow-mode badge mapping a letter to a link span.
+type LinkHint struct {
+	LineIdx int
+	SpanIdx int
+	URL     string
+	Label   rune
+}
+
 // MarkdownViewerState holds the rendering state for the markdown reader overlay.
 type MarkdownViewerState struct {
 	Open         bool
@@ -58,6 +66,17 @@ type MarkdownViewerState struct {
 	// HasAlt is true when an alternate view is available (e.g. llms.txt ↔ llms-full.txt).
 	// When set, the hint bar shows "Tab switch".
 	HasAlt bool
+
+	// Follow-link mode (f key).
+	FollowMode bool
+	LinkHints  []LinkHint
+
+	// IsLLMS marks this viewer as browsing llms.txt content (enables history nav).
+	IsLLMS bool
+
+	// HistoryLen / ForwardLen control hint bar display of back/forward availability.
+	HistoryLen int
+	ForwardLen int
 }
 
 // categoryGroup groups bindings under one category for rendering.
@@ -515,15 +534,35 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	titleX := panelX + (panelW-len([]rune(title))*cw)/2
 	r.font.DrawString(r.modalLayer, title, titleX, titleY, r.ui.Accent)
 
+	// Breadcrumb for history navigation.
+	if state.IsLLMS && state.HistoryLen > 0 {
+		breadcrumb := fmt.Sprintf("< %d", state.HistoryLen)
+		r.font.DrawString(r.modalLayer, breadcrumb, panelX+panelPad, titleY, r.ui.Dim)
+	}
+
 	hint := "/ search  Esc close"
-	if state.HasAlt {
-		hint = "Tab switch  " + hint
-	}
-	if state.MaxScroll > 0 {
-		hint = "j/k scroll  " + hint
-	}
-	if len(state.SearchMatches) > 0 {
-		hint = "n/N match  " + hint
+	if state.FollowMode {
+		hint = "a-z follow  Esc cancel"
+	} else {
+		if state.IsLLMS {
+			hint = "f follow  " + hint
+			if state.ForwardLen > 0 {
+				hint = "L fwd  " + hint
+			}
+			if state.HistoryLen > 0 {
+				hint = "H back  " + hint
+			}
+		}
+		hint = "Cmd+Ret pane  " + hint
+		if state.HasAlt {
+			hint = "Tab switch  " + hint
+		}
+		if state.MaxScroll > 0 {
+			hint = "j/k scroll  " + hint
+		}
+		if len(state.SearchMatches) > 0 {
+			hint = "n/N match  " + hint
+		}
 	}
 	hintX := panelRect.Max.X - panelPad - len([]rune(hint))*cw
 	r.font.DrawString(r.modalLayer, hint, hintX, titleY, r.ui.Dim)
@@ -633,6 +672,36 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 		}
 
 		drawY += rowH
+	}
+
+	// Follow-mode link badges: draw letter labels over link spans.
+	if state.FollowMode && len(state.LinkHints) > 0 {
+		badgeBg := color.RGBA{0xFF, 0xCC, 0x00, 0xFF}  // bright yellow badge
+		badgeFg := color.RGBA{0x00, 0x00, 0x00, 0xFF}  // black text on badge
+		for _, hint := range state.LinkHints {
+			if hint.LineIdx >= len(state.Lines) {
+				continue
+			}
+			lineY := hint.LineIdx*rowH - state.ScrollOffset + contentTop
+			if lineY+rowH < contentTop || lineY > contentTop+visibleContentH {
+				continue // off-screen
+			}
+			// Calculate X position of the link span.
+			line := state.Lines[hint.LineIdx]
+			sx := contentLeft + line.Indent*cw
+			for si := 0; si < hint.SpanIdx && si < len(line.Spans); si++ {
+				sx += len([]rune(line.Spans[si].Text)) * cw
+			}
+			// Draw badge: [letter] before the link text.
+			badgeStr := string(hint.Label)
+			bx := sx - 2*cw
+			if bx < contentLeft {
+				bx = sx // fallback: draw at span start
+			}
+			badgeRect := image.Rect(bx, lineY, bx+cw+2, lineY+rowH)
+			r.modalLayer.SubImage(badgeRect).(*ebiten.Image).Fill(badgeBg)
+			r.font.DrawString(r.modalLayer, badgeStr, bx+1, lineY+1, badgeFg)
+		}
 	}
 
 	// Scrollbar.

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- llms.txt browser: link following hint mode (f key) — letter badges on visible links, follows llms.txt links inline or opens external URLs in system browser
+- llms.txt browser: navigation history — Backspace/H to go back, L to go forward, breadcrumb indicator in title bar
+- llms.txt browser: Cmd+Enter sends viewer content to a persistent pane running less
+- llms.txt browser: "Send Viewer to Pane" command palette entry
+- Browser category in keybindings overlay with all new shortcuts
+- terminal.StartCmd() for launching panes with custom commands (not the user's shell)
+
 ## [0.17.0] - 2026-03-08
 
 ### Added
