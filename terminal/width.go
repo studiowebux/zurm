@@ -13,10 +13,6 @@ func RuneWidth(r rune) int {
 	if r >= 0x1F000 {
 		return 2
 	}
-	// Common symbol/emoji blocks that are double-width in terminals.
-	if r >= 0x2600 && r <= 0x27BF {
-		return 2
-	}
 	// Unicode east-asian width classification covers CJK, Hangul, fullwidth forms, etc.
 	p, _ := width.Lookup([]byte(string(r)))
 	switch p.Kind() {
