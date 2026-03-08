@@ -322,7 +322,7 @@ func (sb *ScreenBuffer) PutChar(ch rune) {
 
 	sb.clearWideOverlap(sb.CursorRow, sb.CursorCol)
 	cell := sb.SGR.toCell(ch)
-	cell.Width = uint8(w)
+	cell.Width = uint8(w) // #nosec G115 -- runewidth returns 0-2, fits in uint8
 	sb.SetCell(sb.CursorRow, sb.CursorCol, cell)
 	sb.CursorCol++
 
