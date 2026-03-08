@@ -419,14 +419,15 @@ func main() {
 		addr := fmt.Sprintf("localhost:%d", cfg.Performance.PprofPort)
 		ln, err := net.Listen("tcp", addr)
 		if err != nil {
-			log.Fatalf("pprof: cannot bind %s: %v", addr, err)
+			log.Printf("pprof: cannot bind %s: %v (skipping)", addr, err)
+		} else {
+			log.Printf("pprof: http://%s/debug/pprof/", addr)
+			go func() {
+				if err := http.Serve(ln, nil); err != nil { // #nosec G114 — pprof is localhost-only, no timeout needed
+					log.Printf("pprof server: %v", err)
+				}
+			}()
 		}
-		log.Printf("pprof: http://%s/debug/pprof/", addr)
-		go func() {
-			if err := http.Serve(ln, nil); err != nil { // #nosec G114 — pprof is localhost-only, no timeout needed
-				log.Printf("pprof server: %v", err)
-			}
-		}()
 	}
 
 	ebiten.SetWindowSize(logW, logH)
