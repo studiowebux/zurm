@@ -621,7 +621,12 @@ func (sb *ScreenBuffer) SetScrollRegion(top, bottom int) {
 	}
 	sb.ScrollTop = top
 	sb.ScrollBottom = bottom
-	sb.CursorRow = 0
+	// DECOM: cursor homes to scroll region origin, not absolute (0,0).
+	if sb.OriginMode {
+		sb.CursorRow = top
+	} else {
+		sb.CursorRow = 0
+	}
 	sb.CursorCol = 0
 }
 

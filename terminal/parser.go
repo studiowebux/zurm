@@ -249,9 +249,15 @@ func (p *Parser) escape(b byte) {
 		p.sb.savedCursorRow = p.sb.CursorRow
 		p.sb.savedCursorCol = p.sb.CursorCol
 		p.state = stateGround
-	case '8': // DECRC — restore cursor
+	case '8': // DECRC — restore cursor (clamp to current grid after resize)
 		p.sb.CursorRow = p.sb.savedCursorRow
 		p.sb.CursorCol = p.sb.savedCursorCol
+		if p.sb.CursorRow >= p.sb.Rows {
+			p.sb.CursorRow = p.sb.Rows - 1
+		}
+		if p.sb.CursorCol >= p.sb.Cols {
+			p.sb.CursorCol = p.sb.Cols - 1
+		}
 		p.state = stateGround
 	case '(', ')': // Charset designation — consume next byte
 		p.state = stateEscapeInterm
@@ -624,8 +630,13 @@ func (p *Parser) dispatchCSI(final byte, private, secondary, kittyPop bool) {
 	case 'X': // ECH — erase characters
 		n := param(0, 1)
 		for i := 0; i < n; i++ {
-			sb.SetCell(sb.CursorRow, sb.CursorCol+i, Cell{
-				Char: ' ', FG: sb.DefaultFG, BG: sb.DefaultBG,
+			col := sb.CursorCol + i
+			if col >= sb.Cols {
+				break
+			}
+			sb.clearWideOverlap(sb.CursorRow, col)
+			sb.SetCell(sb.CursorRow, col, Cell{
+				Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG,
 			})
 		}
 		sb.dirty[sb.CursorRow] = true
@@ -660,9 +671,15 @@ func (p *Parser) dispatchCSI(final byte, private, secondary, kittyPop bool) {
 	case 's': // SCP — save cursor position
 		sb.savedCursorRow = sb.CursorRow
 		sb.savedCursorCol = sb.CursorCol
-	case 'u': // RCP — restore cursor position
+	case 'u': // RCP — restore cursor position (clamp to current grid after resize)
 		sb.CursorRow = sb.savedCursorRow
 		sb.CursorCol = sb.savedCursorCol
+		if sb.CursorRow >= sb.Rows {
+			sb.CursorRow = sb.Rows - 1
+		}
+		if sb.CursorCol >= sb.Cols {
+			sb.CursorCol = sb.Cols - 1
+		}
 	case 'h': // SM — set mode (public)
 		// e.g. CSI 4 h (insert mode) — mostly ignored for now
 	case 'l': // RM — reset mode (public)
