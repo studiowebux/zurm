@@ -597,42 +597,13 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	codeBorder := color.RGBA{0x60, 0x60, 0x60, 0xFF}  // dim border for code blocks
 	tableBorder := color.RGBA{0x50, 0x50, 0x50, 0xFF} // dim border for table grid
 
-	// Build per-line match list for highlight rendering.
-	lineMatches := make(map[int][]SearchMatch, len(state.SearchMatches))
-	for _, m := range state.SearchMatches {
-		lineMatches[m.LineIdx] = append(lineMatches[m.LineIdx], m)
-	}
-	currentMatchIdx := state.SearchIdx
-	matchBg := color.RGBA{0x80, 0x80, 0x00, 0x60}   // dim yellow for matches
-	currentBg := color.RGBA{0xFF, 0xCC, 0x00, 0x80}  // bright yellow for current match
-
-	for lineIdx, line := range state.Lines {
+	for _, line := range state.Lines {
 		// HRule or table separator: draw a horizontal line.
 		if len(line.Spans) == 1 && (line.Spans[0].Style == markdown.StyleHRule || line.Spans[0].Style == markdown.StyleTableSeparator) {
 			lineY := drawY + rowH/2
 			contentImg.SubImage(image.Rect(contentLeft, lineY, contentRight, lineY+1)).(*ebiten.Image).Fill(r.ui.Border)
 			drawY += rowH
 			continue
-		}
-
-		// Search match highlights — precise per-character rectangles.
-		if matches, ok := lineMatches[lineIdx]; ok {
-			baseX := contentLeft + line.Indent*cw
-			for mi, m := range matches {
-				bg := matchBg
-				// Find absolute index of this match to compare with currentMatchIdx.
-				for ai, am := range state.SearchMatches {
-					if am.LineIdx == m.LineIdx && am.Col == m.Col && ai == currentMatchIdx {
-						bg = currentBg
-						break
-					}
-				}
-				_ = mi
-				hlX := baseX + m.Col*cw
-				hlW := m.Len * cw
-				hlRect := image.Rect(hlX, drawY, hlX+hlW, drawY+rowH)
-				contentImg.SubImage(hlRect).(*ebiten.Image).Fill(bg)
-			}
 		}
 
 		x := contentLeft + line.Indent*cw
@@ -715,6 +686,32 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 		}
 
 		drawY += rowH
+	}
+
+	// Search highlights — drawn AFTER text so they aren't overwritten by
+	// code block backgrounds, heading underlines, or other span decorations.
+	if len(state.SearchMatches) > 0 {
+		matchBg := color.RGBA{0x80, 0x80, 0x00, 0x60}
+		currentBg := color.RGBA{0xFF, 0xCC, 0x00, 0x80}
+		for i, m := range state.SearchMatches {
+			if m.LineIdx >= len(state.Lines) {
+				continue
+			}
+			lineY := contentTop + m.LineIdx*rowH - state.ScrollOffset
+			if lineY+rowH < contentTop || lineY > contentTop+visibleContentH {
+				continue
+			}
+			line := state.Lines[m.LineIdx]
+			baseX := contentLeft + line.Indent*cw
+			bg := matchBg
+			if i == state.SearchIdx {
+				bg = currentBg
+			}
+			hlX := baseX + m.Col*cw
+			hlW := m.Len * cw
+			hlRect := image.Rect(hlX, lineY, hlX+hlW, lineY+rowH)
+			contentImg.SubImage(hlRect).(*ebiten.Image).Fill(bg)
+		}
 	}
 
 	// Follow-mode link badges: draw letter labels over link spans.
