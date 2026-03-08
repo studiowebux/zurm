@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-03-08
+
+### Changed
+
+- Markdown parser replaced with goldmark (GFM extension) for robust AST-based rendering
+- Table columns are now aligned with computed max-width padding
+
+### Added
+
+- Markdown viewer: mouse wheel scrolling
+- Markdown viewer: key repeat on j/k and arrow keys for continuous scrolling
+- Markdown viewer: vim motions — gg (top), G (bottom), Ctrl+d (half-page down), Ctrl+u (half-page up)
+- Markdown viewer: strikethrough, image, task list checkbox, and table rendering styles
+
+### Fixed
+
+- Markdown viewer close leaving grey screen — added ClearPaneCache on dismiss
+- Markdown viewer content capture uses full block output range instead of visible viewport
+
 ## [0.16.1] - 2026-03-07
 
 ### Fixed

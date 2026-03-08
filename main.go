@@ -229,7 +229,8 @@ type Game struct {
 	speaker voice.Speaker
 
 	// Markdown viewer overlay state (Cmd+Shift+M).
-	mdViewerState renderer.MarkdownViewerState
+	mdViewerState  renderer.MarkdownViewerState
+	mdViewerLastG  time.Time // timestamp of last 'g' press for gg detection
 
 	// Speech-to-text via macOS SFSpeechRecognizer.
 	listener              voice.Listener
@@ -6037,7 +6038,8 @@ func (g *Game) captureMarkdownContent() string {
 	defer buf.RUnlock()
 
 	// Priority 1: last completed block output.
-	if g.blocksEnabled && len(buf.Blocks) > 0 {
+	// Blocks are always tracked by the parser regardless of blocksEnabled.
+	if len(buf.Blocks) > 0 {
 		// Find the last block with valid output range.
 		for i := len(buf.Blocks) - 1; i >= 0; i-- {
 			b := buf.Blocks[i]
@@ -6054,11 +6056,12 @@ func (g *Game) captureMarkdownContent() string {
 		return buf.TextRange(norm.StartRow, norm.EndRow)
 	}
 
-	// Priority 3: visible screen.
-	sbLen := buf.ScrollbackLen()
-	viewStart := sbLen + buf.ViewOffset
-	viewEnd := viewStart + buf.Rows - 1
-	return buf.TextRange(viewStart, viewEnd)
+	// Priority 3: if scrolled back, capture from scroll position to end
+	// of primary screen (user positioned viewport at start of content).
+	// Otherwise, capture primary screen only.
+	absStart := buf.DisplayToAbsRow(0)
+	absEnd := buf.ScrollbackLen() + buf.Rows - 1
+	return buf.TextRange(absStart, absEnd)
 }
 
 // handleMarkdownViewerInput processes keyboard input while the markdown viewer is open.
@@ -6067,6 +6070,7 @@ func (g *Game) handleMarkdownViewerInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.mdViewerState = renderer.MarkdownViewerState{}
 		g.renderer.SetLayoutDirty()
+		g.renderer.ClearPaneCache()
 		g.screenDirty = true
 		g.prevKeys[ebiten.KeyEscape] = true
 		return
@@ -6077,40 +6081,95 @@ func (g *Game) handleMarkdownViewerInput() {
 	if meta && shift && inpututil.IsKeyJustPressed(ebiten.KeyM) {
 		g.mdViewerState = renderer.MarkdownViewerState{}
 		g.renderer.SetLayoutDirty()
+		g.renderer.ClearPaneCache()
 		g.screenDirty = true
 		return
 	}
 
-	edgeKeys := []ebiten.Key{
+	rowH := g.mdViewerState.RowH
+	if rowH == 0 {
+		rowH = 16
+	}
+
+	// Keyboard scroll with key-repeat support.
+	// Initial delay: 20 frames (~333ms at 60fps), repeat every 3 frames (~50ms).
+	const repeatDelay = 20
+	const repeatInterval = 3
+
+	scrollKeys := []ebiten.Key{
 		ebiten.KeyArrowUp, ebiten.KeyArrowDown,
 		ebiten.KeyJ, ebiten.KeyK,
 		ebiten.KeyPageUp, ebiten.KeyPageDown,
 		ebiten.KeyHome, ebiten.KeyEnd,
 	}
 
-	for _, key := range edgeKeys {
-		pressed := ebiten.IsKeyPressed(key)
-		wasPressed := g.prevKeys[key]
-		if pressed && !wasPressed {
-			rowH := g.mdViewerState.RowH
-			if rowH == 0 {
-				rowH = 16
-			}
-			switch key {
-			case ebiten.KeyArrowUp, ebiten.KeyK:
-				g.mdViewerState.ScrollOffset -= rowH
-			case ebiten.KeyArrowDown, ebiten.KeyJ:
-				g.mdViewerState.ScrollOffset += rowH
-			case ebiten.KeyPageUp:
-				g.mdViewerState.ScrollOffset -= 10 * rowH
-			case ebiten.KeyPageDown:
-				g.mdViewerState.ScrollOffset += 10 * rowH
-			case ebiten.KeyHome:
+	for _, key := range scrollKeys {
+		dur := inpututil.KeyPressDuration(key)
+		if dur == 0 {
+			continue
+		}
+		fire := dur == 1 || (dur >= repeatDelay && (dur-repeatDelay)%repeatInterval == 0)
+		if !fire {
+			continue
+		}
+		switch key {
+		case ebiten.KeyArrowUp, ebiten.KeyK:
+			g.mdViewerState.ScrollOffset -= rowH
+		case ebiten.KeyArrowDown, ebiten.KeyJ:
+			g.mdViewerState.ScrollOffset += rowH
+		case ebiten.KeyPageUp:
+			g.mdViewerState.ScrollOffset -= 10 * rowH
+		case ebiten.KeyPageDown:
+			g.mdViewerState.ScrollOffset += 10 * rowH
+		case ebiten.KeyHome:
+			g.mdViewerState.ScrollOffset = 0
+		case ebiten.KeyEnd:
+			g.mdViewerState.ScrollOffset = g.mdViewerState.MaxScroll
+		}
+		g.screenDirty = true
+	}
+
+	// Vim motions: gg (top), G (bottom), Ctrl+d (half-page down), Ctrl+u (half-page up).
+	ctrl := ebiten.IsKeyPressed(ebiten.KeyControl)
+	if ctrl && inpututil.IsKeyJustPressed(ebiten.KeyD) {
+		g.mdViewerState.ScrollOffset += 15 * rowH
+		g.screenDirty = true
+	}
+	if ctrl && inpututil.IsKeyJustPressed(ebiten.KeyU) {
+		g.mdViewerState.ScrollOffset -= 15 * rowH
+		g.screenDirty = true
+	}
+	if !ctrl && inpututil.IsKeyJustPressed(ebiten.KeyG) {
+		shift := ebiten.IsKeyPressed(ebiten.KeyShift)
+		if shift {
+			// Shift+G → bottom
+			g.mdViewerState.ScrollOffset = g.mdViewerState.MaxScroll
+			g.screenDirty = true
+		} else {
+			// gg detection: two 'g' presses within 500ms.
+			now := time.Now()
+			if now.Sub(g.mdViewerLastG) < 500*time.Millisecond {
 				g.mdViewerState.ScrollOffset = 0
-			case ebiten.KeyEnd:
-				g.mdViewerState.ScrollOffset = g.mdViewerState.MaxScroll
+				g.screenDirty = true
+				g.mdViewerLastG = time.Time{} // reset
+			} else {
+				g.mdViewerLastG = now
 			}
 		}
-		g.prevKeys[key] = pressed
+	}
+
+	// Mouse wheel scroll.
+	_, wy := ebiten.Wheel()
+	if wy != 0 {
+		g.mdViewerState.ScrollOffset -= int(wy * float64(rowH) * 3)
+		g.screenDirty = true
+	}
+
+	// Clamp scroll offset.
+	if g.mdViewerState.ScrollOffset < 0 {
+		g.mdViewerState.ScrollOffset = 0
+	}
+	if g.mdViewerState.MaxScroll > 0 && g.mdViewerState.ScrollOffset > g.mdViewerState.MaxScroll {
+		g.mdViewerState.ScrollOffset = g.mdViewerState.MaxScroll
 	}
 }
