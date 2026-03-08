@@ -152,8 +152,7 @@ func (p *Parser) ground(b byte) {
 		p.sb.CursorCol = 0
 	case b == 0x0E || b == 0x0F: // SO/SI — charset switching, ignored
 		p.utf8Len = 0
-	case b >= 0x80 && b <= 0x9F: // C1 control bytes — dispatch, not UTF-8
-		p.utf8Len = 0
+	case b >= 0x80 && b <= 0x9F && p.utf8Len == 0: // C1 control bytes — only when NOT mid-UTF-8
 		switch b {
 		case 0x84: // IND — index (same as ESC D)
 			p.sb.LineFeed()
@@ -180,7 +179,7 @@ func (p *Parser) ground(b byte) {
 			p.oscBuf.Reset()
 			p.state = stateOSC
 		}
-	case b >= 0xA0: // high byte — accumulate UTF-8 multi-byte sequence
+	case b >= 0x80: // high byte — accumulate UTF-8 multi-byte sequence
 		p.utf8Buf[p.utf8Len] = b
 		p.utf8Len++
 		if utf8.FullRune(p.utf8Buf[:p.utf8Len]) {
