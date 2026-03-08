@@ -705,8 +705,9 @@ func (sb *ScreenBuffer) Resize(rows, cols int) {
 			// Fix wide char truncation at the new right edge.
 			lastCol := copyCols - 1
 			if lastCol >= 0 && lastCol < cols {
-				// Wide char truncated: first half is at lastCol but continuation would be at lastCol+1 (outside bounds or overwritten).
-				if n[r][lastCol].Width == 2 && (lastCol+1 >= cols || n[r][lastCol+1].Width != 0) {
+				// Wide char truncated: first half is at lastCol but continuation is outside the new grid.
+				// Only applies on shrink — on grow, fresh blank cells at lastCol+1 are not continuations.
+				if n[r][lastCol].Width == 2 && lastCol+1 >= cols {
 					n[r][lastCol] = Cell{Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG}
 				}
 				// Orphaned continuation at first column (from a resize that cut the parent).
