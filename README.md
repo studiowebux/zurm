@@ -34,103 +34,70 @@ Discord: https://discord.gg/BG5Erm9fNv
 
 ## Features
 
-### Rendering
-
-| Feature | Description |
-|---|---|
-| **GPU rendering** | Ebitengine offscreen compositing at native HiDPI resolution |
-| **xterm-256color** | Full 256-color and truecolor support; configurable 16-color ANSI palette |
-| **Wide character support** | CJK characters render with correct column widths. Emoji displays as boxes due to Ebiten limitations (see [docs/emoji-limitations.md](docs/emoji-limitations.md)) |
-| **Dirty-flag rendering** | Only redraws when state changes; suspends game loop after 5s unfocused (TPS drops to 1) |
-
-### Terminal
-
-| Feature | Description |
-|---|---|
-| **Independent PTYs** | Each pane owns its shell, buffer, and cursor |
-| **TUI compatibility** | Mouse reporting (X10 + SGR), alternate screen, focus events, Kitty keyboard protocol |
-| **Scrollback** | Configurable ring buffer; Shift+PgUp/Down, mouse wheel, Shift+Wheel to override PTY mouse mode |
-| **In-buffer search** | Cmd+F — incremental search across scrollback and primary screen with match navigation |
-| **Clickable URLs** | Cmd+click opens URLs detected in terminal output |
-| **Command blocks** | OSC 133 prompt/output tracking; hover to copy a command's output with one click |
-| **Text selection** | Click, double-click (word), triple-click (line), drag with auto-scroll; absolute buffer coordinates survive scrolling |
-| **Copy / paste** | Cmd+C copies selection; Cmd+V pastes with bracketed paste and NFC normalization |
-
-### Panes
-
-| Feature | Description |
-|---|---|
-| **Pane splits** | Binary tree layout — Cmd+D horizontal, Cmd+Shift+D vertical, any depth |
-| **Pane resize** | Drag dividers with the mouse or Cmd+Opt+Arrow keys (5% step) |
-| **Pane rename** | Double-click header, right-click menu, or command palette; names persist across sessions |
-| **Pane headers** | Name labels with scroll position indicator when scrolled back |
-| **Zoom pane** | Cmd+Z temporarily fullscreens the focused pane |
-| **Pane navigation** | Cmd+Arrow to focus adjacent pane; Cmd+[ / ] to cycle |
-| **Detach / move pane** | Detach pane to new tab, or move to next/previous tab (command palette or right-click menu) |
-
-### Tabs
-
-| Feature | Description |
-|---|---|
-| **Multi-tab workspace** | OSC 0/2 title updates; rename via double-click or Cmd+Shift+R |
-| **Tab pins** | Pin tabs to home-row slots (a–l) and jump instantly with Cmd+G → key |
-| **Tab switcher** | Fuzzy overlay to switch tabs by name (Cmd+Shift+T) |
-| **Tab search** | Cmd+J — fuzzy filter by tab name or CWD |
-| **Tab notes** | Cmd+Shift+N — attach a persistent text note to any tab; `*` indicator on tab bar, note shown in status bar |
-| **Tab reorder** | Cmd+Shift+←/→ or mouse drag (8px threshold) |
-| **Tab activity indicator** | Purple dot on background tabs with unseen PTY output |
-| **Tab hover popover** | Minimap preview when hovering background tabs (configurable delay and size) |
-| **Focus history** | Cmd+; — jump back through previously viewed tabs and panes (stack of 50) |
-| **Close confirmation** | Optional dialog before closing a tab or pane (configurable) |
-
-### File Explorer
-
-| Feature | Description |
-|---|---|
-| **Sidebar tree browser** | Cmd+E — `.` and `..` entries, create/rename/delete/copy operations, Finder reveal |
-| **Search filter** | `/` to filter entries (Telescope-style); flat filtered list with keyboard navigation |
-| **File drag-and-drop** | Drop files from Finder to paste shell-escaped paths into the terminal |
-
-### Overlays
-
-| Feature | Description |
-|---|---|
-| **Command palette** | Cmd+P — searchable list of all commands and shortcuts |
-| **Help overlay** | Cmd+/ — all keybindings grouped by category |
-| **Markdown viewer** | Cmd+Shift+M — reader mode for terminal markdown content with goldmark rendering, Cmd+F search with match highlighting, vim motions (gg, G, Ctrl+d/u, j/k) |
-| **Stats overlay** | Cmd+I — live TPS/FPS, goroutines, heap memory, GC pauses, tab/pane count, buffer dimensions |
-| **Right-click menu** | Context menu for copy/paste, pane management, scroll, and more |
-
-### Recording
-
-| Feature | Description |
-|---|---|
-| **Screenshot** | Cmd+Shift+S — one-shot PNG capture to ~/Pictures/zurm-screenshots/ |
-| **Screen recording** | Cmd+Shift+. — FFMPEG pipe to MP4 at 30fps to ~/Movies/zurm-recordings/; status bar indicator with elapsed time and file size |
-
-### Speech
-
-| Feature | Description |
-|---|---|
-| **Text-to-speech** | Cmd+Shift+U — read selection (or visible buffer) aloud via macOS `say`; auto-speak mode for command output; configurable voice and rate |
-| **Speech-to-text** | Cmd+Shift+Space — dictation overlay via macOS SFSpeechRecognizer; transcribed text sent to focused PTY |
-
-### Configuration
-
-| Feature | Description |
-|---|---|
-| **TOML config** | `~/.config/zurm/config.toml` — font, colors, shell, padding, scrollback, keyboard, status bar, session, voice |
-| **Config auto-bootstrap** | Writes a fully documented config on first launch with all keys and defaults |
-| **Hot-reload** | Cmd+, — reload config without restarting |
-| **Theme system** | External TOML themes in `~/.config/zurm/themes/`; switch via config reload |
-| **Font size** | Cmd+= / Cmd+- to adjust font size on the fly |
-
-### Session & Status
-
-| Feature | Description |
-|---|---|
-| **Session persistence** | Saves tab CWDs, titles, pin slots, notes, pane names, and complete pane layout (splits and ratios). Restores on relaunch with fresh shells. `--no-restore` to skip. |
-| **Status bar** | Live CWD, git branch, foreground process, scroll offset, zoom indicator, version, recording status, tab notes |
+| Category | Feature | Details |
+|---|---|---|
+| **Rendering** | GPU compositing | Ebitengine offscreen rendering at native resolution |
+| | HiDPI / Retina | Physical-pixel layout with automatic scale factor detection |
+| | Dirty-flag redraw | Only renders when state changes; TPS drops to 1 after 5s unfocused |
+| | Wide characters | CJK characters render with correct double-width columns |
+| | Font fallback chain | Multiple fonts tried in order; covers Latin, CJK, symbols |
+| **Terminal** | xterm-256color | Full 256-color and truecolor (24-bit) support |
+| | ANSI palette | Configurable 16-color palette via TOML |
+| | PTY per pane | Each pane owns its shell, buffer, and cursor independently |
+| | VT parser | Handles CSI, OSC, DCS, alternate screen, scroll regions |
+| | Kitty keyboard | Extended key protocol for unambiguous modifier detection |
+| | Mouse modes | X10 + SGR mouse reporting, focus events |
+| **Panes** | Binary tree splits | Cmd+D horizontal, Cmd+Shift+D vertical, any depth |
+| | Resize drag | Mouse drag on dividers or Cmd+Opt+Arrow (5% step) |
+| | Zoom | Cmd+Z temporarily fullscreens the focused pane |
+| | Detach / move | Detach pane to new tab or move between tabs |
+| | Headers | Name labels with scroll position indicator |
+| | Rename | Double-click header, right-click menu, or command palette |
+| | Persist | Pane names and layout survive session save/restore |
+| **Tabs** | Switcher | Cmd+Shift+T — fuzzy overlay to switch by name |
+| | Search | Cmd+J — filter by tab name or CWD |
+| | Pins | Cmd+G → home-row key (a–l) for instant tab jump |
+| | Notes | Cmd+Shift+N — persistent text note per tab; shown in status bar |
+| | Reorder | Cmd+Shift+←/→ or mouse drag |
+| | Activity indicator | Purple dot on tabs with unseen PTY output |
+| | Hover preview | Minimap popover on background tab hover |
+| | Focus history | Cmd+; — stack of 50 previously viewed tabs/panes |
+| **File Explorer** | Tree sidebar | Cmd+E — browse, create, rename, delete, copy path |
+| | Finder reveal | Open file location in macOS Finder |
+| | Search filter | / to filter entries (Telescope-style flat list) |
+| **Selection** | Click / word / line | Click, double-click, triple-click with drag |
+| | Auto-scroll | Selection drag past viewport edges scrolls automatically |
+| | Wide char aware | Selection handles double-width characters correctly |
+| | Cmd+C / Cmd+V | Copy selection, paste with bracketed paste + NFC normalization |
+| **Scrollback** | Ring buffer | Configurable size (default 10,000 lines) |
+| | Search | Cmd+F — incremental search across scrollback + primary screen |
+| | Mouse wheel | Scroll through history; Shift+Wheel overrides PTY mouse mode |
+| **URLs & Blocks** | Cmd+click URLs | Opens detected URLs in the default browser |
+| | OSC 133 blocks | Command prompt/output tracking via shell hooks |
+| | Block hover copy | Hover a command block to copy its output; elapsed timer shown |
+| **Markdown** | Reader mode | Cmd+Shift+M — renders terminal content as markdown via goldmark |
+| | Search | Cmd+F with match highlighting inside the viewer |
+| | Vim motions | gg, G, Ctrl+d/u, j/k navigation |
+| **llms.txt** | Browser | Cmd+L — fetch and display llms.txt from any domain |
+| | Hint-mode links | Follow links by label, keyboard-driven navigation |
+| | History nav | Back/forward through browsed pages |
+| | Send to pane | Pipe content from llms.txt browser to the focused terminal |
+| **Recording** | Screenshot | Cmd+Shift+S — PNG capture to ~/Pictures/zurm-screenshots/ |
+| | Screen recording | Cmd+Shift+. — FFMPEG MP4 at 30fps to ~/Movies/zurm-recordings/ |
+| | Status indicator | Elapsed time and file size shown in status bar while recording |
+| **Speech** | Text-to-speech | Cmd+Shift+U — read selection aloud via macOS `say`; auto-speak mode |
+| | Speech-to-text | Cmd+Shift+Space — dictation via SFSpeechRecognizer; text sent to PTY |
+| **Config** | TOML | `~/.config/zurm/config.toml` — auto-generated with defaults on first launch |
+| | Hot-reload | Cmd+, — reload config without restarting |
+| | Theme system | External TOML themes in `~/.config/zurm/themes/` |
+| | Font size adjust | Cmd+= / Cmd+- on the fly |
+| **Session** | Save / restore | Tabs, panes, layout, CWDs, pins, notes — all persisted. `--no-restore` to skip |
+| | Auto-save | Optional automatic session save on quit |
+| **Status Bar** | Live indicators | CWD, git branch, process, scroll offset, zoom, recording, version |
+| **macOS** | .app bundle | ARM64 build via GitHub Actions |
+| | DMG distribution | Drag-to-install disk image |
+| | Gatekeeper | `xattr -d com.apple.quarantine` or right-click → Open |
+| | Left Option as Meta | Configurable; right Option composes macOS characters |
 
 ## Installation
 
