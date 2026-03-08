@@ -77,6 +77,7 @@ func AllCommands() []Command {
 		{Name: "Show Keybindings", Shortcut: "Cmd+/"},
 		{Name: "Command Palette", Shortcut: "Cmd+P"},
 		{Name: "Markdown Reader Mode", Shortcut: "Cmd+Shift+M"},
+		{Name: "Open llms.txt", Shortcut: "Cmd+L"},
 		// Config
 		{Name: "Reload Config", Shortcut: "Cmd+,"},
 		// App

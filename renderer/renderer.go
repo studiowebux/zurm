@@ -192,7 +192,7 @@ func (r *Renderer) StatusBarHeight() int {
 }
 
 // DrawAll renders the tab bar, all panes, status bar, and any active UI overlays onto screen.
-func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int, focused *pane.Pane, zoomed bool, menu *MenuState, overlay *OverlayState, confirm *ConfirmState, search *SearchState, statusBar *StatusBarState, tabSwitcher *TabSwitcherState, palette *PaletteState, paletteEntries []PaletteEntry, fileExplorer *FileExplorerState, tabSearch *TabSearchState, stats *StatsState, tabHover *TabHoverState, dictation *DictationState, mdViewer *MarkdownViewerState) {
+func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int, focused *pane.Pane, zoomed bool, menu *MenuState, overlay *OverlayState, confirm *ConfirmState, search *SearchState, statusBar *StatusBarState, tabSwitcher *TabSwitcherState, palette *PaletteState, paletteEntries []PaletteEntry, fileExplorer *FileExplorerState, tabSearch *TabSearchState, stats *StatsState, tabHover *TabHoverState, dictation *DictationState, mdViewer *MarkdownViewerState, urlInput *URLInputState, hintMode bool) {
 	if r.offscreen == nil {
 		return
 	}
@@ -215,7 +215,7 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 		r.drawDividers(layout)
 	}
 
-	r.drawTabBar(tabs, activeTab)
+	r.drawTabBar(tabs, activeTab, hintMode)
 
 	// Reset block hover each frame so stale state doesn't linger when the
 	// cursor moves off a block or blocks are disabled.
@@ -364,6 +364,9 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 	// Markdown viewer overlay — same layer as help overlay.
 	r.drawMarkdownViewer(mdViewer)
 
+	// URL input overlay — drawn above markdown viewer.
+	r.drawURLInput(urlInput)
+
 	// Confirm dialog drawn above overlay.
 	if confirm != nil {
 		r.drawConfirm(confirm)
@@ -398,7 +401,8 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 }
 
 // drawTabBar renders the tab strip at the top of the offscreen buffer.
-func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int) {
+// When hintMode is true, tab number badges (1-9) are overlaid for discoverability.
+func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int, hintMode bool) {
 	tabBarH := r.TabBarHeight()
 	physW := r.offscreen.Bounds().Dx()
 	numTabs := len(tabs)
@@ -506,6 +510,20 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int) {
 				dotColor = r.bellColor
 			}
 			r.offscreen.SubImage(dotRect).(*ebiten.Image).Fill(dotColor)
+		}
+
+		// Hint mode: overlay tab number badge (1-9) when Cmd is held.
+		if hintMode && i < 9 {
+			badge := fmt.Sprintf("%d", i+1)
+			badgeW := r.font.CellW + 6
+			badgeH := r.font.CellH + 4
+			badgeX := x + (tabW-badgeW)/2
+			badgeY := (tabBarH - badgeH) / 2
+			badgeRect := image.Rect(badgeX, badgeY, badgeX+badgeW, badgeY+badgeH)
+			r.offscreen.SubImage(badgeRect).(*ebiten.Image).Fill(r.cursorColor)
+			textX := badgeX + (badgeW-r.font.CellW)/2
+			textY := badgeY + 2
+			r.font.DrawString(r.offscreen, badge, textX, textY, config.ParseHexColor(r.cfg.Colors.Background))
 		}
 	}
 }
