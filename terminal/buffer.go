@@ -99,13 +99,15 @@ type ScreenBuffer struct {
 	SGR SGRState
 
 	// Alternate screen support.
-	altActive      bool
-	altCells       [][]Cell
-	altWrapped     []bool
-	altCursorRow   int
-	altCursorCol   int
-	savedCursorRow int
-	savedCursorCol int
+	altActive        bool
+	altCells         [][]Cell
+	altWrapped       []bool
+	altCursorRow     int
+	altCursorCol     int
+	savedCursorRow   int
+	savedCursorCol   int
+	savedScrollTop   int
+	savedScrollBot   int
 
 	// 16-color ANSI palette.
 	Palette [16]color.RGBA
@@ -638,8 +640,11 @@ func (sb *ScreenBuffer) EnableAltScreen() {
 	}
 	sb.savedCursorRow = sb.CursorRow
 	sb.savedCursorCol = sb.CursorCol
+	sb.savedScrollTop = sb.ScrollTop
+	sb.savedScrollBot = sb.ScrollBottom
 	sb.altCells = makeCells(sb.Rows, sb.Cols, sb.DefaultFG, sb.DefaultBG)
-	sb.altWrapped = sb.wrapped
+	sb.altWrapped = make([]bool, len(sb.wrapped))
+	copy(sb.altWrapped, sb.wrapped)
 	sb.wrapped = make([]bool, sb.Rows)
 	sb.altCursorRow = 0
 	sb.altCursorCol = 0
@@ -676,8 +681,15 @@ func (sb *ScreenBuffer) DisableAltScreen() {
 	if sb.CursorCol >= sb.Cols {
 		sb.CursorCol = sb.Cols - 1
 	}
-	sb.ScrollTop = 0
-	sb.ScrollBottom = sb.Rows - 1
+	// Restore primary scroll region, clamped to current dimensions.
+	sb.ScrollTop = sb.savedScrollTop
+	sb.ScrollBottom = sb.savedScrollBot
+	if sb.ScrollBottom >= sb.Rows {
+		sb.ScrollBottom = sb.Rows - 1
+	}
+	if sb.ScrollTop >= sb.ScrollBottom {
+		sb.ScrollTop = 0
+	}
 	for r := range sb.dirty {
 		sb.dirty[r] = true
 	}
