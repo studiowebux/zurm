@@ -5177,8 +5177,7 @@ func (g *Game) reloadConfig() {
 	}
 	config.ApplyTheme(newCfg, meta)
 
-	oldFontSize := g.cfg.Font.Size
-	oldFontFile := g.cfg.Font.File
+	oldFont := g.cfg.Font
 	g.cfg = newCfg
 
 	// Propagate colors to renderer and all terminal panes.
@@ -5190,7 +5189,7 @@ func (g *Game) reloadConfig() {
 	}
 
 	// Font reload — skip if recording is active (dimensions would become stale).
-	if (newCfg.Font.Size != oldFontSize || newCfg.Font.File != oldFontFile) && g.recorder != nil && !g.recorder.Active() {
+	if (newCfg.Font.Size != oldFont.Size || newCfg.Font.File != oldFont.File) && g.recorder != nil && !g.recorder.Active() {
 		fontBytes := jetbrainsMono
 		if newCfg.Font.File != "" {
 			if data, loadErr := os.ReadFile(newCfg.Font.File); loadErr == nil {
@@ -5210,6 +5209,9 @@ func (g *Game) reloadConfig() {
 			}
 			// Restore active tab layout pointer.
 			g.layout = g.tabs[g.activeTab].Layout
+		} else {
+			// Rollback font config to match the actual font renderer.
+			g.cfg.Font = oldFont
 		}
 	}
 
