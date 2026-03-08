@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"image"
+	"io"
 	"io/fs"
 	"log"
 	"net"
@@ -237,6 +238,21 @@ type Game struct {
 	// Markdown viewer overlay state (Cmd+Shift+M).
 	mdViewerState  renderer.MarkdownViewerState
 	mdViewerLastG  time.Time // timestamp of last 'g' press for gg detection
+
+	// llms.txt URL input overlay state (Cmd+L).
+	urlInputState    renderer.URLInputState
+	llmsFetchCh      chan llmsFetchResult
+	llmsShort        string // cached /llms.txt content
+	llmsFull         string // cached /llms-full.txt content
+	llmsDomain       string // domain of the last fetch
+	llmsViewingFull  bool   // true when showing /llms-full.txt
+
+	// Key repeat state for URL input backspace.
+	urlRepeatKey    ebiten.Key
+	urlRepeatActive bool
+	urlRepeatStart  time.Time
+	urlRepeatLast   time.Time
+	urlRepeatAlt    bool
 
 	// Speech-to-text via macOS SFSpeechRecognizer.
 	listener              voice.Listener
@@ -574,6 +590,7 @@ func (g *Game) Update() error {
 	g.drainBell()
 	g.drainBlockDone()
 	g.drainGitBranch()
+	g.drainLLMSFetch()
 	g.drainForeground()
 	g.pollStatusOnOutput()
 	g.recomputeSearch()
@@ -669,7 +686,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.renderer.DrawAll(screen, g.tabs, g.activeTab, g.focused, g.zoomed,
 		&g.menuState, &g.overlayState, &g.confirmState, &g.searchState, &g.statusBarState, &g.tabSwitcherState,
 		&g.paletteState, g.paletteEntries, &g.fileExplorerState, &g.tabSearchState, &g.statsState, &g.tabHoverState,
-		&g.dictationState, &g.mdViewerState)
+		&g.dictationState, &g.mdViewerState, &g.urlInputState)
 	g.screenDirty = false
 	g.lastClockSec = time.Now().Unix()
 
@@ -781,6 +798,13 @@ func (g *Game) handleInput() {
 	if g.mdViewerState.Open {
 		g.screenDirty = true
 		g.handleMarkdownViewerInput()
+		return
+	}
+
+	// When the URL input overlay is open, route input to URL input handling.
+	if g.urlInputState.Open {
+		g.screenDirty = true
+		g.handleURLInputInput()
 		return
 	}
 
@@ -1031,6 +1055,10 @@ func (g *Game) handleInput() {
 			case meta && shift && key == ebiten.KeyM:
 				// Cmd+Shift+M — markdown reader mode.
 				g.openMarkdownViewer()
+
+			case meta && !shift && key == ebiten.KeyL:
+				// Cmd+L — open llms.txt browser.
+				g.openURLInput()
 
 			// Tab management.
 			case meta && shift && key == ebiten.KeyT:
@@ -1476,6 +1504,15 @@ type gitInfo struct {
 	Staged  int
 	Ahead   int
 	Behind  int
+}
+
+// llmsFetchResult is the result of an async llms.txt HTTP fetch.
+// Both files are fetched in parallel; either may be empty if unavailable.
+type llmsFetchResult struct {
+	Short  string // /llms.txt content (may be empty)
+	Full   string // /llms-full.txt content (may be empty)
+	Domain string
+	Err    error
 }
 
 // drainCwd reads the latest CWD from the focused pane's OSC 7 channel.
@@ -5259,6 +5296,7 @@ func (g *Game) buildPalette() {
 		g.toggleOverlay,
 		g.openPalette,
 		g.openMarkdownViewer,
+		g.openURLInput,
 		// Config
 		g.reloadConfig,
 		// App
@@ -6061,6 +6099,195 @@ func (g *Game) openMarkdownViewerWithContent(content, title string) {
 	g.screenDirty = true
 }
 
+// openURLInput opens the llms.txt URL input overlay.
+func (g *Game) openURLInput() {
+	g.urlInputState = renderer.URLInputState{Open: true}
+	g.screenDirty = true
+}
+
+// handleURLInputInput processes keyboard input while the URL input overlay is open.
+func (g *Game) handleURLInputInput() {
+	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
+
+	// ESC: close overlay (also cancels any pending fetch).
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.urlInputState = renderer.URLInputState{}
+		g.llmsFetchCh = nil
+		g.urlRepeatActive = false
+		g.prevKeys[ebiten.KeyEscape] = true
+		return
+	}
+
+	// While loading, ignore all other input.
+	if g.urlInputState.Loading {
+		return
+	}
+
+	ti := &TextInput{Text: g.urlInputState.Query}
+
+	// Backspace with key repeat (same pattern as rename/note input).
+	backspacePressed := ebiten.IsKeyPressed(ebiten.KeyBackspace)
+	if backspacePressed && !meta {
+		now := time.Now()
+		if !g.urlRepeatActive || g.urlRepeatKey != ebiten.KeyBackspace {
+			g.urlRepeatActive = true
+			g.urlRepeatKey = ebiten.KeyBackspace
+			g.urlRepeatStart = now
+			g.urlRepeatLast = now
+			g.urlRepeatAlt = alt
+			if alt {
+				ti.DeleteWord()
+			} else {
+				ti.DeleteLastChar()
+			}
+			g.urlInputState.Query = ti.Text
+		} else if now.Sub(g.urlRepeatStart) >= keyRepeatDelay &&
+			now.Sub(g.urlRepeatLast) >= keyRepeatInterval {
+			g.urlRepeatLast = now
+			if g.urlRepeatAlt {
+				ti.DeleteWord()
+			} else {
+				ti.DeleteLastChar()
+			}
+			g.urlInputState.Query = ti.Text
+		}
+	} else {
+		if g.urlRepeatKey == ebiten.KeyBackspace {
+			g.urlRepeatActive = false
+		}
+	}
+
+	// Edge-triggered keys: Enter, Cmd+V.
+	edgeKeys := []ebiten.Key{
+		ebiten.KeyEnter,
+		ebiten.KeyNumpadEnter,
+		ebiten.KeyV,
+	}
+	for _, key := range edgeKeys {
+		pressed := ebiten.IsKeyPressed(key)
+		wasPressed := g.prevKeys[key]
+		if pressed && !wasPressed {
+			switch key {
+			case ebiten.KeyEnter, ebiten.KeyNumpadEnter:
+				q := strings.TrimSpace(g.urlInputState.Query)
+				if q != "" {
+					g.startLLMSFetch(q)
+				}
+			case ebiten.KeyV:
+				if meta {
+					out, err := exec.Command("pbpaste").Output()
+					if err == nil && len(out) > 0 {
+						// Take first line only, trim whitespace.
+						line := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+						g.urlInputState.Query += line
+					}
+				}
+			}
+		}
+		g.prevKeys[key] = pressed
+	}
+
+	// Printable character input.
+	if !meta {
+		for _, r := range ebiten.AppendInputChars(nil) {
+			if r >= 0x20 && r != 0x7f {
+				g.urlInputState.Query += string(r)
+			}
+		}
+	}
+}
+
+// startLLMSFetch initiates an async HTTP fetch for both /llms.txt and /llms-full.txt
+// from the given domain. Both are fetched in parallel; either may be empty.
+func (g *Game) startLLMSFetch(domain string) {
+	// Strip protocol prefix, known paths, and trailing slash.
+	domain = strings.TrimPrefix(domain, "https://")
+	domain = strings.TrimPrefix(domain, "http://")
+	domain = strings.TrimRight(domain, "/")
+	domain = strings.TrimSuffix(domain, "/llms.txt")
+	domain = strings.TrimSuffix(domain, "/llms-full.txt")
+
+	g.urlInputState.Loading = true
+	ch := make(chan llmsFetchResult, 1)
+	g.llmsFetchCh = ch
+
+	go func() {
+		client := &http.Client{Timeout: 10 * time.Second}
+		type partial struct {
+			body string
+			ok   bool
+		}
+
+		fetch := func(path string) partial {
+			resp, err := client.Get("https://" + domain + path) // #nosec G107 — user-provided URL, intentional
+			if err != nil {
+				return partial{}
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				return partial{}
+			}
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return partial{}
+			}
+			return partial{body: string(body), ok: true}
+		}
+
+		shortCh := make(chan partial, 1)
+		fullCh := make(chan partial, 1)
+		go func() { shortCh <- fetch("/llms.txt") }()
+		go func() { fullCh <- fetch("/llms-full.txt") }()
+
+		short := <-shortCh
+		full := <-fullCh
+
+		if !short.ok && !full.ok {
+			ch <- llmsFetchResult{Err: fmt.Errorf("no llms.txt found on %s", domain), Domain: domain}
+			return
+		}
+
+		ch <- llmsFetchResult{Short: short.body, Full: full.body, Domain: domain}
+	}()
+}
+
+// drainLLMSFetch reads a completed async llms.txt fetch result when available.
+func (g *Game) drainLLMSFetch() {
+	if g.llmsFetchCh == nil {
+		return
+	}
+	select {
+	case result := <-g.llmsFetchCh:
+		g.urlInputState = renderer.URLInputState{}
+		g.llmsFetchCh = nil
+		g.screenDirty = true
+
+		if result.Err != nil {
+			g.flashStatus("llms.txt: " + result.Err.Error())
+			return
+		}
+
+		// Cache both results for Tab switching.
+		g.llmsShort = result.Short
+		g.llmsFull = result.Full
+		g.llmsDomain = result.Domain
+		g.llmsViewingFull = false
+
+		// Show /llms.txt if available, otherwise /llms-full.txt.
+		content := result.Short
+		title := "llms.txt — " + result.Domain
+		if content == "" {
+			content = result.Full
+			title = "llms-full.txt — " + result.Domain
+			g.llmsViewingFull = true
+		}
+		g.openMarkdownViewerWithContent(content, title)
+		g.mdViewerState.HasAlt = result.Short != "" && result.Full != ""
+	default:
+	}
+}
+
 // captureMarkdownContent extracts text from the terminal for markdown viewing.
 // Priority: last block output > active selection > visible screen.
 func (g *Game) captureMarkdownContent() string {
@@ -6125,6 +6352,18 @@ func (g *Game) handleMarkdownViewerInput() {
 		g.renderer.SetLayoutDirty()
 		g.renderer.ClearPaneCache()
 		g.screenDirty = true
+		return
+	}
+
+	// Tab — switch between llms.txt and llms-full.txt when both are available.
+	if inpututil.IsKeyJustPressed(ebiten.KeyTab) && g.llmsShort != "" && g.llmsFull != "" {
+		g.llmsViewingFull = !g.llmsViewingFull
+		if g.llmsViewingFull {
+			g.openMarkdownViewerWithContent(g.llmsFull, "llms-full.txt — "+g.llmsDomain)
+		} else {
+			g.openMarkdownViewerWithContent(g.llmsShort, "llms.txt — "+g.llmsDomain)
+		}
+		g.mdViewerState.HasAlt = true
 		return
 	}
 
@@ -6233,16 +6472,18 @@ func (g *Game) handleMarkdownViewerInput() {
 
 // handleMarkdownSearchInput processes keyboard input while the search bar is active.
 func (g *Game) handleMarkdownSearchInput() {
-	// ESC — close search bar.
+	shift := ebiten.IsKeyPressed(ebiten.KeyShift)
+
+	// ESC — close search bar (matches stay visible for n/N in normal mode).
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.mdViewerState.SearchOpen = false
 		g.screenDirty = true
 		return
 	}
 
-	// Enter — jump to next match; Shift+Enter — previous.
-	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
-		if ebiten.IsKeyPressed(ebiten.KeyShift) {
+	// Enter/n — next match; Shift+Enter/N — previous match.
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyN) {
+		if shift {
 			g.mdViewerSearchPrev()
 		} else {
 			g.mdViewerSearchNext()
@@ -6261,10 +6502,18 @@ func (g *Game) handleMarkdownSearchInput() {
 		return
 	}
 
-	// Text input.
+	// Text input — filter out n/N when navigating matches to avoid typing them.
 	runes := ebiten.AppendInputChars(nil)
 	if len(runes) > 0 {
-		g.mdViewerState.SearchQuery += string(runes)
+		for _, r := range runes {
+			// Skip 'n' and 'N' when they were consumed by match navigation above.
+			if (r == 'n' || r == 'N') && len(g.mdViewerState.SearchMatches) > 0 {
+				continue
+			}
+			if r >= 0x20 && r != 0x7f {
+				g.mdViewerState.SearchQuery += string(r)
+			}
+		}
 		g.mdViewerUpdateSearch()
 		g.screenDirty = true
 	}

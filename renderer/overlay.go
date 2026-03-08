@@ -33,6 +33,13 @@ type DictationState struct {
 	Transcript string // latest interim or final transcript text
 }
 
+// URLInputState holds the rendering state for the llms.txt URL input overlay.
+type URLInputState struct {
+	Open    bool
+	Query   string
+	Loading bool
+}
+
 // MarkdownViewerState holds the rendering state for the markdown reader overlay.
 type MarkdownViewerState struct {
 	Open         bool
@@ -47,6 +54,10 @@ type MarkdownViewerState struct {
 	SearchQuery   string
 	SearchMatches []int // line indices that contain a match
 	SearchIdx     int   // current match index (-1 = none)
+
+	// HasAlt is true when an alternate view is available (e.g. llms.txt ↔ llms-full.txt).
+	// When set, the hint bar shows "Tab switch".
+	HasAlt bool
 }
 
 // categoryGroup groups bindings under one category for rendering.
@@ -505,6 +516,9 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	r.font.DrawString(r.modalLayer, title, titleX, titleY, r.ui.Accent)
 
 	hint := "/ search  Esc close"
+	if state.HasAlt {
+		hint = "Tab switch  " + hint
+	}
 	if state.MaxScroll > 0 {
 		hint = "j/k scroll  " + hint
 	}
@@ -661,6 +675,75 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 			r.font.DrawString(r.modalLayer, noMatch, nmX, barY+4, r.ui.Dim)
 		}
 	}
+}
+
+// drawURLInput renders a centered URL input dialog for the llms.txt browser.
+func (r *Renderer) drawURLInput(state *URLInputState) {
+	if state == nil || !state.Open {
+		return
+	}
+
+	physW := r.modalLayer.Bounds().Dx()
+	physH := r.modalLayer.Bounds().Dy()
+
+	// Semi-transparent backdrop.
+	if r.overlayBg == nil {
+		r.overlayBg = ebiten.NewImage(1, 1)
+	}
+	r.overlayBg.Fill(r.ui.Backdrop)
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Scale(float64(physW), float64(physH))
+	r.modalLayer.DrawImage(r.overlayBg, op)
+
+	cw := r.font.CellW
+	ch := r.font.CellH
+
+	title := "Open llms.txt"
+	hint := "[Enter] fetch    [Esc] cancel"
+	inputText := state.Query + "_"
+	if state.Loading {
+		inputText = state.Query
+		hint = "Fetching..."
+	}
+
+	// Panel width = widest line.
+	innerW := len([]rune(title))
+	if l := len([]rune(hint)); l > innerW {
+		innerW = l
+	}
+	if l := len([]rune(inputText)) + 2; l > innerW {
+		innerW = l
+	}
+	if innerW < 40 {
+		innerW = 40
+	}
+
+	panelPad := cw
+	panelW := innerW*cw + panelPad*2
+	panelH := ch*6 + panelPad*2
+	panelX := (physW - panelW) / 2
+	panelY := (physH - panelH) / 2
+	panelRect := image.Rect(panelX, panelY, panelX+panelW, panelY+panelH)
+
+	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(r.ui.PanelBg)
+	r.drawOverlayBorder(panelRect)
+
+	// Title (centered, accent color).
+	titleX := panelX + (panelW-len([]rune(title))*cw)/2
+	r.font.DrawString(r.modalLayer, title, titleX, panelY+panelPad, r.ui.Accent)
+
+	// Input field with HoverBg background.
+	inputY := panelY + panelPad + ch*2
+	inputRect := image.Rect(panelX+panelPad, inputY, panelX+panelW-panelPad, inputY+ch+6)
+	r.modalLayer.SubImage(inputRect).(*ebiten.Image).Fill(r.ui.HoverBg)
+	r.drawOverlayBorder(inputRect)
+	r.font.DrawString(r.modalLayer, inputText, panelX+panelPad+cw/2, inputY+3, r.ui.Fg)
+
+	// Hint line (dim).
+	hintColor := r.ui.Dim
+	hintY := panelY + panelPad + ch*4
+	hintX := panelX + (panelW-len([]rune(hint))*cw)/2
+	r.font.DrawString(r.modalLayer, hint, hintX, hintY, hintColor)
 }
 
 // drawOverlayBorder draws a 1px border around rect.
