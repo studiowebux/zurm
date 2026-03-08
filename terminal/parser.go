@@ -108,7 +108,7 @@ func (p *Parser) consume(b byte) {
 		} else if b == 0x1B { // ESC — start of ESC \ (7-bit ST); dispatch now, consume '\' next
 			p.dispatchDCS()
 			p.state = stateIgnore
-		} else {
+		} else if p.dcsBuf.Len() < 4096 {
 			p.dcsBuf.WriteByte(b)
 		}
 	case stateIgnore:
@@ -352,7 +352,9 @@ func (p *Parser) osc(b byte) {
 		p.dispatchOSC(p.oscBuf.String())
 		p.state = stateIgnore
 	default:
-		p.oscBuf.WriteByte(b)
+		if p.oscBuf.Len() < 4096 {
+			p.oscBuf.WriteByte(b)
+		}
 	}
 }
 
@@ -537,17 +539,25 @@ func (p *Parser) dispatchCSI(final byte, private, secondary, kittyPop bool) {
 	}
 
 	switch final {
-	case 'A': // CUU — cursor up
+	case 'A': // CUU — cursor up (clamp to scroll top when inside region)
 		n := param(0, 1)
-		sb.CursorRow -= n
-		if sb.CursorRow < 0 {
-			sb.CursorRow = 0
+		top := 0
+		if sb.CursorRow >= sb.ScrollTop && sb.CursorRow <= sb.ScrollBottom {
+			top = sb.ScrollTop
 		}
-	case 'B': // CUD — cursor down
+		sb.CursorRow -= n
+		if sb.CursorRow < top {
+			sb.CursorRow = top
+		}
+	case 'B': // CUD — cursor down (clamp to scroll bottom when inside region)
 		n := param(0, 1)
+		bot := sb.Rows - 1
+		if sb.CursorRow >= sb.ScrollTop && sb.CursorRow <= sb.ScrollBottom {
+			bot = sb.ScrollBottom
+		}
 		sb.CursorRow += n
-		if sb.CursorRow >= sb.Rows {
-			sb.CursorRow = sb.Rows - 1
+		if sb.CursorRow > bot {
+			sb.CursorRow = bot
 		}
 	case 'C': // CUF — cursor forward
 		n := param(0, 1)
@@ -880,6 +890,9 @@ func parseParams(s string) []int {
 		v, err := strconv.Atoi(part)
 		if err != nil {
 			v = 0
+		}
+		if v > 65535 {
+			v = 65535
 		}
 		out = append(out, v)
 	}
