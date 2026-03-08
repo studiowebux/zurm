@@ -1,3 +1,8 @@
+---
+title: Emoji Limitations
+description: Technical details on emoji rendering support and limitations.
+---
+
 # Emoji Rendering Limitations
 
 ## Summary

@@ -139,38 +139,9 @@ go build -o zurm .
 
 ## Getting Started
 
-Config file: `~/.config/zurm/config.toml` — created automatically on first launch.
+Config file: `~/.config/zurm/config.toml` — created automatically on first launch with all defaults.
 
-```toml
-[font]
-size = 15
-
-[window]
-columns = 120
-rows = 35
-padding = 4
-
-[colors]
-background = "#0F0F18"
-foreground = "#E8E8F0"
-cursor     = "#A855F7"
-border     = "#1C1C2E"
-
-[shell]
-program = "/bin/zsh"
-args    = ["-l"]
-
-[scrollback]
-lines = 10000
-
-[keyboard]
-left_option_as_meta = true  # left Option sends ESC sequences; right Option composes macOS chars
-
-[session]
-enabled           = true   # save/restore session on quit/launch
-restore_on_launch = true
-auto_save         = false  # automatically save session on quit (set true to enable)
-```
+A full annotated example is available at [`config.example.toml`](config.example.toml).
 
 Shell hooks for command blocks (OSC 133) are installed via the command palette: `Cmd+P` → "Install shell hooks".
 
@@ -179,6 +150,42 @@ All keybindings are discoverable in-app via `Cmd+/` (help overlay) or `Cmd+P` (c
 ## Documentation
 
 https://zurm.dev
+
+## Optional Fonts
+
+zurm ships with JetBrains Mono embedded. For CJK characters, emoji, Nerd Font symbols, and braille, add fallback fonts to the `[font]` section in your config:
+
+```toml
+[font]
+fallbacks = [
+  "/Users/you/Library/Fonts/NotoSansMonoCJKsc-Regular.otf",
+  "/Users/you/Library/Fonts/NotoEmoji-Regular.ttf",
+  "/Users/you/Library/Fonts/SymbolsNerdFontMono-Regular.ttf",
+  "/Users/you/Library/Fonts/NotoSansSymbols2-Regular.ttf",
+]
+```
+
+Fonts are tried in order when a glyph is missing from the primary font. Download them once:
+
+```bash
+# CJK (~16 MB)
+curl -sL "https://github.com/googlefonts/noto-cjk/raw/main/Sans/Mono/NotoSansMonoCJKsc-Regular.otf" \
+  -o ~/Library/Fonts/NotoSansMonoCJKsc-Regular.otf
+
+# Monochrome emoji (~2 MB)
+curl -sL "https://github.com/google/fonts/raw/main/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf" \
+  -o ~/Library/Fonts/NotoEmoji-Regular.ttf
+
+# Nerd Font symbols (~2.4 MB)
+curl -sL "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.4.0/NerdFontsSymbolsOnly.tar.xz" \
+  | tar xJ -C ~/Library/Fonts/ SymbolsNerdFontMono-Regular.ttf
+
+# Braille + extra symbols (~1.2 MB)
+curl -sL "https://github.com/google/fonts/raw/main/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf" \
+  -o ~/Library/Fonts/NotoSansSymbols2-Regular.ttf
+```
+
+Color emoji (Apple Color Emoji, Twemoji) are not supported — Ebitengine does not render color font formats. Monochrome emoji via Noto Emoji work fine.
 
 ## Contributions
 
