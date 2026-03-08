@@ -259,6 +259,56 @@ func TestResize_OrphanedContinuationAtCol0(t *testing.T) {
 	}
 }
 
+func TestPutChar_Emoji(t *testing.T) {
+	buf := newTestBuffer(2, 10)
+	buf.PutChar('😀') // SMP emoji — width 2
+
+	cell := buf.GetCell(0, 0)
+	if cell.Char != '😀' || cell.Width != 2 {
+		t.Errorf("emoji first cell: got Char=%U Width=%d, want U+1F600/2", cell.Char, cell.Width)
+	}
+	cont := buf.GetCell(0, 1)
+	if cont.Width != 0 {
+		t.Errorf("emoji continuation: got Width=%d, want 0", cont.Width)
+	}
+	if buf.CursorCol != 2 {
+		t.Errorf("cursor after emoji: got %d, want 2", buf.CursorCol)
+	}
+}
+
+func TestTextRange_SkipsContinuation(t *testing.T) {
+	buf := newTestBuffer(1, 10)
+	buf.PutChar('A')
+	buf.PutChar('中')
+	buf.PutChar('B')
+
+	text := buf.TextRange(0, 0)
+	want := "A中B\n"
+	if text != want {
+		t.Errorf("TextRange got %q, want %q", text, want)
+	}
+}
+
+func TestSearchAll_WideChar(t *testing.T) {
+	buf := newTestBuffer(1, 10)
+	buf.PutChar('A')
+	buf.PutChar('中') // cols 1-2
+	buf.PutChar('B')  // col 3
+
+	matches := buf.SearchAll("中")
+	if len(matches) != 1 {
+		t.Fatalf("SearchAll: got %d matches, want 1", len(matches))
+	}
+	m := matches[0]
+	if m.Col != 1 {
+		t.Errorf("SearchAll: match col = %d, want 1", m.Col)
+	}
+	// Span should cover cols 1-2 (the wide char + continuation).
+	if m.Len != 2 {
+		t.Errorf("SearchAll: match len = %d, want 2", m.Len)
+	}
+}
+
 func TestRuneWidth(t *testing.T) {
 	tests := []struct {
 		name string

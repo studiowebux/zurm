@@ -5967,7 +5967,11 @@ func (g *Game) getRecentBufferText(maxLines int) string {
 		absRow := g.focused.Term.Buf.DisplayToAbsRow(r)
 		var line strings.Builder
 		for c := 0; c < cols; c++ {
-			ch := g.focused.Term.Buf.GetAbsCell(absRow, c).Char
+			cell := g.focused.Term.Buf.GetAbsCell(absRow, c)
+			if cell.Width == 0 {
+				continue
+			}
+			ch := cell.Char
 			if ch == 0 {
 				ch = ' '
 			}
