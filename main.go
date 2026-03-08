@@ -211,6 +211,7 @@ type Game struct {
 
 	// screenshotPending is set by Cmd+Shift+S; consumed by Draw() to capture a PNG.
 	screenshotPending bool
+	screenshotDone    chan string // receives flash message when background PNG encode completes
 
 	// Screen recording state (FFMPEG pipe → MP4).
 	recorder        *recorder.Recorder
@@ -398,6 +399,7 @@ func main() {
 		blocksEnabled:    cfg.Blocks.Enabled,
 		recorder:         recorder.New(winW, winH),
 		recDone:          make(chan string, 1),
+		screenshotDone:   make(chan string, 1),
 		tabHoverState:    renderer.TabHoverState{TabIdx: -1},
 	}
 
@@ -486,6 +488,13 @@ func (g *Game) Update() error {
 	// Drain recording-done channel (background goroutine sends flash message).
 	select {
 	case msg := <-g.recDone:
+		g.flashStatus(msg)
+	default:
+	}
+
+	// Drain screenshot-done channel (background PNG encode sends flash message).
+	select {
+	case msg := <-g.screenshotDone:
 		g.flashStatus(msg)
 	default:
 	}
@@ -705,13 +714,17 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		raw := make([]byte, bounds.Dx()*bounds.Dy()*4)
 		screen.ReadPixels(raw)
 		go func() {
+			var msg string
 			path, err := recorder.SavePNG(raw, bounds)
 			if err != nil {
-				g.flashStatus("Screenshot failed: " + err.Error())
+				msg = "Screenshot failed: " + err.Error()
 			} else {
-				g.flashStatus("Screenshot: " + filepath.Base(path))
+				msg = "Screenshot: " + filepath.Base(path)
 			}
-			g.screenDirty = true
+			select {
+			case g.screenshotDone <- msg:
+			default:
+			}
 		}()
 	}
 }
