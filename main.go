@@ -6691,6 +6691,52 @@ func (g *Game) clampMdViewerScroll() {
 	}
 }
 
+// spanToANSI converts a markdown span to ANSI-colored text for terminal display.
+func spanToANSI(span markdown.Span) string {
+	const reset = "\033[0m"
+	switch span.Style {
+	case markdown.StyleHeading1:
+		return "\033[1;97m" + span.Text + reset // bold bright white
+	case markdown.StyleHeading2:
+		return "\033[1;36m" + span.Text + reset // bold cyan
+	case markdown.StyleHeading3:
+		return "\033[2;37m" + span.Text + reset // dim white
+	case markdown.StyleBold:
+		return "\033[1;97m" + span.Text + reset // bold bright white
+	case markdown.StyleItalic:
+		return "\033[3;37m" + span.Text + reset // italic dim
+	case markdown.StyleInlineCode:
+		return "\033[7;33m" + span.Text + reset // reverse yellow
+	case markdown.StyleCodeBlock:
+		return "\033[32m" + span.Text + reset // green
+	case markdown.StyleLink:
+		if span.Extra != "" {
+			return "\033[4;36m" + span.Text + reset + "\033[2m (" + span.Extra + ")" + reset
+		}
+		return "\033[4;36m" + span.Text + reset // underline cyan
+	case markdown.StyleBlockquote:
+		return "\033[2;37m" + span.Text + reset // dim
+	case markdown.StyleListItem:
+		return "\033[36m" + span.Text + reset // cyan marker
+	case markdown.StyleTableHeader:
+		return "\033[1;97m" + span.Text + reset // bold white
+	case markdown.StyleTableCell:
+		return span.Text
+	case markdown.StyleTableSeparator, markdown.StyleHRule:
+		return "\033[2m────────────────────────────────────────" + reset
+	case markdown.StyleStrikethrough:
+		return "\033[9;2m" + span.Text + reset // strikethrough dim
+	case markdown.StyleImage:
+		return "\033[35m" + span.Text + reset // magenta
+	case markdown.StyleCheckboxChecked:
+		return "\033[32m" + span.Text + reset // green
+	case markdown.StyleCheckboxUnchecked:
+		return "\033[2m" + span.Text + reset // dim
+	default:
+		return span.Text
+	}
+}
+
 // collectVisibleLinkHints scans visible lines for StyleLink spans and assigns
 // letter badges (a-z). Returns at most 26 hints.
 func (g *Game) collectVisibleLinkHints() []renderer.LinkHint {
@@ -6832,11 +6878,38 @@ func (g *Game) sendViewerToPane() {
 		paneName = "llms — " + g.llmsDomain
 	}
 
-	// Build plain text from styled lines.
+	// Build ANSI-colored text from styled lines for rich rendering in less -R.
 	var buf strings.Builder
 	for _, line := range lines {
+		// Indent.
+		for i := 0; i < line.Indent; i++ {
+			buf.WriteByte(' ')
+		}
 		for _, span := range line.Spans {
-			buf.WriteString(span.Text)
+			buf.WriteString(spanToANSI(span))
+		}
+		// Heading underlines.
+		if len(line.Spans) > 0 {
+			switch line.Spans[0].Style {
+			case markdown.StyleHeading1:
+				textLen := 0
+				for _, s := range line.Spans {
+					textLen += len([]rune(s.Text))
+				}
+				buf.WriteByte('\n')
+				buf.WriteString("\033[97m")
+				buf.WriteString(strings.Repeat("━", textLen))
+				buf.WriteString("\033[0m")
+			case markdown.StyleHeading2:
+				textLen := 0
+				for _, s := range line.Spans {
+					textLen += len([]rune(s.Text))
+				}
+				buf.WriteByte('\n')
+				buf.WriteString("\033[36m")
+				buf.WriteString(strings.Repeat("─", textLen))
+				buf.WriteString("\033[0m")
+			}
 		}
 		buf.WriteByte('\n')
 	}
@@ -6859,7 +6932,7 @@ func (g *Game) sendViewerToPane() {
 	g.renderer.SetLayoutDirty()
 	g.renderer.ClearPaneCache()
 
-	// Create a new tab with a pane running `less <tmpfile>`.
+	// Create a new tab with a pane running `less -R <tmpfile>`.
 	physW := int(float64(g.winW) * g.dpi)
 	physH := int(float64(g.winH) * g.dpi)
 	tabBarH := g.renderer.TabBarHeight()
@@ -6867,7 +6940,7 @@ func (g *Game) sendViewerToPane() {
 	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
 
 	term := terminal.New(g.cfg)
-	term.StartCmd("less", []string{tmpFile.Name()}, "")
+	term.StartCmd("less", []string{"-R", tmpFile.Name()}, "")
 	p := &pane.Pane{
 		Term:       term,
 		Rect:       paneRect,
