@@ -40,6 +40,13 @@ type URLInputState struct {
 	Loading bool
 }
 
+// SearchMatch stores the position of a search hit within a styled line.
+type SearchMatch struct {
+	LineIdx int // which StyledLine
+	Col     int // rune offset within the concatenated line text
+	Len     int // rune length of the match
+}
+
 // LinkHint is a follow-mode badge mapping a letter to a link span.
 type LinkHint struct {
 	LineIdx int
@@ -60,8 +67,8 @@ type MarkdownViewerState struct {
 	// Search state (Cmd+F / /).
 	SearchOpen    bool
 	SearchQuery   string
-	SearchMatches []int // line indices that contain a match
-	SearchIdx     int   // current match index (-1 = none)
+	SearchMatches []SearchMatch // matches with position info
+	SearchIdx     int           // current match index (-1 = none)
 
 	// HasAlt is true when an alternate view is available (e.g. llms.txt ↔ llms-full.txt).
 	// When set, the hint bar shows "Tab switch".
@@ -590,15 +597,12 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	codeBorder := color.RGBA{0x60, 0x60, 0x60, 0xFF}  // dim border for code blocks
 	tableBorder := color.RGBA{0x50, 0x50, 0x50, 0xFF} // dim border for table grid
 
-	// Build match set for highlight rendering.
-	matchSet := make(map[int]bool, len(state.SearchMatches))
-	for _, idx := range state.SearchMatches {
-		matchSet[idx] = true
+	// Build per-line match list for highlight rendering.
+	lineMatches := make(map[int][]SearchMatch, len(state.SearchMatches))
+	for _, m := range state.SearchMatches {
+		lineMatches[m.LineIdx] = append(lineMatches[m.LineIdx], m)
 	}
-	currentMatchLine := -1
-	if state.SearchIdx >= 0 && state.SearchIdx < len(state.SearchMatches) {
-		currentMatchLine = state.SearchMatches[state.SearchIdx]
-	}
+	currentMatchIdx := state.SearchIdx
 	matchBg := color.RGBA{0x80, 0x80, 0x00, 0x60}   // dim yellow for matches
 	currentBg := color.RGBA{0xFF, 0xCC, 0x00, 0x80}  // bright yellow for current match
 
@@ -611,14 +615,24 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 			continue
 		}
 
-		// Search match highlight.
-		if matchSet[lineIdx] {
-			bg := matchBg
-			if lineIdx == currentMatchLine {
-				bg = currentBg
+		// Search match highlights — precise per-character rectangles.
+		if matches, ok := lineMatches[lineIdx]; ok {
+			baseX := contentLeft + line.Indent*cw
+			for mi, m := range matches {
+				bg := matchBg
+				// Find absolute index of this match to compare with currentMatchIdx.
+				for ai, am := range state.SearchMatches {
+					if am.LineIdx == m.LineIdx && am.Col == m.Col && ai == currentMatchIdx {
+						bg = currentBg
+						break
+					}
+				}
+				_ = mi
+				hlX := baseX + m.Col*cw
+				hlW := m.Len * cw
+				hlRect := image.Rect(hlX, drawY, hlX+hlW, drawY+rowH)
+				contentImg.SubImage(hlRect).(*ebiten.Image).Fill(bg)
 			}
-			hlRect := image.Rect(contentLeft, drawY, contentRight, drawY+rowH)
-			contentImg.SubImage(hlRect).(*ebiten.Image).Fill(bg)
 		}
 
 		x := contentLeft + line.Indent*cw

@@ -6627,12 +6627,23 @@ func (g *Game) mdViewerUpdateSearch() {
 		return
 	}
 
-	for i, line := range g.mdViewerState.Lines {
+	qLen := len([]rune(q))
+	for lineIdx, line := range g.mdViewerState.Lines {
+		// Concatenate span text to find matches across span boundaries.
+		col := 0
 		for _, span := range line.Spans {
-			if strings.Contains(strings.ToLower(span.Text), q) {
-				g.mdViewerState.SearchMatches = append(g.mdViewerState.SearchMatches, i)
-				break
+			lower := strings.ToLower(span.Text)
+			runes := []rune(lower)
+			for j := 0; j <= len(runes)-qLen; j++ {
+				if strings.ToLower(string(runes[j:j+qLen])) == q {
+					g.mdViewerState.SearchMatches = append(g.mdViewerState.SearchMatches, renderer.SearchMatch{
+						LineIdx: lineIdx,
+						Col:     col + j,
+						Len:     qLen,
+					})
+				}
 			}
+			col += len(runes)
 		}
 	}
 
@@ -6675,8 +6686,8 @@ func (g *Game) mdViewerScrollToMatch() {
 	if rowH == 0 {
 		rowH = 16
 	}
-	lineIdx := g.mdViewerState.SearchMatches[g.mdViewerState.SearchIdx]
-	targetOffset := lineIdx * rowH
+	m := g.mdViewerState.SearchMatches[g.mdViewerState.SearchIdx]
+	targetOffset := m.LineIdx * rowH
 	g.mdViewerState.ScrollOffset = targetOffset
 	g.clampMdViewerScroll()
 }
