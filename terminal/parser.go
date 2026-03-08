@@ -112,9 +112,14 @@ func (p *Parser) consume(b byte) {
 			p.dcsBuf.WriteByte(b)
 		}
 	case stateIgnore:
-		// Consume the trailing '\' of a 7-bit ST (ESC \) and return to ground.
-		// Dispatch was already called before transitioning here.
+		// Expected: trailing '\' of a 7-bit ST (ESC \). Dispatch was already called.
+		// If it IS '\', consume it. Otherwise the ESC started a new sequence —
+		// return to ground and re-process the byte so it isn't dropped.
 		p.state = stateGround
+		if b != '\\' {
+			p.consume(b)
+			return
+		}
 	}
 }
 
@@ -147,7 +152,35 @@ func (p *Parser) ground(b byte) {
 		p.sb.CursorCol = 0
 	case b == 0x0E || b == 0x0F: // SO/SI — charset switching, ignored
 		p.utf8Len = 0
-	case b >= 0x80: // high byte — accumulate UTF-8 multi-byte sequence
+	case b >= 0x80 && b <= 0x9F: // C1 control bytes — dispatch, not UTF-8
+		p.utf8Len = 0
+		switch b {
+		case 0x84: // IND — index (same as ESC D)
+			p.sb.LineFeed()
+		case 0x85: // NEL — next line (same as ESC E)
+			p.sb.CursorCol = 0
+			p.sb.LineFeed()
+		case 0x8D: // RI — reverse index (same as ESC M)
+			if p.sb.CursorRow == p.sb.ScrollTop {
+				p.sb.ScrollDown(1)
+			} else if p.sb.CursorRow > 0 {
+				p.sb.CursorRow--
+			}
+		case 0x90: // DCS — device control string
+			p.dcsBuf.Reset()
+			p.state = stateDCS
+		case 0x9B: // CSI — same as ESC [
+			p.paramStr = ""
+			p.params = nil
+			p.csiIntermByte = 0
+			p.state = stateCSIEntry
+		case 0x9C: // ST — string terminator (terminates OSC/DCS)
+			// No-op in ground state; handled inline for OSC/DCS.
+		case 0x9D: // OSC — same as ESC ]
+			p.oscBuf.Reset()
+			p.state = stateOSC
+		}
+	case b >= 0xA0: // high byte — accumulate UTF-8 multi-byte sequence
 		p.utf8Buf[p.utf8Len] = b
 		p.utf8Len++
 		if utf8.FullRune(p.utf8Buf[:p.utf8Len]) {
@@ -289,6 +322,8 @@ func (p *Parser) csiInterm(b byte) {
 		return
 	}
 	if b >= 0x40 && b <= 0x7E {
+		// Parse params now — they weren't parsed on transition to stateCSIInterm.
+		p.params = parseParams(p.paramStr)
 		// DECSCUSR: CSI <n> SP q — set cursor style.
 		if p.csiIntermByte == 0x20 && b == 'q' {
 			n := 0
