@@ -620,6 +620,11 @@ func (g *Game) needsRender() bool {
 	if g.cfg.StatusBar.ShowClock && time.Now().Unix() != g.lastClockSec {
 		return true
 	}
+	// Cmd press/release toggles hint mode badges on the tab bar.
+	metaNow := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	if metaNow != g.prevKeys[ebiten.KeyMeta] {
+		return true
+	}
 	// Stats overlay refreshes once per second when open.
 	if g.statsState.Open && time.Since(g.statsLastTick) >= time.Second {
 		g.collectStats()
@@ -683,10 +688,16 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	if g.activeTab >= 0 && g.activeTab < len(g.tabs) {
 		g.statusBarState.TabNote = g.tabs[g.activeTab].Note
 	}
+	// Hint mode: show tab number badges when Cmd is held and no modal is active.
+	hintMode := ebiten.IsKeyPressed(ebiten.KeyMeta) &&
+		!g.overlayState.Open && !g.paletteState.Open && !g.confirmState.Open &&
+		!g.mdViewerState.Open && !g.urlInputState.Open && !g.tabSwitcherState.Open &&
+		!g.tabSearchState.Open && !g.searchState.Open && !g.dictationState.Open &&
+		!g.menuState.Open && !g.fileExplorerState.Open
 	g.renderer.DrawAll(screen, g.tabs, g.activeTab, g.focused, g.zoomed,
 		&g.menuState, &g.overlayState, &g.confirmState, &g.searchState, &g.statusBarState, &g.tabSwitcherState,
 		&g.paletteState, g.paletteEntries, &g.fileExplorerState, &g.tabSearchState, &g.statsState, &g.tabHoverState,
-		&g.dictationState, &g.mdViewerState, &g.urlInputState)
+		&g.dictationState, &g.mdViewerState, &g.urlInputState, hintMode)
 	g.screenDirty = false
 	g.lastClockSec = time.Now().Unix()
 
