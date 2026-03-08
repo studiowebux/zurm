@@ -1509,6 +1509,7 @@ func (g *Game) handleResize() {
 	}
 
 	g.syncActive()
+	g.screenDirty = true
 }
 
 func (g *Game) drainTitle() {
