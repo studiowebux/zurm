@@ -620,11 +620,6 @@ func (g *Game) needsRender() bool {
 	if g.cfg.StatusBar.ShowClock && time.Now().Unix() != g.lastClockSec {
 		return true
 	}
-	// Cmd press/release toggles hint mode badges on the tab bar.
-	metaNow := ebiten.IsKeyPressed(ebiten.KeyMeta)
-	if metaNow != g.prevKeys[ebiten.KeyMeta] {
-		return true
-	}
 	// Stats overlay refreshes once per second when open.
 	if g.statsState.Open && time.Since(g.statsLastTick) >= time.Second {
 		g.collectStats()
@@ -742,6 +737,14 @@ func (g *Game) updateLayout(n *pane.LayoutNode) {
 }
 
 func (g *Game) handleInput() {
+	// Track meta key state for hint mode (tab number badges).
+	// Must run before any early return so release is always detected.
+	metaNow := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	if metaNow != g.prevKeys[ebiten.KeyMeta] {
+		g.screenDirty = true
+		g.prevKeys[ebiten.KeyMeta] = metaNow
+	}
+
 	// Pane rename mode intercepts all input (highest priority).
 	if g.renamingPane() {
 		g.screenDirty = true
