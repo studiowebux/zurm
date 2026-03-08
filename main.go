@@ -297,12 +297,11 @@ func main() {
 			log.Printf("font file %q not found, using embedded font: %v", cfg.Font.File, err)
 		}
 	}
-	fontR, err := renderer.NewFontRenderer(fontBytes, cfg.Font.Size*dpi)
+	fallbackSlice := loadFontFallbacks(cfg.Font)
+	fontR, err := renderer.NewFontRenderer(fontBytes, cfg.Font.Size*dpi, fallbackSlice...)
 	if err != nil {
 		log.Fatalf("font load: %v", err)
 	}
-	// Emoji fonts are not supported by Ebiten - see docs/emoji-limitations.md
-	// Color glyphs cannot be rendered due to golang.org/x/image/font limitations
 
 	// Compute tab bar and status bar heights first so they're included in the window size budget.
 	rend := renderer.NewRenderer(fontR, cfg)
@@ -3147,13 +3146,18 @@ func (g *Game) handleMouse() {
 
 			g.focused.Term.Buf.Lock()
 			absRow := g.focused.Term.Buf.DisplayToAbsRow(row)
+			// Snap col to parent cell if clicking on a wide char continuation.
+			snapCol := col
+			if snapCol >= 0 && snapCol < g.focused.Term.Buf.Cols && g.focused.Term.Buf.GetDisplayCell(row, snapCol).Width == 0 && snapCol > 0 {
+				snapCol--
+			}
 			switch g.clickCount {
 			case 1:
 				g.selDragging = true
 				g.focused.Term.Buf.Selection = terminal.Selection{
 					Active:   true,
-					StartRow: absRow, StartCol: col,
-					EndRow:   absRow, EndCol: col,
+					StartRow: absRow, StartCol: snapCol,
+					EndRow:   absRow, EndCol: snapCol,
 				}
 			case 2:
 				g.selDragging = false
@@ -3189,7 +3193,12 @@ func (g *Game) handleMouse() {
 				g.focused.Term.Buf.SetViewOffset(vo)
 			}
 			g.focused.Term.Buf.Selection.EndRow = g.focused.Term.Buf.DisplayToAbsRow(row)
-			g.focused.Term.Buf.Selection.EndCol = col
+			// Snap to parent cell if dragging onto a continuation cell.
+			dragCol := col
+			if dragCol >= 0 && dragCol < g.focused.Term.Buf.Cols && g.focused.Term.Buf.GetDisplayCell(row, dragCol).Width == 0 && dragCol > 0 {
+				dragCol--
+			}
+			g.focused.Term.Buf.Selection.EndCol = dragCol
 			g.focused.Term.Buf.BumpRenderGen()
 			g.focused.Term.Buf.Unlock()
 			g.screenDirty = true
@@ -3301,14 +3310,26 @@ func (g *Game) wordSelection(row, col int) terminal.Selection {
 	}
 
 	absRow := buf.DisplayToAbsRow(row)
+
+	// Snap to parent cell if clicking on a continuation cell.
 	cell := buf.GetDisplayCell(row, col)
+	if cell.Width == 0 && col > 0 {
+		col--
+		cell = buf.GetDisplayCell(row, col)
+	}
+
 	if !isWordChar(cell.Char) {
 		return terminal.Selection{Active: true, StartRow: absRow, StartCol: col, EndRow: absRow, EndCol: col}
 	}
 
 	startCol := col
 	for startCol > 0 {
-		if !isWordChar(buf.GetDisplayCell(row, startCol-1).Char) {
+		prev := buf.GetDisplayCell(row, startCol-1)
+		if prev.Width == 0 {
+			startCol--
+			continue
+		}
+		if !isWordChar(prev.Char) {
 			break
 		}
 		startCol--
@@ -3316,7 +3337,12 @@ func (g *Game) wordSelection(row, col int) terminal.Selection {
 
 	endCol := col
 	for endCol < buf.Cols-1 {
-		if !isWordChar(buf.GetDisplayCell(row, endCol+1).Char) {
+		next := buf.GetDisplayCell(row, endCol+1)
+		if next.Width == 0 {
+			endCol++
+			continue
+		}
+		if !isWordChar(next.Char) {
 			break
 		}
 		endCol++
@@ -3363,7 +3389,12 @@ func (g *Game) copySelection() {
 
 		var line strings.Builder
 		for c := colStart; c <= colEnd && c < cols; c++ {
-			ch := g.focused.Term.Buf.GetAbsCell(r, c).Char
+			cell := g.focused.Term.Buf.GetAbsCell(r, c)
+			// Skip continuation cells (second half of wide char) to avoid duplicates.
+			if cell.Width == 0 {
+				continue
+			}
+			ch := cell.Char
 			if ch == 0 {
 				ch = ' '
 			}
@@ -5100,7 +5131,8 @@ func (g *Game) adjustFontSize(delta float64) {
 			fontBytes = data
 		}
 	}
-	fontR, err := renderer.NewFontRenderer(fontBytes, newSize*g.dpi)
+	fbSlice := loadFontFallbacks(g.cfg.Font)
+	fontR, err := renderer.NewFontRenderer(fontBytes, newSize*g.dpi, fbSlice...)
 	if err != nil {
 		g.flashStatus("Font resize failed: " + err.Error())
 		return
@@ -5149,7 +5181,8 @@ func (g *Game) reloadConfig() {
 				fontBytes = data
 			}
 		}
-		fontR, fontErr := renderer.NewFontRenderer(fontBytes, newCfg.Font.Size*g.dpi)
+		fbSlice := loadFontFallbacks(newCfg.Font)
+		fontR, fontErr := renderer.NewFontRenderer(fontBytes, newCfg.Font.Size*g.dpi, fbSlice...)
 		if fontErr == nil {
 			g.font = fontR
 			g.renderer.SetFont(fontR)
@@ -5903,7 +5936,11 @@ func (g *Game) extractSelectedText() string {
 		}
 		var line strings.Builder
 		for c := colStart; c <= colEnd && c < cols; c++ {
-			ch := g.focused.Term.Buf.GetAbsCell(r, c).Char
+			cell := g.focused.Term.Buf.GetAbsCell(r, c)
+			if cell.Width == 0 {
+				continue
+			}
+			ch := cell.Char
 			if ch == 0 {
 				ch = ' '
 			}
@@ -5931,7 +5968,11 @@ func (g *Game) getRecentBufferText(maxLines int) string {
 		absRow := g.focused.Term.Buf.DisplayToAbsRow(r)
 		var line strings.Builder
 		for c := 0; c < cols; c++ {
-			ch := g.focused.Term.Buf.GetAbsCell(absRow, c).Char
+			cell := g.focused.Term.Buf.GetAbsCell(absRow, c)
+			if cell.Width == 0 {
+				continue
+			}
+			ch := cell.Char
 			if ch == 0 {
 				ch = ' '
 			}
@@ -6095,6 +6136,30 @@ func resolveShellPath() {
 	if len(added) > 0 {
 		os.Setenv("PATH", currentPath+":"+strings.Join(added, ":"))
 	}
+}
+
+// loadFontFallbacks reads all configured fallback font files from a FontConfig.
+// It merges the legacy single Fallback field with the Fallbacks list,
+// returning a slice of raw font bytes suitable for NewFontRenderer.
+func loadFontFallbacks(fc config.FontConfig) [][]byte {
+	var paths []string
+	if fc.Fallback != "" {
+		paths = append(paths, fc.Fallback)
+	}
+	paths = append(paths, fc.Fallbacks...)
+	var result [][]byte
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			log.Printf("fallback font %q not found, skipping: %v", p, err)
+			continue
+		}
+		result = append(result, data)
+	}
+	return result
 }
 
 // openMarkdownViewer captures terminal content and opens the markdown viewer overlay.

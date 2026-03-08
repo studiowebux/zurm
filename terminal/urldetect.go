@@ -45,21 +45,29 @@ func trimTrailingPunct(u string) string {
 }
 
 // DetectURLs scans the visible buffer rows and returns all URL matches
-// with display-space coordinates. Caller must hold at least an RLock.
+// with display-space coordinates. Continuation cells (Width=0) are skipped
+// when building the search text; a colMap converts rune positions back to
+// column indices so highlights cover the correct cells.
+// Caller must hold at least an RLock.
 func (sb *ScreenBuffer) DetectURLs() []URLMatch {
 	var matches []URLMatch
 	for row := 0; row < sb.Rows; row++ {
-		// Build the text for this display row.
-		line := make([]rune, sb.Cols)
+		// Build clean text and colMap skipping continuation cells.
+		var runes []rune
+		var colMap []int // colMap[runeIdx] = display column
 		for col := 0; col < sb.Cols; col++ {
 			cell := sb.GetDisplayCell(row, col)
+			if cell.Width == 0 {
+				continue
+			}
 			ch := cell.Char
 			if ch == 0 {
 				ch = ' '
 			}
-			line[col] = ch
+			runes = append(runes, ch)
+			colMap = append(colMap, col)
 		}
-		text := string(line)
+		text := string(runes)
 		locs := urlPattern.FindAllStringIndex(text, -1)
 		for _, loc := range locs {
 			raw := text[loc[0]:loc[1]]
@@ -67,9 +75,19 @@ func (sb *ScreenBuffer) DetectURLs() []URLMatch {
 			if cleaned == "" {
 				continue
 			}
-			// Convert byte offsets to rune (column) offsets.
-			startCol := len([]rune(text[:loc[0]]))
-			endCol := startCol + len([]rune(cleaned)) - 1
+			// Convert byte offsets to rune indices, then to columns via colMap.
+			runeStart := len([]rune(text[:loc[0]]))
+			runeEnd := runeStart + len([]rune(cleaned)) - 1
+			if runeStart >= len(colMap) || runeEnd >= len(colMap) {
+				continue
+			}
+			startCol := colMap[runeStart]
+			endCol := colMap[runeEnd]
+			// Extend endCol to include continuation cell of a trailing wide char.
+			endCell := sb.GetDisplayCell(row, endCol)
+			if endCell.Width == 2 && endCol+1 < sb.Cols {
+				endCol++
+			}
 			matches = append(matches, URLMatch{
 				StartRow: row, StartCol: startCol,
 				EndRow: row, EndCol: endCol,

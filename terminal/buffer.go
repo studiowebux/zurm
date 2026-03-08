@@ -12,8 +12,11 @@ import (
 )
 
 // Cell represents a single character cell in the terminal grid.
+// Width encodes display width: 1 = normal, 2 = wide (CJK/emoji first cell),
+// 0 = continuation (second cell of a wide character).
 type Cell struct {
 	Char      rune
+	Width     uint8 // 0=continuation, 1=normal, 2=wide
 	FG        color.RGBA
 	BG        color.RGBA
 	Bold      bool
@@ -41,6 +44,7 @@ type SGRState struct {
 func (s SGRState) toCell(ch rune) Cell {
 	return Cell{
 		Char:              ch,
+		Width:             1,
 		FG:                s.FG,
 		BG:                s.BG,
 		Bold:              s.Bold,
@@ -221,7 +225,7 @@ func makeCells(rows, cols int, fg, bg color.RGBA) [][]Cell {
 	for r := range cells {
 		cells[r] = make([]Cell, cols)
 		for c := range cells[r] {
-			cells[r][c] = Cell{Char: ' ', FG: fg, BG: bg}
+			cells[r][c] = Cell{Char: ' ', Width: 1, FG: fg, BG: bg}
 		}
 	}
 	return cells
@@ -255,7 +259,7 @@ func (sb *ScreenBuffer) SetCell(row, col int, c Cell) {
 // GetCell returns the cell at row/col. Caller must hold at least read lock.
 func (sb *ScreenBuffer) GetCell(row, col int) Cell {
 	if row < 0 || row >= sb.Rows || col < 0 || col >= sb.Cols {
-		return Cell{Char: ' ', FG: sb.DefaultFG, BG: sb.DefaultBG}
+		return Cell{Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG}
 	}
 	return sb.cells()[row][col]
 }
@@ -263,6 +267,8 @@ func (sb *ScreenBuffer) GetCell(row, col int) Cell {
 // PutChar writes the current SGR-attributed rune at the cursor and advances.
 // Combining characters (Unicode Mn/Mc/Me) are merged with the preceding cell
 // via NFC normalization instead of occupying their own cell.
+// Wide characters (CJK, fullwidth, emoji) occupy 2 columns: the first cell
+// gets Width=2, the second gets Width=0 (continuation).
 // Caller must hold write lock.
 func (sb *ScreenBuffer) PutChar(ch rune) {
 	// Combining character — merge with the previous cell via NFC.
@@ -285,6 +291,8 @@ func (sb *ScreenBuffer) PutChar(ch rune) {
 		return // can't compose — discard the combining mark
 	}
 
+	w := RuneWidth(ch)
+
 	if sb.CursorCol >= sb.Cols {
 		if !sb.AutoWrap {
 			sb.CursorCol = sb.Cols - 1 // clamp: overwrite last column
@@ -295,8 +303,58 @@ func (sb *ScreenBuffer) PutChar(ch rune) {
 			sb.wrapped[sb.CursorRow] = true
 		}
 	}
-	sb.SetCell(sb.CursorRow, sb.CursorCol, sb.SGR.toCell(ch))
+
+	// Wide char at last column: can't fit both cells. Fill with space and wrap.
+	if w == 2 && sb.CursorCol == sb.Cols-1 {
+		sb.clearWideOverlap(sb.CursorRow, sb.CursorCol)
+		sb.SetCell(sb.CursorRow, sb.CursorCol, Cell{Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG})
+		if sb.AutoWrap {
+			sb.CursorCol = 0
+			sb.LineFeed()
+			sb.wrapped[sb.CursorRow] = true
+		} else {
+			// No wrap — can't place the wide char at all; drop it.
+			return
+		}
+	}
+
+	sb.clearWideOverlap(sb.CursorRow, sb.CursorCol)
+	cell := sb.SGR.toCell(ch)
+	cell.Width = uint8(w)
+	sb.SetCell(sb.CursorRow, sb.CursorCol, cell)
 	sb.CursorCol++
+
+	// Place continuation cell for wide characters.
+	if w == 2 {
+		sb.clearWideOverlap(sb.CursorRow, sb.CursorCol)
+		sb.SetCell(sb.CursorRow, sb.CursorCol, Cell{Width: 0, FG: cell.FG, BG: cell.BG})
+		sb.CursorCol++
+	}
+}
+
+// clearWideOverlap fixes orphaned wide character halves when a cell is about
+// to be overwritten. Must be called before SetCell on any cell that might be
+// part of a wide character pair.
+// Caller must hold write lock.
+func (sb *ScreenBuffer) clearWideOverlap(row, col int) {
+	if row < 0 || row >= sb.Rows || col < 0 || col >= sb.Cols {
+		return
+	}
+	cells := sb.cells()
+	c := cells[row][col]
+
+	// Overwriting a continuation cell (second half of wide char) —
+	// clear the parent wide char at col-1.
+	if c.Width == 0 && col > 0 {
+		cells[row][col-1] = Cell{Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG}
+		sb.dirty[row] = true
+	}
+
+	// Overwriting the first half of a wide char — clear its continuation at col+1.
+	if c.Width == 2 && col+1 < sb.Cols {
+		cells[row][col+1] = Cell{Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG}
+		sb.dirty[row] = true
+	}
 }
 
 // LineFeed moves the cursor down one row, scrolling if at the bottom of the scroll region.
@@ -356,7 +414,7 @@ func (sb *ScreenBuffer) ScrollDown(n int) {
 func blankRow(cols int, fg, bg color.RGBA) []Cell {
 	row := make([]Cell, cols)
 	for i := range row {
-		row[i] = Cell{Char: ' ', FG: fg, BG: bg}
+		row[i] = Cell{Char: ' ', Width: 1, FG: fg, BG: bg}
 	}
 	return row
 }
@@ -419,14 +477,22 @@ func (sb *ScreenBuffer) EraseInLine(mode int) {
 }
 
 func clearRowFrom(row []Cell, from, to int, fg, bg color.RGBA) {
+	// If erase starts on a continuation cell, also clear the parent wide char.
+	if from > 0 && from < len(row) && row[from].Width == 0 {
+		row[from-1] = Cell{Char: ' ', Width: 1, FG: fg, BG: bg}
+	}
 	for i := from; i < to && i < len(row); i++ {
-		row[i] = Cell{Char: ' ', FG: fg, BG: bg}
+		row[i] = Cell{Char: ' ', Width: 1, FG: fg, BG: bg}
 	}
 }
 
 func clearRowTo(row []Cell, from, to int, fg, bg color.RGBA) {
 	for i := from; i < to && i < len(row); i++ {
-		row[i] = Cell{Char: ' ', FG: fg, BG: bg}
+		row[i] = Cell{Char: ' ', Width: 1, FG: fg, BG: bg}
+	}
+	// If erase ends on the first half of a wide char, also clear the continuation.
+	if to > 0 && to < len(row) && row[to].Width == 0 {
+		row[to] = Cell{Char: ' ', Width: 1, FG: fg, BG: bg}
 	}
 }
 
@@ -442,10 +508,16 @@ func (sb *ScreenBuffer) InsertChars(n int) {
 	if n > end-col {
 		n = end - col
 	}
+	// Fix wide char split at insertion point.
+	if col > 0 && col < len(row) && row[col].Width == 0 {
+		row[col-1] = Cell{Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG}
+	}
 	copy(row[col+n:end], row[col:end-n])
 	for i := col; i < col+n; i++ {
-		row[i] = Cell{Char: ' ', FG: sb.DefaultFG, BG: sb.DefaultBG}
+		row[i] = Cell{Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG}
 	}
+	// Fix wide char split at the right edge after shift.
+	fixWideSplit(row, end-n, sb.DefaultFG, sb.DefaultBG)
 	sb.dirty[sb.CursorRow] = true
 }
 
@@ -461,11 +533,33 @@ func (sb *ScreenBuffer) DeleteChars(n int) {
 	if n > end-col {
 		n = end - col
 	}
+	// Fix wide char split at deletion point.
+	if col > 0 && col < len(row) && row[col].Width == 0 {
+		row[col-1] = Cell{Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG}
+	}
+	// Fix wide char split at the far edge of deletion.
+	if col+n < len(row) && row[col+n].Width == 0 {
+		row[col+n] = Cell{Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG}
+	}
 	copy(row[col:end-n], row[col+n:end])
 	for i := end - n; i < end; i++ {
-		row[i] = Cell{Char: ' ', FG: sb.DefaultFG, BG: sb.DefaultBG}
+		row[i] = Cell{Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG}
 	}
 	sb.dirty[sb.CursorRow] = true
+}
+
+// fixWideSplit repairs a wide character that was split at a boundary col.
+// If row[col] is a continuation cell (Width=0) its parent is gone — replace with space.
+// If row[col-1] is a wide char (Width=2) whose continuation was lost — replace with space.
+func fixWideSplit(row []Cell, col int, fg, bg color.RGBA) {
+	if col >= 0 && col < len(row) && row[col].Width == 0 {
+		row[col] = Cell{Char: ' ', Width: 1, FG: fg, BG: bg}
+	}
+	if col > 0 && col-1 < len(row) && row[col-1].Width == 2 {
+		if col >= len(row) || row[col].Width != 0 {
+			row[col-1] = Cell{Char: ' ', Width: 1, FG: fg, BG: bg}
+		}
+	}
 }
 
 // InsertLines inserts n blank lines at the cursor row within the scroll region.
@@ -608,6 +702,18 @@ func (sb *ScreenBuffer) Resize(rows, cols int) {
 		n := makeCells(rows, cols, sb.DefaultFG, sb.DefaultBG)
 		for r := 0; r < copyRows; r++ {
 			copy(n[r][:copyCols], old[r][:copyCols])
+			// Fix wide char truncation at the new right edge.
+			lastCol := copyCols - 1
+			if lastCol >= 0 && lastCol < cols {
+				// Wide char truncated: first half is at lastCol but continuation would be at lastCol+1 (outside bounds or overwritten).
+				if n[r][lastCol].Width == 2 && (lastCol+1 >= cols || n[r][lastCol+1].Width != 0) {
+					n[r][lastCol] = Cell{Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG}
+				}
+				// Orphaned continuation at first column (from a resize that cut the parent).
+				if n[r][0].Width == 0 {
+					n[r][0] = Cell{Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG}
+				}
+			}
 		}
 		return n
 	}
@@ -744,11 +850,11 @@ func (sb *ScreenBuffer) GetDisplayCell(row, col int) Cell {
 	// primary row 0, so scrollback index = len - ViewOffset + row.
 	sbIdx := sb.scrollCount - sb.ViewOffset + row
 	if sbIdx < 0 || sbIdx >= sb.scrollCount {
-		return Cell{Char: ' ', FG: sb.DefaultFG, BG: sb.DefaultBG}
+		return Cell{Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG}
 	}
 	sbRow := sb.scrollbackGet(sbIdx)
 	if col < 0 || col >= len(sbRow) {
-		return Cell{Char: ' ', FG: sb.DefaultFG, BG: sb.DefaultBG}
+		return Cell{Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG}
 	}
 	return sbRow[col]
 }
@@ -876,7 +982,7 @@ func (sb *ScreenBuffer) GetAbsCell(absRow, col int) Cell {
 	if absRow < sbLen {
 		row := sb.scrollbackGet(absRow)
 		if absRow < 0 || col < 0 || row == nil || col >= len(row) {
-			return Cell{Char: ' ', FG: sb.DefaultFG, BG: sb.DefaultBG}
+			return Cell{Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG}
 		}
 		return row[col]
 	}
@@ -910,7 +1016,10 @@ type SearchMatch struct {
 }
 
 // SearchAll searches the entire scrollback + primary screen for query
-// (case-insensitive, non-overlapping). Caller must hold at least read lock.
+// (case-insensitive, non-overlapping). Wide character continuation cells are
+// skipped when building the search text; a colMap translates rune indices back
+// to column positions so highlights cover the correct columns.
+// Caller must hold at least read lock.
 func (sb *ScreenBuffer) SearchAll(query string) []SearchMatch {
 	if query == "" {
 		return nil
@@ -930,24 +1039,44 @@ func (sb *ScreenBuffer) SearchAll(query string) []SearchMatch {
 		} else {
 			row = sb.Cells[absRow-sb.scrollCount]
 		}
-		col := 0
-		for col <= len(row)-qlen {
+
+		// Build text and colMap skipping continuation cells.
+		var text []rune
+		var colMap []int // colMap[runeIdx] = column index
+		for col := 0; col < len(row); col++ {
+			if row[col].Width == 0 {
+				continue
+			}
+			c := row[col].Char
+			if c == 0 {
+				c = ' '
+			}
+			text = append(text, c)
+			colMap = append(colMap, col)
+		}
+
+		ri := 0
+		for ri <= len(text)-qlen {
 			ok := true
 			for i := 0; i < qlen; i++ {
-				c := row[col+i].Char
-				if c == 0 {
-					c = ' '
-				}
-				if unicode.ToLower(c) != qrunes[i] {
+				if unicode.ToLower(text[ri+i]) != qrunes[i] {
 					ok = false
 					break
 				}
 			}
 			if ok {
-				matches = append(matches, SearchMatch{AbsRow: absRow, Col: col, Len: qlen})
-				col += qlen
+				startCol := colMap[ri]
+				endCol := colMap[ri+qlen-1]
+				// Span includes the continuation cell of a trailing wide char.
+				endCell := row[endCol]
+				spanLen := endCol - startCol + 1
+				if endCell.Width == 2 {
+					spanLen++
+				}
+				matches = append(matches, SearchMatch{AbsRow: absRow, Col: startCol, Len: spanLen})
+				ri += qlen
 			} else {
-				col++
+				ri++
 			}
 		}
 	}
@@ -1088,6 +1217,10 @@ func (sb *ScreenBuffer) TextRange(absStart, absEnd int) string {
 		}
 		var line []rune
 		for _, c := range row {
+			// Skip continuation cells to avoid duplicate chars.
+			if c.Width == 0 {
+				continue
+			}
 			ch := c.Char
 			if ch == 0 {
 				ch = ' '
@@ -1114,6 +1247,9 @@ func (sb *ScreenBuffer) rowText(row int) string {
 	}
 	var b strings.Builder
 	for _, c := range cells[row] {
+		if c.Width == 0 {
+			continue
+		}
 		if c.Char != 0 {
 			b.WriteRune(c.Char)
 		}

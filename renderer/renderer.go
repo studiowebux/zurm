@@ -586,6 +586,16 @@ func (r *Renderer) drawPaneTo(dst *ebiten.Image, buf *terminal.ScreenBuffer, cur
 		for col := 0; col < cols; col++ {
 			cell := buf.GetDisplayCell(row, col)
 
+			// Skip continuation cells — the wide char's first cell already drew both columns.
+			if cell.Width == 0 {
+				continue
+			}
+
+			wCells := 1
+			if cell.Width == 2 {
+				wCells = 2
+			}
+
 			fg := cell.FG
 			cbg := cell.BG
 
@@ -626,7 +636,12 @@ func (r *Renderer) drawPaneTo(dst *ebiten.Image, buf *terminal.ScreenBuffer, cur
 				ch = ' '
 			}
 
-			r.font.DrawGlyph(dst, ch, x, y, fg, cbg, cell.Bold, underline)
+			r.font.DrawGlyph(dst, ch, x, y, fg, cbg, cell.Bold, underline, wCells)
+
+			// Skip the continuation column for wide chars so the outer loop doesn't re-process it.
+			if wCells == 2 {
+				col++
+			}
 		}
 	}
 
@@ -634,6 +649,12 @@ func (r *Renderer) drawPaneTo(dst *ebiten.Image, buf *terminal.ScreenBuffer, cur
 		curRow := buf.CursorRow
 		curCol := buf.CursorCol
 		if curRow >= 0 && curRow < rows && curCol >= 0 && curCol < cols {
+			cell := buf.GetDisplayCell(curRow, curCol)
+			curW := 1
+			if cell.Width == 2 {
+				curW = 2
+			}
+
 			x := originX + curCol*cellW + pad
 			y := originY + curRow*cellH + pad
 
@@ -647,10 +668,9 @@ func (r *Renderer) drawPaneTo(dst *ebiten.Image, buf *terminal.ScreenBuffer, cur
 				cursorStyle = 2
 			}
 
-			r.font.DrawCursor(dst, x, y, cursorStyle, r.cursorColor)
+			r.font.DrawCursor(dst, x, y, cursorStyle, r.cursorColor, curW)
 
 			if cur.Style == terminal.CursorBlock {
-				cell := buf.GetDisplayCell(curRow, curCol)
 				ch := cell.Char
 				if ch == 0 {
 					ch = ' '
@@ -658,7 +678,7 @@ func (r *Renderer) drawPaneTo(dst *ebiten.Image, buf *terminal.ScreenBuffer, cur
 				r.font.DrawGlyph(dst, ch, x, y,
 					config.ParseHexColor(r.cfg.Colors.Background),
 					r.cursorColor,
-					cell.Bold, cell.Underline)
+					cell.Bold, cell.Underline, curW)
 			}
 		}
 	}

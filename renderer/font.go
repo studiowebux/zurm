@@ -7,15 +7,18 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
-	"golang.org/x/text/width"
+	"github.com/studiowebux/zurm/terminal"
 )
 
 // FontRenderer manages font face loading and glyph rendering.
 // It uses Ebitengine's text/v2 package with a Go freetype face.
+// When a fallback font is configured, a MultiFace is used so missing glyphs
+// (e.g. CJK characters absent from JetBrains Mono) fall through to the
+// secondary font automatically.
 //
 // Pattern: cache — glyphs are pre-measured; Ebitengine handles atlas internally.
 type FontRenderer struct {
-	face     *text.GoTextFace
+	face     text.Face // primary GoTextFace or MultiFace with fallback
 	src      *text.GoTextFaceSource
 	size     float64
 	CellW    int // width of a single monospace cell in pixels
@@ -30,21 +33,23 @@ type FontRenderer struct {
 	runeStr [127]string
 }
 
-// NewFontRenderer loads the embedded TTF and calculates cell metrics.
-func NewFontRenderer(ttfData []byte, size float64) (*FontRenderer, error) {
+// NewFontRenderer loads the primary TTF and calculates cell metrics.
+// If fallbackData is non-nil, a MultiFace is created so glyphs missing from
+// the primary font (e.g. CJK) are rendered from the fallback.
+func NewFontRenderer(ttfData []byte, size float64, fallbackData ...[]byte) (*FontRenderer, error) {
 	src, err := text.NewGoTextFaceSource(bytes.NewReader(ttfData))
 	if err != nil {
 		return nil, err
 	}
 
-	face := &text.GoTextFace{
+	primary := &text.GoTextFace{
 		Source: src,
 		Size:   size,
 	}
 
 	// Measure a reference character to get cell dimensions.
 	// 'M' is the standard reference for monospace width.
-	w, h := text.Measure("M", face, 0)
+	w, h := text.Measure("M", primary, 0)
 	cellW := int(w + 0.5)
 	cellH := int(h + 0.5)
 	if cellW < 1 {
@@ -56,6 +61,28 @@ func NewFontRenderer(ttfData []byte, size float64) (*FontRenderer, error) {
 
 	// Baseline: approximately 80% of cell height is a reasonable default.
 	baseline := int(float64(cellH)*0.80 + 0.5)
+
+	// Build the effective face: primary alone or MultiFace with fallback chain.
+	var face text.Face = primary
+	var fbFaces []text.Face
+	for _, fbData := range fallbackData {
+		if fbData == nil {
+			continue
+		}
+		fbSrc, fbErr := text.NewGoTextFaceSource(bytes.NewReader(fbData))
+		if fbErr != nil {
+			continue
+		}
+		fbFaces = append(fbFaces, &text.GoTextFace{Source: fbSrc, Size: size})
+	}
+	if len(fbFaces) > 0 {
+		allFaces := make([]text.Face, 0, 1+len(fbFaces))
+		allFaces = append(allFaces, primary)
+		allFaces = append(allFaces, fbFaces...)
+		if multi, mErr := text.NewMultiFace(allFaces...); mErr == nil {
+			face = multi
+		}
+	}
 
 	f := &FontRenderer{
 		face:     face,
@@ -81,11 +108,13 @@ func (f *FontRenderer) runeString(ch rune) string {
 }
 
 // DrawGlyph renders a single character onto dst at pixel position (x, y) — top-left of cell.
+// widthCells is the number of columns the glyph spans (1 for normal, 2 for wide).
 // Background is filled via SubImage (no per-cell allocation).
 // Text is positioned at the cell top-left as required by Ebitengine text/v2.
-func (f *FontRenderer) DrawGlyph(dst *ebiten.Image, ch rune, x, y int, fg, bg color.RGBA, bold, underline bool) {
+func (f *FontRenderer) DrawGlyph(dst *ebiten.Image, ch rune, x, y int, fg, bg color.RGBA, bold, underline bool, widthCells int) {
+	w := widthCells * f.CellW
 	// Fill background using SubImage — zero allocations per call.
-	dst.SubImage(image.Rect(x, y, x+f.CellW, y+f.CellH)).(*ebiten.Image).Fill(bg)
+	dst.SubImage(image.Rect(x, y, x+w, y+f.CellH)).(*ebiten.Image).Fill(bg)
 
 	if ch == ' ' || ch == 0 {
 		return
@@ -100,18 +129,20 @@ func (f *FontRenderer) DrawGlyph(dst *ebiten.Image, ch rune, x, y int, fg, bg co
 	text.Draw(dst, f.runeString(ch), f.face, &f.drawOpts)
 
 	if underline {
-		dst.SubImage(image.Rect(x, y+f.CellH-2, x+f.CellW, y+f.CellH)).(*ebiten.Image).Fill(fg)
+		dst.SubImage(image.Rect(x, y+f.CellH-2, x+w, y+f.CellH)).(*ebiten.Image).Fill(fg)
 	}
 }
 
 // DrawCursor draws a cursor block, underline, or bar at the given cell position.
+// widthCells is the number of columns the cursor spans (1 for normal, 2 for wide).
 // Uses SubImage for zero-allocation fills.
-func (f *FontRenderer) DrawCursor(dst *ebiten.Image, x, y int, style int, fg color.RGBA) {
+func (f *FontRenderer) DrawCursor(dst *ebiten.Image, x, y int, style int, fg color.RGBA, widthCells int) {
+	w := widthCells * f.CellW
 	switch style {
 	case 0: // block
-		dst.SubImage(image.Rect(x, y, x+f.CellW, y+f.CellH)).(*ebiten.Image).Fill(fg)
+		dst.SubImage(image.Rect(x, y, x+w, y+f.CellH)).(*ebiten.Image).Fill(fg)
 	case 1: // underline
-		dst.SubImage(image.Rect(x, y+f.CellH-2, x+f.CellW, y+f.CellH)).(*ebiten.Image).Fill(fg)
+		dst.SubImage(image.Rect(x, y+f.CellH-2, x+w, y+f.CellH)).(*ebiten.Image).Fill(fg)
 	case 2: // bar
 		dst.SubImage(image.Rect(x, y, x+2, y+f.CellH)).(*ebiten.Image).Fill(fg)
 	}
@@ -158,27 +189,9 @@ func (f *FontRenderer) DrawString(dst *ebiten.Image, s string, x, y int, clr col
 // Ebiten doesn't support color fonts due to golang.org/x/image/font limitations
 
 // RuneDisplayWidth returns the number of terminal columns needed to display r.
-// Returns 2 for wide characters (CJK, emoji), 0 for zero-width combiners, 1 otherwise.
+// Delegates to terminal.RuneWidth — single source of truth for width calculation.
 func RuneDisplayWidth(r rune) int {
-	// Zero-width: ZWJ, variation selectors, BOM.
-	if r == 0x200D || r == 0xFEFF || (r >= 0xFE00 && r <= 0xFE0F) {
-		return 0
-	}
-	// Supplementary multilingual plane emoji (U+1F000 and above) are double-width.
-	if r >= 0x1F000 {
-		return 2
-	}
-	// Common symbol/emoji blocks that are double-width in terminals.
-	if r >= 0x2600 && r <= 0x27BF {
-		return 2
-	}
-	// Unicode east-asian width classification covers CJK, Hangul, fullwidth forms, etc.
-	p, _ := width.Lookup([]byte(string(r)))
-	switch p.Kind() {
-	case width.EastAsianWide, width.EastAsianFullwidth:
-		return 2
-	}
-	return 1
+	return terminal.RuneWidth(r)
 }
 
 // StringDisplayWidth returns the total number of terminal columns needed to display s.
