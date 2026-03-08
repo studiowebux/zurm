@@ -211,6 +211,7 @@ type Game struct {
 
 	// screenshotPending is set by Cmd+Shift+S; consumed by Draw() to capture a PNG.
 	screenshotPending bool
+	screenshotDone    chan string // receives flash message when background PNG encode completes
 
 	// Screen recording state (FFMPEG pipe → MP4).
 	recorder        *recorder.Recorder
@@ -398,6 +399,7 @@ func main() {
 		blocksEnabled:    cfg.Blocks.Enabled,
 		recorder:         recorder.New(winW, winH),
 		recDone:          make(chan string, 1),
+		screenshotDone:   make(chan string, 1),
 		tabHoverState:    renderer.TabHoverState{TabIdx: -1},
 	}
 
@@ -417,14 +419,15 @@ func main() {
 		addr := fmt.Sprintf("localhost:%d", cfg.Performance.PprofPort)
 		ln, err := net.Listen("tcp", addr)
 		if err != nil {
-			log.Fatalf("pprof: cannot bind %s: %v", addr, err)
+			log.Printf("pprof: cannot bind %s: %v (skipping)", addr, err)
+		} else {
+			log.Printf("pprof: http://%s/debug/pprof/", addr)
+			go func() {
+				if err := http.Serve(ln, nil); err != nil { // #nosec G114 — pprof is localhost-only, no timeout needed
+					log.Printf("pprof server: %v", err)
+				}
+			}()
 		}
-		log.Printf("pprof: http://%s/debug/pprof/", addr)
-		go func() {
-			if err := http.Serve(ln, nil); err != nil { // #nosec G114 — pprof is localhost-only, no timeout needed
-				log.Printf("pprof server: %v", err)
-			}
-		}()
 	}
 
 	ebiten.SetWindowSize(logW, logH)
@@ -486,6 +489,13 @@ func (g *Game) Update() error {
 	// Drain recording-done channel (background goroutine sends flash message).
 	select {
 	case msg := <-g.recDone:
+		g.flashStatus(msg)
+	default:
+	}
+
+	// Drain screenshot-done channel (background PNG encode sends flash message).
+	select {
+	case msg := <-g.screenshotDone:
 		g.flashStatus(msg)
 	default:
 	}
@@ -705,13 +715,17 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		raw := make([]byte, bounds.Dx()*bounds.Dy()*4)
 		screen.ReadPixels(raw)
 		go func() {
+			var msg string
 			path, err := recorder.SavePNG(raw, bounds)
 			if err != nil {
-				g.flashStatus("Screenshot failed: " + err.Error())
+				msg = "Screenshot failed: " + err.Error()
 			} else {
-				g.flashStatus("Screenshot: " + filepath.Base(path))
+				msg = "Screenshot: " + filepath.Base(path)
 			}
-			g.screenDirty = true
+			select {
+			case g.screenshotDone <- msg:
+			default:
+			}
 		}()
 	}
 }
@@ -1495,6 +1509,7 @@ func (g *Game) handleResize() {
 	}
 
 	g.syncActive()
+	g.screenDirty = true
 }
 
 func (g *Game) drainTitle() {
@@ -3499,6 +3514,7 @@ func (g *Game) closeActiveTab() {
 	if g.activeTab >= len(g.tabs) {
 		g.activeTab = len(g.tabs) - 1
 	}
+	g.renderer.ClearPaneCache()
 	g.renderer.SetLayoutDirty()
 	g.syncActive()
 }
@@ -5161,8 +5177,7 @@ func (g *Game) reloadConfig() {
 	}
 	config.ApplyTheme(newCfg, meta)
 
-	oldFontSize := g.cfg.Font.Size
-	oldFontFile := g.cfg.Font.File
+	oldFont := g.cfg.Font
 	g.cfg = newCfg
 
 	// Propagate colors to renderer and all terminal panes.
@@ -5174,7 +5189,7 @@ func (g *Game) reloadConfig() {
 	}
 
 	// Font reload — skip if recording is active (dimensions would become stale).
-	if (newCfg.Font.Size != oldFontSize || newCfg.Font.File != oldFontFile) && g.recorder != nil && !g.recorder.Active() {
+	if (newCfg.Font.Size != oldFont.Size || newCfg.Font.File != oldFont.File) && g.recorder != nil && !g.recorder.Active() {
 		fontBytes := jetbrainsMono
 		if newCfg.Font.File != "" {
 			if data, loadErr := os.ReadFile(newCfg.Font.File); loadErr == nil {
@@ -5194,6 +5209,9 @@ func (g *Game) reloadConfig() {
 			}
 			// Restore active tab layout pointer.
 			g.layout = g.tabs[g.activeTab].Layout
+		} else {
+			// Rollback font config to match the actual font renderer.
+			g.cfg.Font = oldFont
 		}
 	}
 

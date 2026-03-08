@@ -99,13 +99,15 @@ type ScreenBuffer struct {
 	SGR SGRState
 
 	// Alternate screen support.
-	altActive      bool
-	altCells       [][]Cell
-	altWrapped     []bool
-	altCursorRow   int
-	altCursorCol   int
-	savedCursorRow int
-	savedCursorCol int
+	altActive        bool
+	altCells         [][]Cell
+	altWrapped       []bool
+	altCursorRow     int
+	altCursorCol     int
+	savedCursorRow   int
+	savedCursorCol   int
+	savedScrollTop   int
+	savedScrollBot   int
 
 	// 16-color ANSI palette.
 	Palette [16]color.RGBA
@@ -621,7 +623,12 @@ func (sb *ScreenBuffer) SetScrollRegion(top, bottom int) {
 	}
 	sb.ScrollTop = top
 	sb.ScrollBottom = bottom
-	sb.CursorRow = 0
+	// DECOM: cursor homes to scroll region origin, not absolute (0,0).
+	if sb.OriginMode {
+		sb.CursorRow = top
+	} else {
+		sb.CursorRow = 0
+	}
 	sb.CursorCol = 0
 }
 
@@ -633,8 +640,11 @@ func (sb *ScreenBuffer) EnableAltScreen() {
 	}
 	sb.savedCursorRow = sb.CursorRow
 	sb.savedCursorCol = sb.CursorCol
+	sb.savedScrollTop = sb.ScrollTop
+	sb.savedScrollBot = sb.ScrollBottom
 	sb.altCells = makeCells(sb.Rows, sb.Cols, sb.DefaultFG, sb.DefaultBG)
-	sb.altWrapped = sb.wrapped
+	sb.altWrapped = make([]bool, len(sb.wrapped))
+	copy(sb.altWrapped, sb.wrapped)
 	sb.wrapped = make([]bool, sb.Rows)
 	sb.altCursorRow = 0
 	sb.altCursorCol = 0
@@ -671,8 +681,15 @@ func (sb *ScreenBuffer) DisableAltScreen() {
 	if sb.CursorCol >= sb.Cols {
 		sb.CursorCol = sb.Cols - 1
 	}
-	sb.ScrollTop = 0
-	sb.ScrollBottom = sb.Rows - 1
+	// Restore primary scroll region, clamped to current dimensions.
+	sb.ScrollTop = sb.savedScrollTop
+	sb.ScrollBottom = sb.savedScrollBot
+	if sb.ScrollBottom >= sb.Rows {
+		sb.ScrollBottom = sb.Rows - 1
+	}
+	if sb.ScrollTop >= sb.ScrollBottom {
+		sb.ScrollTop = 0
+	}
 	for r := range sb.dirty {
 		sb.dirty[r] = true
 	}
@@ -705,8 +722,9 @@ func (sb *ScreenBuffer) Resize(rows, cols int) {
 			// Fix wide char truncation at the new right edge.
 			lastCol := copyCols - 1
 			if lastCol >= 0 && lastCol < cols {
-				// Wide char truncated: first half is at lastCol but continuation would be at lastCol+1 (outside bounds or overwritten).
-				if n[r][lastCol].Width == 2 && (lastCol+1 >= cols || n[r][lastCol+1].Width != 0) {
+				// Wide char truncated: first half is at lastCol but continuation is outside the new grid.
+				// Only applies on shrink — on grow, fresh blank cells at lastCol+1 are not continuations.
+				if n[r][lastCol].Width == 2 && lastCol+1 >= cols {
 					n[r][lastCol] = Cell{Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG}
 				}
 				// Orphaned continuation at first column (from a resize that cut the parent).

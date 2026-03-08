@@ -61,7 +61,13 @@ func NewPTYManager(shell string, args []string, cols, rows int, env []string, di
 // renderSeq is incremented after each batch so the game loop can detect new output.
 func (m *PTYManager) StartReader(parser *Parser, buf *ScreenBuffer) {
 	go func() {
-		defer close(m.dead)
+		defer func() {
+			close(m.dead)
+			// Reap the child process to prevent zombie accumulation.
+			// Signal the UI first (dead channel) so pane removal is immediate,
+			// then block briefly for the kernel to clean up the process entry.
+			m.cmd.Wait() //nolint:errcheck // exit status is irrelevant; we just need to reap
+		}()
 		scratch := make([]byte, 4096)
 		for {
 			n, err := m.ptmx.Read(scratch)

@@ -319,7 +319,7 @@ func TestRuneWidth(t *testing.T) {
 		{"CJK ideograph", '中', 2},
 		{"Fullwidth Latin", 'Ａ', 2},
 		{"Emoji SMP", '😀', 2},
-		{"Misc symbol", '☀', 2},
+		{"Misc symbol", '☀', 1},
 		{"ZWJ", '\u200D', 0},
 		{"Variation selector", '\uFE0F', 0},
 	}

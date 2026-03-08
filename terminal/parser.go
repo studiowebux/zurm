@@ -112,9 +112,14 @@ func (p *Parser) consume(b byte) {
 			p.dcsBuf.WriteByte(b)
 		}
 	case stateIgnore:
-		// Consume the trailing '\' of a 7-bit ST (ESC \) and return to ground.
-		// Dispatch was already called before transitioning here.
+		// Expected: trailing '\' of a 7-bit ST (ESC \). Dispatch was already called.
+		// If it IS '\', consume it. Otherwise the ESC started a new sequence —
+		// return to ground and re-process the byte so it isn't dropped.
 		p.state = stateGround
+		if b != '\\' {
+			p.consume(b)
+			return
+		}
 	}
 }
 
@@ -147,7 +152,35 @@ func (p *Parser) ground(b byte) {
 		p.sb.CursorCol = 0
 	case b == 0x0E || b == 0x0F: // SO/SI — charset switching, ignored
 		p.utf8Len = 0
-	case b >= 0x80: // high byte — accumulate UTF-8 multi-byte sequence
+	case b >= 0x80 && b <= 0x9F: // C1 control bytes — dispatch, not UTF-8
+		p.utf8Len = 0
+		switch b {
+		case 0x84: // IND — index (same as ESC D)
+			p.sb.LineFeed()
+		case 0x85: // NEL — next line (same as ESC E)
+			p.sb.CursorCol = 0
+			p.sb.LineFeed()
+		case 0x8D: // RI — reverse index (same as ESC M)
+			if p.sb.CursorRow == p.sb.ScrollTop {
+				p.sb.ScrollDown(1)
+			} else if p.sb.CursorRow > 0 {
+				p.sb.CursorRow--
+			}
+		case 0x90: // DCS — device control string
+			p.dcsBuf.Reset()
+			p.state = stateDCS
+		case 0x9B: // CSI — same as ESC [
+			p.paramStr = ""
+			p.params = nil
+			p.csiIntermByte = 0
+			p.state = stateCSIEntry
+		case 0x9C: // ST — string terminator (terminates OSC/DCS)
+			// No-op in ground state; handled inline for OSC/DCS.
+		case 0x9D: // OSC — same as ESC ]
+			p.oscBuf.Reset()
+			p.state = stateOSC
+		}
+	case b >= 0xA0: // high byte — accumulate UTF-8 multi-byte sequence
 		p.utf8Buf[p.utf8Len] = b
 		p.utf8Len++
 		if utf8.FullRune(p.utf8Buf[:p.utf8Len]) {
@@ -216,9 +249,15 @@ func (p *Parser) escape(b byte) {
 		p.sb.savedCursorRow = p.sb.CursorRow
 		p.sb.savedCursorCol = p.sb.CursorCol
 		p.state = stateGround
-	case '8': // DECRC — restore cursor
+	case '8': // DECRC — restore cursor (clamp to current grid after resize)
 		p.sb.CursorRow = p.sb.savedCursorRow
 		p.sb.CursorCol = p.sb.savedCursorCol
+		if p.sb.CursorRow >= p.sb.Rows {
+			p.sb.CursorRow = p.sb.Rows - 1
+		}
+		if p.sb.CursorCol >= p.sb.Cols {
+			p.sb.CursorCol = p.sb.Cols - 1
+		}
 		p.state = stateGround
 	case '(', ')': // Charset designation — consume next byte
 		p.state = stateEscapeInterm
@@ -289,6 +328,8 @@ func (p *Parser) csiInterm(b byte) {
 		return
 	}
 	if b >= 0x40 && b <= 0x7E {
+		// Parse params now — they weren't parsed on transition to stateCSIInterm.
+		p.params = parseParams(p.paramStr)
 		// DECSCUSR: CSI <n> SP q — set cursor style.
 		if p.csiIntermByte == 0x20 && b == 'q' {
 			n := 0
@@ -589,8 +630,13 @@ func (p *Parser) dispatchCSI(final byte, private, secondary, kittyPop bool) {
 	case 'X': // ECH — erase characters
 		n := param(0, 1)
 		for i := 0; i < n; i++ {
-			sb.SetCell(sb.CursorRow, sb.CursorCol+i, Cell{
-				Char: ' ', FG: sb.DefaultFG, BG: sb.DefaultBG,
+			col := sb.CursorCol + i
+			if col >= sb.Cols {
+				break
+			}
+			sb.clearWideOverlap(sb.CursorRow, col)
+			sb.SetCell(sb.CursorRow, col, Cell{
+				Char: ' ', Width: 1, FG: sb.DefaultFG, BG: sb.DefaultBG,
 			})
 		}
 		sb.dirty[sb.CursorRow] = true
@@ -625,9 +671,15 @@ func (p *Parser) dispatchCSI(final byte, private, secondary, kittyPop bool) {
 	case 's': // SCP — save cursor position
 		sb.savedCursorRow = sb.CursorRow
 		sb.savedCursorCol = sb.CursorCol
-	case 'u': // RCP — restore cursor position
+	case 'u': // RCP — restore cursor position (clamp to current grid after resize)
 		sb.CursorRow = sb.savedCursorRow
 		sb.CursorCol = sb.savedCursorCol
+		if sb.CursorRow >= sb.Rows {
+			sb.CursorRow = sb.Rows - 1
+		}
+		if sb.CursorCol >= sb.Cols {
+			sb.CursorCol = sb.Cols - 1
+		}
 	case 'h': // SM — set mode (public)
 		// e.g. CSI 4 h (insert mode) — mostly ignored for now
 	case 'l': // RM — reset mode (public)
