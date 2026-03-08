@@ -581,8 +581,14 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	contentLeft := panelX + panelPad
 	contentRight := panelX + panelW - panelPad
 
-	// Bright white for bold text.
+	// Heading and emphasis colors.
 	boldColor := color.RGBA{0xFF, 0xFF, 0xFF, 0xFF}
+	h1Color := color.RGBA{0xFF, 0xFF, 0xFF, 0xFF}   // bright white
+	h2Color := r.ui.Accent                            // theme accent
+	h3Color := r.ui.Dim                               // subdued
+	codeFg := color.RGBA{0xA0, 0xD0, 0x80, 0xFF}     // soft green for code
+	codeBorder := color.RGBA{0x60, 0x60, 0x60, 0xFF}  // dim border for code blocks
+	tableBorder := color.RGBA{0x50, 0x50, 0x50, 0xFF} // dim border for table grid
 
 	// Build match set for highlight rendering.
 	matchSet := make(map[int]bool, len(state.SearchMatches))
@@ -617,11 +623,18 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 
 		x := contentLeft + line.Indent*cw
 
-		// Code block lines get full-width background.
+		// Code block lines get full-width background + left border stripe.
 		isCodeLine := len(line.Spans) > 0 && line.Spans[0].Style == markdown.StyleCodeBlock
 		if isCodeLine {
 			bgRect := image.Rect(contentLeft, drawY, contentRight, drawY+rowH)
 			contentImg.SubImage(bgRect).(*ebiten.Image).Fill(r.ui.HoverBg)
+			contentImg.SubImage(image.Rect(contentLeft, drawY, contentLeft+2, drawY+rowH)).(*ebiten.Image).Fill(codeBorder)
+		}
+
+		// Table row lines get a subtle bottom border.
+		isTableLine := len(line.Spans) > 0 && (line.Spans[0].Style == markdown.StyleTableHeader || line.Spans[0].Style == markdown.StyleTableCell)
+		if isTableLine {
+			contentImg.SubImage(image.Rect(contentLeft, drawY+rowH-1, contentRight, drawY+rowH)).(*ebiten.Image).Fill(tableBorder)
 		}
 
 		// Blockquote accent stripe.
@@ -634,8 +647,12 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 			textW := len([]rune(span.Text)) * cw
 
 			switch span.Style {
-			case markdown.StyleHeading1, markdown.StyleHeading2, markdown.StyleHeading3:
-				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
+			case markdown.StyleHeading1:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, h1Color)
+			case markdown.StyleHeading2:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, h2Color)
+			case markdown.StyleHeading3:
+				r.font.DrawString(contentImg, span.Text, x, drawY+1, h3Color)
 			case markdown.StyleBold:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, boldColor)
 			case markdown.StyleItalic:
@@ -645,7 +662,7 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 				contentImg.SubImage(bgRect).(*ebiten.Image).Fill(r.ui.HoverBg)
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.KeyName)
 			case markdown.StyleCodeBlock:
-				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Fg)
+				r.font.DrawString(contentImg, span.Text, x+cw, drawY+1, codeFg)
 			case markdown.StyleLink:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
 			case markdown.StyleBlockquote:
@@ -669,6 +686,18 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 			}
 
 			x += textW
+		}
+
+		// Heading underlines after the line is drawn.
+		if len(line.Spans) > 0 {
+			switch line.Spans[0].Style {
+			case markdown.StyleHeading1:
+				ulY := drawY + rowH - 2
+				contentImg.SubImage(image.Rect(contentLeft, ulY, contentRight, ulY+1)).(*ebiten.Image).Fill(h1Color)
+			case markdown.StyleHeading2:
+				ulY := drawY + rowH - 2
+				contentImg.SubImage(image.Rect(contentLeft, ulY, x, ulY+1)).(*ebiten.Image).Fill(h2Color)
+			}
 		}
 
 		drawY += rowH
