@@ -1505,9 +1505,12 @@ func (g *Game) handleResize() {
 	}
 
 	// Resume PTY readers after all resizes are complete.
-	for _, t := range g.tabs {
-		for _, leaf := range t.Layout.Leaves() {
-			leaf.Pane.Term.SetPaused(false)
+	// Skip if window is idle-suspended — readers should stay paused.
+	if !g.suspended {
+		for _, t := range g.tabs {
+			for _, leaf := range t.Layout.Leaves() {
+				leaf.Pane.Term.SetPaused(false)
+			}
 		}
 	}
 
