@@ -15,8 +15,9 @@ import (
 	_ "net/http/pprof" // #nosec G108 — opt-in via config, localhost-only
 	"os"
 	"os/exec"
-	"runtime"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -1370,12 +1371,20 @@ func (g *Game) handleFocus() {
 			}
 			g.unfocusedAt = time.Time{}
 
-			// Reset edge-detection state: snapshot current physical key state so the
-			// next frame sees correct "was pressed" values. Without this, keys held
-			// during the blur (e.g. Cmd from Cmd+Tab) appear as stale presses and
-			// swallow the first real keystroke after focus returns.
+			// Reset edge-detection state: only snapshot modifier keys so that
+			// Cmd held from Cmd+Tab doesn't appear as a stale press. Non-modifier
+			// keys start as "not pressed" so the first real keystroke or paste
+			// after focus regain fires its leading edge correctly.
 			for k := ebiten.Key(0); k <= ebiten.KeyMax; k++ {
-				g.prevKeys[k] = ebiten.IsKeyPressed(k)
+				switch k {
+				case ebiten.KeyMeta, ebiten.KeyMetaLeft, ebiten.KeyMetaRight,
+					ebiten.KeyControl, ebiten.KeyControlLeft, ebiten.KeyControlRight,
+					ebiten.KeyShift, ebiten.KeyShiftLeft, ebiten.KeyShiftRight,
+					ebiten.KeyAlt, ebiten.KeyAltLeft, ebiten.KeyAltRight:
+					g.prevKeys[k] = ebiten.IsKeyPressed(k)
+				default:
+					g.prevKeys[k] = false
+				}
 			}
 			g.repeatActive = false
 			g.scrollAccum = 0
@@ -1477,12 +1486,31 @@ func (g *Game) handleResize() {
 	statusBarH := g.renderer.StatusBarHeight()
 	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
 
+	// Pause all PTY readers before resizing to avoid lock starvation.
+	// Without this, heavy PTY output (e.g. Claude Code streaming) continuously
+	// holds the buffer write lock, preventing Resize from acquiring it.
+	for _, t := range g.tabs {
+		for _, leaf := range t.Layout.Leaves() {
+			leaf.Pane.Term.SetPaused(true)
+		}
+	}
+
 	// Recompute rects for every tab's layout.
 	for _, t := range g.tabs {
 		setPaneHeaders(t.Layout, g.font.CellH)
 		t.Layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
 		for _, leaf := range t.Layout.Leaves() {
 			leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
+		}
+	}
+
+	// Resume PTY readers after all resizes are complete.
+	// Skip if window is idle-suspended — readers should stay paused.
+	if !g.suspended {
+		for _, t := range g.tabs {
+			for _, leaf := range t.Layout.Leaves() {
+				leaf.Pane.Term.SetPaused(false)
+			}
 		}
 	}
 
@@ -4372,6 +4400,7 @@ func (g *Game) openTabContextMenu(px, py int) {
 		SubParentIdx: -1,
 		SubHoverIdx:  -1,
 	}
+	g.screenDirty = true
 }
 
 // --- Context menu ---
@@ -4456,6 +4485,7 @@ func (g *Game) openContextMenu(px, py int) {
 		SubParentIdx: -1,
 		SubHoverIdx:  -1,
 	}
+	g.screenDirty = true
 }
 
 // closeMenu resets all menu state and forces pane pixels under the menu to be redrawn.
@@ -5012,6 +5042,7 @@ func (g *Game) unzoom() {
 func (g *Game) showConfirm(msg string, action func()) {
 	g.confirmState = renderer.ConfirmState{Open: true, Message: msg}
 	g.confirmPendingAction = action
+	g.screenDirty = true
 }
 
 // handleConfirmInput processes keyboard input while the confirm dialog is open.
@@ -5022,6 +5053,7 @@ func (g *Game) handleConfirmInput() {
 		g.confirmState = renderer.ConfirmState{}
 		g.confirmPendingAction = nil
 		g.prevKeys[ebiten.KeyEscape] = true
+		g.screenDirty = true
 		return
 	}
 
@@ -5037,6 +5069,7 @@ func (g *Game) handleConfirmInput() {
 			}
 			g.confirmState = renderer.ConfirmState{}
 			g.confirmPendingAction = nil
+			g.screenDirty = true
 			return
 		}
 	}
@@ -5051,6 +5084,7 @@ func (g *Game) toggleOverlay() {
 		g.closeMenu()
 		g.closePalette()
 	}
+	g.screenDirty = true
 }
 
 // openPalette opens the command palette, closing any conflicting surfaces.
@@ -5136,7 +5170,11 @@ func (g *Game) reloadConfig() {
 	}
 
 	// Font reload — skip if recording is active (dimensions would become stale).
-	if (newCfg.Font.Size != oldFont.Size || newCfg.Font.File != oldFont.File) && g.recorder != nil && !g.recorder.Active() {
+	fontChanged := newCfg.Font.Size != oldFont.Size ||
+		newCfg.Font.File != oldFont.File ||
+		newCfg.Font.Fallback != oldFont.Fallback ||
+		!slices.Equal(newCfg.Font.Fallbacks, oldFont.Fallbacks)
+	if fontChanged && (g.recorder == nil || !g.recorder.Active()) {
 		fontBytes := jetbrainsMono
 		if newCfg.Font.File != "" {
 			if data, loadErr := os.ReadFile(newCfg.Font.File); loadErr == nil {
