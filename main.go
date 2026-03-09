@@ -1370,12 +1370,20 @@ func (g *Game) handleFocus() {
 			}
 			g.unfocusedAt = time.Time{}
 
-			// Reset edge-detection state: snapshot current physical key state so the
-			// next frame sees correct "was pressed" values. Without this, keys held
-			// during the blur (e.g. Cmd from Cmd+Tab) appear as stale presses and
-			// swallow the first real keystroke after focus returns.
+			// Reset edge-detection state: only snapshot modifier keys so that
+			// Cmd held from Cmd+Tab doesn't appear as a stale press. Non-modifier
+			// keys start as "not pressed" so the first real keystroke or paste
+			// after focus regain fires its leading edge correctly.
 			for k := ebiten.Key(0); k <= ebiten.KeyMax; k++ {
-				g.prevKeys[k] = ebiten.IsKeyPressed(k)
+				switch k {
+				case ebiten.KeyMeta, ebiten.KeyMetaLeft, ebiten.KeyMetaRight,
+					ebiten.KeyControl, ebiten.KeyControlLeft, ebiten.KeyControlRight,
+					ebiten.KeyShift, ebiten.KeyShiftLeft, ebiten.KeyShiftRight,
+					ebiten.KeyAlt, ebiten.KeyAltLeft, ebiten.KeyAltRight:
+					g.prevKeys[k] = ebiten.IsKeyPressed(k)
+				default:
+					g.prevKeys[k] = false
+				}
 			}
 			g.repeatActive = false
 			g.scrollAccum = 0
@@ -1477,12 +1485,28 @@ func (g *Game) handleResize() {
 	statusBarH := g.renderer.StatusBarHeight()
 	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
 
+	// Pause all PTY readers before resizing to avoid lock starvation.
+	// Without this, heavy PTY output (e.g. Claude Code streaming) continuously
+	// holds the buffer write lock, preventing Resize from acquiring it.
+	for _, t := range g.tabs {
+		for _, leaf := range t.Layout.Leaves() {
+			leaf.Pane.Term.SetPaused(true)
+		}
+	}
+
 	// Recompute rects for every tab's layout.
 	for _, t := range g.tabs {
 		setPaneHeaders(t.Layout, g.font.CellH)
 		t.Layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
 		for _, leaf := range t.Layout.Leaves() {
 			leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
+		}
+	}
+
+	// Resume PTY readers after all resizes are complete.
+	for _, t := range g.tabs {
+		for _, leaf := range t.Layout.Leaves() {
+			leaf.Pane.Term.SetPaused(false)
 		}
 	}
 

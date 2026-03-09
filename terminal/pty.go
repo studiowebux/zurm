@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
@@ -59,7 +60,9 @@ func NewPTYManager(shell string, args []string, cols, rows int, env []string, di
 // StartReader launches the goroutine that reads PTY output and feeds it
 // into the parser. Each read batch is processed under the buffer write lock.
 // renderSeq is incremented after each batch so the game loop can detect new output.
-func (m *PTYManager) StartReader(parser *Parser, buf *ScreenBuffer) {
+// The paused flag is checked before acquiring the buffer lock so that resize
+// operations can complete without lock starvation during heavy PTY output.
+func (m *PTYManager) StartReader(parser *Parser, buf *ScreenBuffer, paused *atomic.Bool) {
 	go func() {
 		defer func() {
 			close(m.dead)
@@ -72,6 +75,11 @@ func (m *PTYManager) StartReader(parser *Parser, buf *ScreenBuffer) {
 		for {
 			n, err := m.ptmx.Read(scratch)
 			if n > 0 {
+				// Spin-wait while paused so resize can acquire the buffer lock
+				// without contention from the reader goroutine.
+				for paused.Load() {
+					runtime.Gosched()
+				}
 				buf.Lock()
 				parser.Feed(scratch[:n])
 				buf.Unlock()

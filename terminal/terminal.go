@@ -86,7 +86,7 @@ func (t *Terminal) Start(dir string) error {
 		return fmt.Errorf("terminal start: %w", err)
 	}
 	t.pty = pty
-	t.pty.StartReader(t.parser, t.Buf)
+	t.pty.StartReader(t.parser, t.Buf, &t.paused)
 	return nil
 }
 
@@ -98,7 +98,7 @@ func (t *Terminal) StartCmd(program string, args []string, dir string) error {
 		return fmt.Errorf("terminal start cmd: %w", err)
 	}
 	t.pty = pty
-	t.pty.StartReader(t.parser, t.Buf)
+	t.pty.StartReader(t.parser, t.Buf, &t.paused)
 	return nil
 }
 
