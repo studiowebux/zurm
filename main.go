@@ -4400,6 +4400,7 @@ func (g *Game) openTabContextMenu(px, py int) {
 		SubParentIdx: -1,
 		SubHoverIdx:  -1,
 	}
+	g.screenDirty = true
 }
 
 // --- Context menu ---
@@ -4484,6 +4485,7 @@ func (g *Game) openContextMenu(px, py int) {
 		SubParentIdx: -1,
 		SubHoverIdx:  -1,
 	}
+	g.screenDirty = true
 }
 
 // closeMenu resets all menu state and forces pane pixels under the menu to be redrawn.
@@ -5040,6 +5042,7 @@ func (g *Game) unzoom() {
 func (g *Game) showConfirm(msg string, action func()) {
 	g.confirmState = renderer.ConfirmState{Open: true, Message: msg}
 	g.confirmPendingAction = action
+	g.screenDirty = true
 }
 
 // handleConfirmInput processes keyboard input while the confirm dialog is open.
@@ -5050,6 +5053,7 @@ func (g *Game) handleConfirmInput() {
 		g.confirmState = renderer.ConfirmState{}
 		g.confirmPendingAction = nil
 		g.prevKeys[ebiten.KeyEscape] = true
+		g.screenDirty = true
 		return
 	}
 
@@ -5065,6 +5069,7 @@ func (g *Game) handleConfirmInput() {
 			}
 			g.confirmState = renderer.ConfirmState{}
 			g.confirmPendingAction = nil
+			g.screenDirty = true
 			return
 		}
 	}
@@ -5079,6 +5084,7 @@ func (g *Game) toggleOverlay() {
 		g.closeMenu()
 		g.closePalette()
 	}
+	g.screenDirty = true
 }
 
 // openPalette opens the command palette, closing any conflicting surfaces.
