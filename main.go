@@ -15,8 +15,9 @@ import (
 	_ "net/http/pprof" // #nosec G108 — opt-in via config, localhost-only
 	"os"
 	"os/exec"
-	"runtime"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -5160,7 +5161,11 @@ func (g *Game) reloadConfig() {
 	}
 
 	// Font reload — skip if recording is active (dimensions would become stale).
-	if (newCfg.Font.Size != oldFont.Size || newCfg.Font.File != oldFont.File) && g.recorder != nil && !g.recorder.Active() {
+	fontChanged := newCfg.Font.Size != oldFont.Size ||
+		newCfg.Font.File != oldFont.File ||
+		newCfg.Font.Fallback != oldFont.Fallback ||
+		!slices.Equal(newCfg.Font.Fallbacks, oldFont.Fallbacks)
+	if fontChanged && (g.recorder == nil || !g.recorder.Active()) {
 		fontBytes := jetbrainsMono
 		if newCfg.Font.File != "" {
 			if data, loadErr := os.ReadFile(newCfg.Font.File); loadErr == nil {
