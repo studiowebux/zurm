@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-03-09
+
+### Fixed
+
+- Resize lock starvation during heavy PTY output (concurrent RLock/Lock ordering in pty.go)
+- Paste and typing dropped on focus regain (prevKeys reset on focus transition)
+- Light theme white-on-white text (bright_white adjusted to #E8E8F0)
+- Font fallback not applying on config hot-reload (gate on loaded flag)
+- Recorder nil pointer on resize before first recording
+- Missing screenDirty on overlay, menu, and confirm state changes (dirty-flag audit)
+- Guard resize resume against idle suspension
+
 ## [1.0.2] - 2026-03-08
 
 ### Fixed
