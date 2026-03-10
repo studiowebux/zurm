@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-03-09
+
+### Fixed
+
+- Block rendering Y offset: include pane header height in geometry calculations
+- Blocks only render after command completes (no janky growing border during execution)
+- Clear stale block positions on window resize; keep active block so first post-resize command works
+
+### Added
+
+- `show_border` config option for blocks: when false, hides border/bg tint but keeps badges and hover copy buttons
+
 ## [1.0.4] - 2026-03-09
 
 ### Fixed
