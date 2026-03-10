@@ -6104,13 +6104,24 @@ PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }printf '\033]133;D;%s\007' \
 	g.flashStatus("Shell hooks installed — restart your shell")
 }
 
-// resolveShellPath augments the process PATH with the user's login shell PATH.
+// resolveShellPath augments the process PATH with the user's login shell PATH
+// and ensures UTF-8 locale is set for subprocesses.
 // macOS .app bundles receive a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) that
 // excludes Homebrew and other user-installed tool directories. This function
 // spawns a login shell to resolve the full PATH and merges it into the process
 // environment so exec.Command("ffmpeg") and similar calls find user-installed
 // binaries. No-op if the shell probe fails.
+//
+// It also sets LANG=en_US.UTF-8 when LANG is unset or non-UTF-8. Without this,
+// pbcopy/pbpaste interpret stdin/stdout as Mac Roman in .app bundles, causing
+// multi-byte UTF-8 characters (em dash, CJK, etc.) to paste as mojibake.
 func resolveShellPath() {
+	// Ensure UTF-8 locale for subprocesses (pbcopy, pbpaste, ffmpeg, etc.).
+	lang := os.Getenv("LANG")
+	if lang == "" || !strings.Contains(strings.ToUpper(lang), "UTF-8") {
+		os.Setenv("LANG", "en_US.UTF-8")
+	}
+
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/zsh"
