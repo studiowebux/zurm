@@ -72,7 +72,7 @@ func (r *Renderer) drawBlocksSnap(snap *blockSnap) {
 		startAbs := b.AbsPromptRow
 		endAbs := b.AbsEndRow
 		if endAbs < 0 {
-			endAbs = sbLen + snap.cursorRow
+			continue // still running — render only after command completes (OSC 133 D)
 		}
 
 		startDisplay := startAbs - sbLen + viewOff
@@ -93,15 +93,16 @@ func (r *Renderer) drawBlocksSnap(snap *blockSnap) {
 
 		// Block box geometry — cell-aligned.
 		// boxY0 = top of first visible cell, boxY1 = bottom of last visible cell.
-		// No padding/gap offsets — borders and bg are confined to exact cell boundaries.
+		// originY includes the pane header so block decorations align with text.
 		pad := r.padding
+		originY := rect.Min.Y + snap.headerH
 		boxX0 := rect.Min.X + 1
 		boxX1 := rect.Max.X - pad
-		boxY0 := rect.Min.Y + visStart*ch + pad
-		if boxY0 < rect.Min.Y {
-			boxY0 = rect.Min.Y
+		boxY0 := originY + visStart*ch + pad
+		if boxY0 < originY {
+			boxY0 = originY
 		}
-		boxY1 := rect.Min.Y + (visEnd+1)*ch + pad
+		boxY1 := originY + (visEnd+1)*ch + pad
 		if boxY1 <= boxY0 {
 			continue // block too thin to render
 		}
@@ -116,23 +117,23 @@ func (r *Renderer) drawBlocksSnap(snap *blockSnap) {
 			exitColor = failColor
 		}
 
-		// Optional background tint — covers the full block area; the left stripe
-		// is drawn on top so it shows through correctly regardless.
-		if hasBg {
-			bgRect := image.Rect(boxX0, boxY0, boxX1, boxY1)
-			op := &ebiten.DrawImageOptions{}
-			op.GeoM.Scale(float64(bgRect.Dx()), float64(bgRect.Dy()))
-			op.GeoM.Translate(float64(bgRect.Min.X), float64(bgRect.Min.Y))
-			r.blocksLayer.DrawImage(bgImg, op)
-		}
+		if cfg.ShowBorder {
+			// Optional background tint — covers the full block area; the left stripe
+			// is drawn on top so it shows through correctly regardless.
+			if hasBg {
+				bgRect := image.Rect(boxX0, boxY0, boxX1, boxY1)
+				op := &ebiten.DrawImageOptions{}
+				op.GeoM.Scale(float64(bgRect.Dx()), float64(bgRect.Dy()))
+				op.GeoM.Translate(float64(bgRect.Min.X), float64(bgRect.Min.Y))
+				r.blocksLayer.DrawImage(bgImg, op)
+			}
 
-		// 4-sided border: left accent stripe + 1px top + 1px right + 1px bottom.
-		// boxY1-1 is the last pixel of the last cell's descender gap — below the
-		// baseline, typically blank for non-descender characters at normal sizes.
-		r.blocksLayer.SubImage(image.Rect(boxX0, boxY0, boxX0+stripeW, boxY1)).(*ebiten.Image).Fill(exitColor)
-		r.blocksLayer.SubImage(image.Rect(boxX0+stripeW, boxY0, boxX1, boxY0+1)).(*ebiten.Image).Fill(exitColor)
-		r.blocksLayer.SubImage(image.Rect(boxX1-1, boxY0, boxX1, boxY1)).(*ebiten.Image).Fill(exitColor)
-		r.blocksLayer.SubImage(image.Rect(boxX0, boxY1-1, boxX1, boxY1)).(*ebiten.Image).Fill(exitColor)
+			// 4-sided border: left accent stripe + 1px top + 1px right + 1px bottom.
+			r.blocksLayer.SubImage(image.Rect(boxX0, boxY0, boxX0+stripeW, boxY1)).(*ebiten.Image).Fill(exitColor)
+			r.blocksLayer.SubImage(image.Rect(boxX0+stripeW, boxY0, boxX1, boxY0+1)).(*ebiten.Image).Fill(exitColor)
+			r.blocksLayer.SubImage(image.Rect(boxX1-1, boxY0, boxX1, boxY1)).(*ebiten.Image).Fill(exitColor)
+			r.blocksLayer.SubImage(image.Rect(boxX0, boxY1-1, boxX1, boxY1)).(*ebiten.Image).Fill(exitColor)
+		}
 
 		// Badges and copy buttons only when the block top is visible.
 		if startDisplay < 0 {
@@ -145,7 +146,7 @@ func (r *Renderer) drawBlocksSnap(snap *blockSnap) {
 		if badgeRow == 0 && viewOff > 0 && visEnd > 0 {
 			badgeRow = 1
 		}
-		badgeY := rect.Min.Y + badgeRow*ch + pad
+		badgeY := originY + badgeRow*ch + pad
 		rightX := boxX1 - cw
 
 		blockRect := image.Rect(boxX0, boxY0, boxX1, boxY1)

@@ -118,6 +118,7 @@ var Defaults = Config{
 	Blocks: BlocksConfig{
 		Enabled:      false,
 		ShowDuration: true,
+		ShowBorder:   true,
 		BorderWidth:  3,
 		MaxHistory:   1000,
 		BorderColor:  "#1C1C2E",

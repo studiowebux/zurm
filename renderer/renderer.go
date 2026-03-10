@@ -37,6 +37,7 @@ type blockSnap struct {
 	cursorRow int
 	buf       *terminal.ScreenBuffer // pointer kept for TextRange in the click handler
 	paneRect  image.Rectangle
+	headerH   int // pane header height offset — block Y coords must include this
 }
 
 // Renderer implements ebiten.Game's Draw() logic.
@@ -257,6 +258,7 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 					cursorRow: p.Term.Buf.CursorRow,
 					buf:       p.Term.Buf,
 					paneRect:  p.Rect,
+					headerH:   p.HeaderH,
 				}
 				copy(snap.blocks, p.Term.Buf.Blocks)
 				if ab := p.Term.Buf.ActiveBlock(); ab != nil {
