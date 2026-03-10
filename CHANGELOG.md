@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-03-10
+
+### Fixed
+
+- Light theme: all 16 ANSI colors now meet WCAG AA (7:1+ contrast against #FAFAF8) — previous palette had 11 colors below 4.5:1, worst offender bright_white at 1.2:1
+
 ## [1.0.5] - 2026-03-09
 
 ### Fixed
