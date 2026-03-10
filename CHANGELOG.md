@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-03-09
+
+### Fixed
+
+- Clipboard encoding in .app bundles: set LANG=en_US.UTF-8 at startup so pbcopy/pbpaste handle multi-byte UTF-8 correctly (em dash, CJK, etc. no longer paste as mojibake)
+
 ## [1.0.3] - 2026-03-09
 
 ### Fixed
