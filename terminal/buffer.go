@@ -772,6 +772,12 @@ func (sb *ScreenBuffer) Resize(rows, cols int) {
 	if sb.CursorCol >= cols {
 		sb.CursorCol = cols - 1
 	}
+
+	// Invalidate completed blocks — without reflow, their absolute row indices
+	// become unreliable after a resize. Keep activeBlock alive so the current
+	// command sequence (A→B→C→D) completes; its positions may be approximate
+	// but losing it entirely drops the first post-resize command.
+	sb.Blocks = sb.Blocks[:0]
 }
 
 // UpdateColors replaces the default FG/BG, palette, and SGR defaults.

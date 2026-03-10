@@ -364,8 +364,12 @@ type BlocksConfig struct {
 	SuccessColor string `toml:"success_color"`
 	// FailColor is the hex border color for non-zero exit codes.
 	FailColor string `toml:"fail_color"`
+	// ShowBorder draws the 4-sided border (left stripe + top/right/bottom lines)
+	// and background tint. When false, only badges (exit code, duration) and
+	// hover copy buttons are rendered.
+	ShowBorder bool `toml:"show_border"`
 	// BgColor is an optional hex background tint drawn inside the block.
-	// Leave empty for no background tint.
+	// Leave empty for no background tint. Only drawn when show_border is true.
 	BgColor string `toml:"bg_color"`
 	// BgAlpha controls the opacity of the background tint (0.0–1.0).
 	BgAlpha float64 `toml:"bg_alpha"`
