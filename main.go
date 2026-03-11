@@ -1942,6 +1942,17 @@ func (g *Game) handleSearchInput() {
 		g.prevKeys[key] = pressed
 	}
 
+	// Cmd+V — paste clipboard into search query.
+	if meta && inpututil.IsKeyJustPressed(ebiten.KeyV) {
+		if out, err := exec.Command("pbpaste").Output(); err == nil {
+			line := strings.TrimSpace(strings.SplitN(strings.ToValidUTF8(string(out), ""), "\n", 2)[0])
+			if line != "" {
+				g.searchState.Query += line
+				g.screenDirty = true
+			}
+		}
+	}
+
 	// Printable character input.
 	if !meta {
 		for _, r := range ebiten.AppendInputChars(nil) {
@@ -4773,33 +4784,25 @@ func (g *Game) handleNoteInput() {
 		}
 	}
 
-	// Edge-triggered keys: Enter commits, Cmd+V pastes.
-	edgeKeys := []ebiten.Key{
-		ebiten.KeyEnter,
-		ebiten.KeyNumpadEnter,
-		ebiten.KeyV,
-	}
-	for _, key := range edgeKeys {
+	// Edge-triggered: Enter commits.
+	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyNumpadEnter} {
 		pressed := ebiten.IsKeyPressed(key)
-		wasPressed := g.prevKeys[key]
-		if pressed && !wasPressed {
-			switch key {
-			case ebiten.KeyEnter, ebiten.KeyNumpadEnter:
-				g.commitNote()
-				g.renameRepeatActive = false
-			case ebiten.KeyV:
-				if meta {
-					if out, err := exec.Command("pbpaste").Output(); err == nil {
-						ti.AddString(strings.ToValidUTF8(string(out), ""))
-						g.tabs[idx].NoteText = ti.Text
-					}
-				}
-			}
+		if pressed && !g.prevKeys[key] {
+			g.commitNote()
+			g.renameRepeatActive = false
 		}
 		g.prevKeys[key] = pressed
 	}
 	g.prevKeys[ebiten.KeyMeta] = meta
 	g.prevKeys[ebiten.KeyAlt] = alt
+
+	// Cmd+V — paste.
+	if meta && inpututil.IsKeyJustPressed(ebiten.KeyV) {
+		if out, err := exec.Command("pbpaste").Output(); err == nil {
+			ti.AddString(strings.ToValidUTF8(string(out), ""))
+			g.tabs[idx].NoteText = ti.Text
+		}
+	}
 
 	// Printable characters.
 	if !meta {
@@ -4869,33 +4872,25 @@ func (g *Game) handleRenameInput() {
 		}
 	}
 
-	// Handle other edge-triggered keys
-	edgeKeys := []ebiten.Key{
-		ebiten.KeyEnter,
-		ebiten.KeyNumpadEnter,
-		ebiten.KeyV,
-	}
-	for _, key := range edgeKeys {
+	// Edge-triggered: Enter commits.
+	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyNumpadEnter} {
 		pressed := ebiten.IsKeyPressed(key)
-		wasPressed := g.prevKeys[key]
-		if pressed && !wasPressed {
-			switch key {
-			case ebiten.KeyEnter, ebiten.KeyNumpadEnter:
-				g.commitRename()
-				g.renameRepeatActive = false
-			case ebiten.KeyV:
-				if meta {
-					if out, err := exec.Command("pbpaste").Output(); err == nil {
-						ti.AddString(strings.ToValidUTF8(string(out), ""))
-						g.tabs[idx].RenameText = ti.Text
-					}
-				}
-			}
+		if pressed && !g.prevKeys[key] {
+			g.commitRename()
+			g.renameRepeatActive = false
 		}
 		g.prevKeys[key] = pressed
 	}
 	g.prevKeys[ebiten.KeyMeta] = meta
 	g.prevKeys[ebiten.KeyAlt] = alt
+
+	// Cmd+V — paste.
+	if meta && inpututil.IsKeyJustPressed(ebiten.KeyV) {
+		if out, err := exec.Command("pbpaste").Output(); err == nil {
+			ti.AddString(strings.ToValidUTF8(string(out), ""))
+			g.tabs[idx].RenameText = ti.Text
+		}
+	}
 
 	// Handle regular text input
 	if !meta {
@@ -6267,34 +6262,24 @@ func (g *Game) handleURLInputInput() {
 		}
 	}
 
-	// Edge-triggered keys: Enter, Cmd+V.
-	edgeKeys := []ebiten.Key{
-		ebiten.KeyEnter,
-		ebiten.KeyNumpadEnter,
-		ebiten.KeyV,
-	}
-	for _, key := range edgeKeys {
+	// Edge-triggered: Enter submits.
+	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyNumpadEnter} {
 		pressed := ebiten.IsKeyPressed(key)
-		wasPressed := g.prevKeys[key]
-		if pressed && !wasPressed {
-			switch key {
-			case ebiten.KeyEnter, ebiten.KeyNumpadEnter:
-				q := strings.TrimSpace(g.urlInputState.Query)
-				if q != "" {
-					g.startLLMSFetch(q)
-				}
-			case ebiten.KeyV:
-				if meta {
-					out, err := exec.Command("pbpaste").Output()
-					if err == nil && len(out) > 0 {
-						// Take first line only, trim whitespace.
-						line := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
-						g.urlInputState.Query += line
-					}
-				}
+		if pressed && !g.prevKeys[key] {
+			q := strings.TrimSpace(g.urlInputState.Query)
+			if q != "" {
+				g.startLLMSFetch(q)
 			}
 		}
 		g.prevKeys[key] = pressed
+	}
+
+	// Cmd+V — paste (first line only).
+	if meta && inpututil.IsKeyJustPressed(ebiten.KeyV) {
+		if out, err := exec.Command("pbpaste").Output(); err == nil && len(out) > 0 {
+			line := strings.TrimSpace(strings.SplitN(strings.ToValidUTF8(string(out), ""), "\n", 2)[0])
+			g.urlInputState.Query += line
+		}
 	}
 
 	// Printable character input.

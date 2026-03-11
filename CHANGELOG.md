@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-03-10
+
+### Fixed
+
+- Cmd+V paste not working in Cmd+F search bar
+- Normalized all text input handlers (tab rename, tab note, URL input) to use `inpututil.IsKeyJustPressed` for paste — consistent with pane rename
+
 ## [1.0.6] - 2026-03-10
 
 ### Fixed
