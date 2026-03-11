@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-03-10
+
+### Added
+
+- macOS "Open With" handler: Zurm appears in Finder's right-click "Open With" menu for folders
+- CLI directory argument: `zurm /path/to/dir` or `open -a zurm /path/to/dir` opens at the given path
+- Apple Event handler for `kAEOpenDocuments` (fresh-launch only; running instance not supported in this release)
+
 ## [1.0.7] - 2026-03-10
 
 ### Fixed

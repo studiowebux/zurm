@@ -276,6 +276,14 @@ func main() {
 		return
 	}
 
+	// Resolve the initial directory from Apple Event (Finder "Open With") or CLI arg.
+	openDir := drainOpenWithEvents()
+	if openDir == "" {
+		if args := flag.Args(); len(args) > 0 {
+			openDir = args[0]
+		}
+	}
+
 	resolveShellPath()
 
 	cfg, err := config.Load()
@@ -373,7 +381,7 @@ func main() {
 	}
 	if len(initialTabs) == 0 {
 		// Use sanitized directory (handles .app bundles correctly)
-		initialDir := getInitialDirectory("")
+		initialDir := getInitialDirectory(openDir)
 		firstTab, tErr := tab.New(cfg, paneRect, fontR.CellW, fontR.CellH, initialDir)
 		if tErr != nil {
 			log.Fatalf("tab new: %v", tErr)
