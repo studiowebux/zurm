@@ -26,20 +26,21 @@ func isRunningFromAppBundle() bool {
 }
 
 // getInitialDirectory returns the appropriate initial directory for new tabs/panes.
-// When running from a .app bundle, always returns the user's home directory.
+// An explicitly requested directory always wins, even inside a .app bundle.
+// When running from a .app bundle with no explicit dir, returns the home directory.
 // Otherwise, returns the provided directory or current working directory.
 func getInitialDirectory(requestedDir string) string {
-	// If running from .app bundle, always use home directory
-	if isRunningFromAppBundle() {
-		if home, err := os.UserHomeDir(); err == nil {
-			return home
-		}
-	}
-
-	// If a specific directory was requested and it exists, use it
+	// Explicit request always wins — honours "Open With" and CLI paths from .app.
 	if requestedDir != "" {
 		if info, err := os.Stat(requestedDir); err == nil && info.IsDir() {
 			return requestedDir
+		}
+	}
+
+	// If running from .app bundle with no explicit dir, use home directory.
+	if isRunningFromAppBundle() {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
 		}
 	}
 
