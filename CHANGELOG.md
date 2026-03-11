@@ -56,6 +56,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - C1 control byte handler (0x80-0x9F) intercepting UTF-8 continuation bytes mid-sequence, breaking all multi-byte Unicode rendering (icons, arrows, CJK, Nerd Font glyphs)
 
+## [1.0.1] - 2026-03-08
+
+### Fixed
+
+- CI lint: resolve staticcheck SA4004 and gosec G115/G304 failures
+
 ## [1.0.0] - 2026-03-08
 
 ### Fixed
@@ -127,6 +133,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Search highlights drawn over text making it unreadable — now uses three-layer approach (backgrounds → highlights → text)
 - Search highlight misaligned on code blocks (missing +cw offset)
 - Panic in mergePaneToTab when source is the last tab
+
+## [0.18.0] - 2026-03-08
+
+### Added
+
+- llms.txt browser: Cmd+L opens URL input to fetch llms.txt from any domain
+- Both /llms.txt and /llms-full.txt fetched in parallel; Tab switches between them in the markdown viewer
+- URL input overlay: Cmd+V paste, backspace key repeat, domain normalization (strips protocol and known paths)
+- Hint mode: hold Cmd to show tab number badges
+- n/N match navigation while search bar is open in markdown viewer
+
+## [0.17.2] - 2026-03-08
+
+### Changed
+
+- README: comprehensive feature tables
+
+## [0.17.1] - 2026-03-08
+
+### Fixed
+
+- Stats overlay dismiss no longer leaves a stale pane cache — call `ClearPaneCache` on toggle off
 
 ## [0.17.0] - 2026-03-08
 
@@ -227,6 +255,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Stats overlay (Cmd+I): live TPS/FPS, goroutines, heap memory, GC pauses, tab/pane count, buffer dimensions
 - "Toggle Stats Overlay" command palette entry
+
+## [0.9.0] - 2026-03-06
+
+### Added
+
+- Config hot-reload (Cmd+,) — apply config changes without restarting
+- Theme system: load external TOML themes from `~/.config/zurm/themes/`
+- Theme merge: user-explicit palette colors override theme; implicit colors follow theme
 
 ## [0.10.0] - 2026-03-06
 
