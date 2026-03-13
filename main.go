@@ -1355,8 +1355,8 @@ func altPrintableSeq(key ebiten.Key) []byte {
 func (g *Game) handleFocus() {
 	focused := ebiten.IsFocused()
 
-	// Idle suspension: reduce TPS after 5 seconds unfocused.
-	if !focused && !g.suspended && !g.unfocusedAt.IsZero() &&
+	// Idle suspension: reduce TPS after 5 seconds unfocused (when auto_idle is enabled).
+	if g.cfg.Performance.AutoIdle && !focused && !g.suspended && !g.unfocusedAt.IsZero() &&
 		time.Since(g.unfocusedAt) > 5*time.Second {
 		ebiten.SetTPS(5)
 		g.suspended = true

@@ -59,7 +59,8 @@ lines = 10000
 wheel_lines_per_tick = 3   # lines scrolled per mouse wheel tick
 
 [performance]
-tps = 30   # Ebitengine tick rate (Update calls/sec); lower = less idle CPU
+tps       = 30     # Ebitengine tick rate (Update calls/sec); lower = less idle CPU
+auto_idle = true   # reduce TPS when unfocused to save CPU; false = keep rendering
 
 [input]
 double_click_ms = 300   # max ms between clicks to register as double-click
@@ -288,6 +289,10 @@ type PerformanceConfig struct {
 	// TPS is the Ebitengine tick rate (Update calls per second).
 	// Lower values reduce idle CPU. 30 is sufficient for a terminal.
 	TPS int `toml:"tps"`
+	// AutoIdle reduces TPS and pauses PTY readers when the window loses focus
+	// for more than 5 seconds. Saves CPU/memory when zurm is in the background.
+	// Disable if you need zurm to keep rendering while unfocused.
+	AutoIdle bool `toml:"auto_idle"`
 	// Pprof enables the net/http/pprof endpoint on localhost for runtime
 	// memory and goroutine profiling. Access via:
 	//   go tool pprof http://localhost:<pprof_port>/debug/pprof/heap

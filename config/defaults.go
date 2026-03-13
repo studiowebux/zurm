@@ -87,6 +87,7 @@ var Defaults = Config{
 	},
 	Performance: PerformanceConfig{
 		TPS:       30,
+		AutoIdle:  true,
 		Pprof:     false,
 		PprofPort: 6060,
 	},

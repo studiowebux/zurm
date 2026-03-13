@@ -25,7 +25,8 @@ dmg: bundle
 
 install: bundle
 	cp -r zurm.app /Applications/zurm.app
-	@echo "Installed to /Applications/zurm.app"
+	/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister -f /Applications/zurm.app
+	@echo "Installed to /Applications/zurm.app (registered with LaunchServices)"
 
 clean:
 	rm -rf zurm zurm.app zurm-macos-arm64.dmg
