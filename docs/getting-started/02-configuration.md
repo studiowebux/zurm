@@ -34,7 +34,8 @@ lines = 10000   # scrollback buffer size per pane
 wheel_lines_per_tick = 3   # lines scrolled per mouse wheel tick
 
 [performance]
-tps = 30   # Ebitengine tick rate (Update calls/sec); lower = less idle CPU
+tps       = 30     # Ebitengine tick rate (Update calls/sec); lower = less idle CPU
+auto_idle = true   # reduce TPS when unfocused to save CPU; false = keep rendering
 
 [input]
 double_click_ms = 300     # max ms between clicks to register as double-click

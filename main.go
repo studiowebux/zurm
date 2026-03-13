@@ -1347,16 +1347,18 @@ func altPrintableSeq(key ebiten.Key) []byte {
 }
 
 // handleFocus sends mode-1004 focus events when the window focus state changes.
-// On focus regain, resets input state so stale prevKeys don't swallow the first keystrokes.
-// Also manages idle suspension: after 5 seconds unfocused, TPS drops to 1 and
-// terminal polling goroutines are paused to minimize CPU and allocation pressure.
+// On focus regain, resets input state so stale prevKeys/prevMouseButtons don't swallow
+// the first events. Also manages idle suspension: after 5 seconds unfocused, TPS drops
+// to 5 and terminal polling goroutines are paused to minimize CPU/allocation pressure.
+// TPS=5 (not 1) ensures clicks and keystrokes that complete within the frame interval
+// are not silently dropped — at 5fps the worst-case input latency is 200ms.
 func (g *Game) handleFocus() {
 	focused := ebiten.IsFocused()
 
-	// Idle suspension: reduce TPS after 5 seconds unfocused.
-	if !focused && !g.suspended && !g.unfocusedAt.IsZero() &&
+	// Idle suspension: reduce TPS after 5 seconds unfocused (when auto_idle is enabled).
+	if g.cfg.Performance.AutoIdle && !focused && !g.suspended && !g.unfocusedAt.IsZero() &&
 		time.Since(g.unfocusedAt) > 5*time.Second {
-		ebiten.SetTPS(1)
+		ebiten.SetTPS(5)
 		g.suspended = true
 		for _, t := range g.tabs {
 			for _, leaf := range t.Layout.Leaves() {
@@ -1394,6 +1396,13 @@ func (g *Game) handleFocus() {
 					g.prevKeys[k] = false
 				}
 			}
+			// Reset mouse button edge-detection state on focus gain, matching
+			// prevKeys reset above. Stale prevMouseButtons[left]=true from the
+			// last interaction before focus loss would cause the first click to
+			// be silently skipped (pressed==was → no edge detected).
+			for btn := range g.prevMouseButtons {
+				g.prevMouseButtons[btn] = false
+			}
 			g.repeatActive = false
 			g.scrollAccum = 0
 
@@ -1404,6 +1413,7 @@ func (g *Game) handleFocus() {
 			// process resumes but needsRender() returns false because no PTY
 			// output arrived yet — the screen appears frozen without this.
 			g.screenDirty = true
+			g.renderer.SetLayoutDirty()
 			for _, t := range g.tabs {
 				for _, leaf := range t.Layout.Leaves() {
 					leaf.Pane.Term.Buf.Lock()
@@ -1417,6 +1427,33 @@ func (g *Game) handleFocus() {
 		}
 		g.prevFocused = focused
 		g.focused.Term.SendFocusEvent(focused)
+	}
+
+	// Emergency recovery for systems where IsFocused() doesn't reliably update
+	// after sleep/wake (e.g. work machines with screen lock or MDM policies).
+	// If still suspended but the user is clicking, unsuspend immediately without
+	// waiting for a focus-state transition. The click was already dispatched to
+	// the PTY by handleMouse(); this just lifts the paused flag so the PTY
+	// reader can deliver the shell response.
+	if g.suspended && (ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) ||
+		ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight)) {
+		ebiten.SetTPS(g.cfg.Performance.TPS)
+		g.suspended = false
+		g.unfocusedAt = time.Time{}
+		for _, t := range g.tabs {
+			for _, leaf := range t.Layout.Leaves() {
+				leaf.Pane.Term.SetPaused(false)
+			}
+		}
+		g.screenDirty = true
+		g.renderer.SetLayoutDirty()
+		for _, t := range g.tabs {
+			for _, leaf := range t.Layout.Leaves() {
+				leaf.Pane.Term.Buf.Lock()
+				leaf.Pane.Term.Buf.MarkAllDirty()
+				leaf.Pane.Term.Buf.Unlock()
+			}
+		}
 	}
 }
 

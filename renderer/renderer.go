@@ -214,6 +214,9 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 	}
 	if r.layoutDirty {
 		r.offscreen.Fill(r.borderColor)
+		// Clearing the offscreen invalidates all pane pixels — force full redraw.
+		// Without this, panes with unchanged gen skip DrawPane and show grey.
+		r.paneCache = make(map[*pane.Pane]*paneCacheEntry)
 		r.layoutDirty = false
 	} else if layout != nil && !zoomed {
 		r.drawDividers(layout)
