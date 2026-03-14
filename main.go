@@ -5959,6 +5959,7 @@ func serializePaneLayout(node *pane.LayoutNode) *session.PaneLayout {
 		}
 		if node.Pane != nil {
 			layout.CustomName = node.Pane.CustomName
+			layout.ServerSessionID = node.Pane.ServerSessionID
 		}
 	case pane.HSplit:
 		layout.Kind = "hsplit"
@@ -6013,10 +6014,16 @@ func deserializePaneLayout(cfg *config.Config, rect image.Rectangle, cellW, cell
 
 	switch layout.Kind {
 	case "leaf":
-		// All restored panes use a local PTY (Mode A). Server sessions are
-		// not persisted in session.json — attach via --attach or the palette.
 		dir := sanitizeDirectory(layout.Cwd)
-		p, err := pane.New(cfg, rect, cellW, cellH, dir)
+		var p *pane.Pane
+		var err error
+		if layout.ServerSessionID != "" {
+			// Reconnect to the zurm-server session (Mode B).
+			// Falls back to local PTY if the server or session is gone.
+			p, err = pane.NewServer(cfg, rect, cellW, cellH, dir, layout.ServerSessionID)
+		} else {
+			p, err = pane.New(cfg, rect, cellW, cellH, dir)
+		}
 		if err != nil {
 			return nil, err
 		}
