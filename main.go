@@ -5822,6 +5822,7 @@ func serializePaneLayout(node *pane.LayoutNode) *session.PaneLayout {
 		}
 		if node.Pane != nil {
 			layout.CustomName = node.Pane.CustomName
+			layout.ServerSessionID = node.Pane.ServerSessionID
 		}
 	case pane.HSplit:
 		layout.Kind = "hsplit"
@@ -5878,7 +5879,7 @@ func deserializePaneLayout(cfg *config.Config, rect image.Rectangle, cellW, cell
 	case "leaf":
 		// Create a new pane with the saved CWD
 		dir := sanitizeDirectory(layout.Cwd)
-		p, err := pane.New(cfg, rect, cellW, cellH, dir)
+		p, err := pane.New(cfg, rect, cellW, cellH, dir, layout.ServerSessionID)
 		if err != nil {
 			return nil, err
 		}

@@ -127,6 +127,10 @@ sync_interval    = 0            # seconds between zsh history re-imports; 0 = im
 # Encryption key: ~/.config/zurm/vault.key (auto-generated, 32-byte AES-256 key, mode 0600)
 # Right arrow accepts the ghost suggestion; space-prefix keeps commands private.
 
+[server]
+enabled = false   # delegate PTY sessions to zurm-server for persistence + remote access
+address = ""      # Unix socket path; empty = ~/.config/zurm/server.sock
+
 [theme]
 name = ""   # theme filename without .toml (e.g. "dark"); empty = no theme
             # themes live in ~/.config/zurm/themes/

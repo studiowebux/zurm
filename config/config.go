@@ -377,6 +377,15 @@ type VaultConfig struct {
 	SyncIntervalSecs int `toml:"sync_interval"`
 }
 
+type ServerConfig struct {
+	// Enabled controls whether zurm connects to a zurm-server instance.
+	// When false (default), zurm manages PTYs directly (Mode A).
+	Enabled bool `toml:"enabled"`
+	// Address is the Unix socket path of the zurm-server.
+	// Empty = ~/.config/zurm/server.sock
+	Address string `toml:"address"`
+}
+
 type ThemeConfig struct {
 	// Name is the theme filename without .toml extension (e.g. "dark", "light").
 	// Empty string means no theme — uses config colors directly.
@@ -432,6 +441,7 @@ type Config struct {
 	Voice        VoiceConfig        `toml:"voice"`
 	Theme        ThemeConfig        `toml:"theme"`
 	Vault        VaultConfig        `toml:"vault"`
+	Server       ServerConfig       `toml:"server"`
 }
 
 // ConfigDir returns the zurm configuration directory (~/.config/zurm).

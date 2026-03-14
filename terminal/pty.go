@@ -20,6 +20,10 @@ var renderSeq atomic.Uint64
 // When the value changes, at least one pane has new output since last draw.
 func RenderSeq() uint64 { return renderSeq.Load() }
 
+// BumpRenderSeq increments the global render sequence counter.
+// Called by ServerBackend after feeding output from a remote session.
+func BumpRenderSeq() { renderSeq.Add(1) }
+
 // PTYManager spawns a shell process attached to a pseudo-terminal.
 //
 // Pattern: goroutine-per-concern — one goroutine owns PTY reads,
