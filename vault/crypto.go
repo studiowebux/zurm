@@ -14,7 +14,7 @@ const keySize = 32 // AES-256
 // loadOrCreateKey reads the encryption key from path, or generates and stores
 // a new random 32-byte key if the file does not exist.
 func loadOrCreateKey(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 — path from config, not user HTTP input
 	if err == nil {
 		if len(data) != keySize {
 			return nil, fmt.Errorf("vault key file %s: expected %d bytes, got %d", path, keySize, len(data))

@@ -11,7 +11,7 @@ import (
 // (": timestamp:0;command"). Multi-line commands joined by trailing backslash
 // are concatenated.
 func ParseZshHistory(path string) ([]string, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 — path from config, not user HTTP input
 	if err != nil {
 		return nil, err
 	}
