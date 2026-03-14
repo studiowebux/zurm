@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"image"
@@ -19,6 +20,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"text/tabwriter"
 	"time"
 	"unicode"
 
@@ -28,8 +30,8 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/studiowebux/zurm/config"
 	"github.com/studiowebux/zurm/fileexplorer"
-	"github.com/studiowebux/zurm/markdown"
 	"github.com/studiowebux/zurm/help"
+	"github.com/studiowebux/zurm/markdown"
 	"github.com/studiowebux/zurm/pane"
 	"github.com/studiowebux/zurm/recorder"
 	"github.com/studiowebux/zurm/renderer"
@@ -38,6 +40,7 @@ import (
 	"github.com/studiowebux/zurm/terminal"
 	"github.com/studiowebux/zurm/vault"
 	"github.com/studiowebux/zurm/voice"
+	"github.com/studiowebux/zurm/zserver"
 )
 
 // version is set at build time via -ldflags "-X main.version=vX.Y.Z".
@@ -277,10 +280,22 @@ type Game struct {
 func main() {
 	noRestore := flag.Bool("no-restore", false, "skip session restore on launch")
 	showVersion := flag.Bool("version", false, "print version and exit")
+	listSessions := flag.Bool("list-sessions", false, "list active zurm-server sessions and exit")
+	flag.BoolVar(listSessions, "ls", false, "list active zurm-server sessions and exit (shorthand)")
+	attachID := flag.String("attach", "", "start zurm attached to the given server session ID")
+	flag.StringVar(attachID, "a", "", "start zurm attached to the given server session ID (shorthand)")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Printf("zurm %s\n", version)
+		return
+	}
+
+	if *listSessions {
+		if err := runListSessions(); err != nil {
+			fmt.Fprintf(os.Stderr, "zurm: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -387,6 +402,23 @@ func main() {
 			}
 		}
 	}
+	if *attachID != "" {
+		// --attach: open a single server-backed tab for the given session ID,
+		// replacing any session-restored tabs.
+		p, aErr := pane.NewServer(cfg, paneRect, fontR.CellW, fontR.CellH, "", *attachID)
+		if aErr != nil {
+			log.Fatalf("attach: %v", aErr)
+		}
+		layout := pane.NewLeaf(p)
+		layout.ComputeRects(paneRect, fontR.CellW, fontR.CellH, cfg.Window.Padding, cfg.Panes.DividerWidthPixels)
+		for _, leaf := range layout.Leaves() {
+			leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
+		}
+		attachTab := &tab.Tab{Layout: layout, Focused: p, Title: "tab 1"}
+		initialTabs = []*tab.Tab{attachTab}
+		initialActive = 0
+	}
+
 	if len(initialTabs) == 0 {
 		// Use sanitized directory (handles .app bundles correctly)
 		initialDir := getInitialDirectory(openDir)
@@ -1056,7 +1088,7 @@ func (g *Game) handleInput() {
 				// Cmd+F — open in-buffer search.
 				g.openSearch()
 
-			case meta && key == ebiten.KeyB:
+			case meta && !shift && key == ebiten.KeyB:
 				// Cmd+B — toggle command blocks.
 				g.blocksEnabled = !g.blocksEnabled
 				g.renderer.BlocksEnabled = g.blocksEnabled
@@ -5559,6 +5591,7 @@ func (g *Game) buildPalette() {
 		},
 		// Session
 		g.manualSaveSession,
+		g.attachServerSession,
 		// Recording
 		func() { g.screenshotPending = true; g.screenDirty = true },
 		g.toggleRecording,
@@ -5864,7 +5897,6 @@ func serializePaneLayout(node *pane.LayoutNode) *session.PaneLayout {
 		}
 		if node.Pane != nil {
 			layout.CustomName = node.Pane.CustomName
-			layout.ServerSessionID = node.Pane.ServerSessionID
 		}
 	case pane.HSplit:
 		layout.Kind = "hsplit"
@@ -5919,17 +5951,10 @@ func deserializePaneLayout(cfg *config.Config, rect image.Rectangle, cellW, cell
 
 	switch layout.Kind {
 	case "leaf":
-		// Create a new pane with the saved CWD.
-		// When ServerSessionID is set the pane was backed by zurm-server;
-		// re-attach via NewServer so the live session is resumed.
+		// All restored panes use a local PTY (Mode A). Server sessions are
+		// not persisted in session.json — attach via --attach or the palette.
 		dir := sanitizeDirectory(layout.Cwd)
-		var p *pane.Pane
-		var err error
-		if layout.ServerSessionID != "" {
-			p, err = pane.NewServer(cfg, rect, cellW, cellH, dir, layout.ServerSessionID)
-		} else {
-			p, err = pane.New(cfg, rect, cellW, cellH, dir)
-		}
+		p, err := pane.New(cfg, rect, cellW, cellH, dir)
 		if err != nil {
 			return nil, err
 		}
@@ -7265,4 +7290,135 @@ func (g *Game) sendViewerToPane() {
 	g.tabs = append(g.tabs, t)
 	g.switchTab(len(g.tabs) - 1)
 	g.screenDirty = true
+}
+
+// runListSessions connects to zurm-server, fetches the session list, prints a
+// table to stdout, and returns. Called by the --list-sessions / -ls flag before
+// the GUI starts.
+func runListSessions() error {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Printf("config load warning: %v (using defaults)", err)
+	}
+
+	addr := zserver.ResolveSocket(cfg.Server.Address)
+	conn, err := net.Dial("unix", addr)
+	if err != nil {
+		return fmt.Errorf("cannot connect to zurm-server at %s: %w", addr, err)
+	}
+	defer conn.Close()
+
+	if err := zserver.WriteMessage(conn, zserver.MsgListSessions, nil); err != nil {
+		return fmt.Errorf("send list request: %w", err)
+	}
+
+	msg, err := zserver.ReadMessage(conn)
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
+	}
+	if msg.Type != zserver.MsgSessionList {
+		return fmt.Errorf("unexpected response type 0x%02x", msg.Type)
+	}
+
+	var sessions []zserver.SessionInfo
+	if len(msg.Payload) > 0 {
+		if err := json.Unmarshal(msg.Payload, &sessions); err != nil {
+			return fmt.Errorf("decode session list: %w", err)
+		}
+	}
+
+	if len(sessions) == 0 {
+		fmt.Println("No active server sessions.")
+		return nil
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tPID\tSIZE\tDIR")
+	for _, s := range sessions {
+		fmt.Fprintf(w, "%s\t%d\t%dx%d\t%s\n", s.ID, s.PID, s.Cols, s.Rows, s.Dir)
+	}
+	w.Flush()
+	return nil
+}
+
+// attachServerSession connects to zurm-server, lists active sessions, and
+// populates the command palette with an entry per session. Selecting an entry
+// opens a new server-backed tab attached to that session.
+// Called from the "Attach to Server Session" palette action.
+func (g *Game) attachServerSession() {
+	addr := zserver.ResolveSocket(g.cfg.Server.Address)
+	conn, err := net.Dial("unix", addr)
+	if err != nil {
+		g.flashStatus("zurm-server unreachable")
+		return
+	}
+	defer conn.Close()
+
+	if err := zserver.WriteMessage(conn, zserver.MsgListSessions, nil); err != nil {
+		g.flashStatus("Session list request failed")
+		return
+	}
+
+	msg, err := zserver.ReadMessage(conn)
+	if err != nil {
+		g.flashStatus("Session list read failed")
+		return
+	}
+
+	var sessions []zserver.SessionInfo
+	if msg.Type == zserver.MsgSessionList && len(msg.Payload) > 0 {
+		if err := json.Unmarshal(msg.Payload, &sessions); err != nil {
+			g.flashStatus("Session list decode failed")
+			return
+		}
+	}
+
+	if len(sessions) == 0 {
+		g.flashStatus("No active server sessions")
+		return
+	}
+
+	// Append per-session palette entries. The base palette is restored on the
+	// next buildPalette call (theme switch, config reload, etc.).
+	for _, s := range sessions {
+		si := s // capture for closure
+		label := fmt.Sprintf("Attach: %s (pid %d, %dx%d, %s)", si.ID, si.PID, si.Cols, si.Rows, si.Dir)
+		g.paletteEntries = append(g.paletteEntries, renderer.PaletteEntry{Name: label})
+		g.paletteActions = append(g.paletteActions, func() {
+			g.openServerTabForSession(si.ID)
+		})
+	}
+
+	// Open palette pre-filtered to the injected entries.
+	g.paletteState.Open = true
+	g.paletteState.Query = "Attach: "
+	g.screenDirty = true
+}
+
+// openServerTabForSession opens a new tab backed by an existing zurm-server
+// session identified by sessionID.
+func (g *Game) openServerTabForSession(sessionID string) {
+	physW := int(float64(g.winW) * g.dpi)
+	physH := int(float64(g.winH) * g.dpi)
+	tabBarH := g.renderer.TabBarHeight()
+	statusBarH := g.renderer.StatusBarHeight()
+	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
+
+	p, err := pane.NewServer(g.cfg, paneRect, g.font.CellW, g.font.CellH, "", sessionID)
+	if err != nil {
+		g.flashStatus("Attach failed: " + err.Error())
+		return
+	}
+	layout := pane.NewLeaf(p)
+	layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
+	for _, leaf := range layout.Leaves() {
+		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
+	}
+	t := &tab.Tab{
+		Layout:  layout,
+		Focused: p,
+		Title:   fmt.Sprintf("tab %d", len(g.tabs)+1),
+	}
+	g.tabs = append(g.tabs, t)
+	g.switchTab(len(g.tabs) - 1)
 }

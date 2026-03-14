@@ -22,7 +22,7 @@ import (
 //  1. Same directory as the running zurm executable (os.Executable)
 //  2. PATH lookup for "zurm-server"
 func EnsureServer(socketPath, serverBinary string) (string, error) {
-	addr := resolveSocket(socketPath)
+	addr := ResolveSocket(socketPath)
 
 	// Fast path: server already running.
 	if isReachable(addr) {
@@ -51,9 +51,9 @@ func EnsureServer(socketPath, serverBinary string) (string, error) {
 	return "", fmt.Errorf("zurm-server did not become ready at %s within 2s", addr)
 }
 
-// resolveSocket returns the canonical socket path, applying the default when
+// ResolveSocket returns the canonical socket path, applying the default when
 // socketPath is empty.
-func resolveSocket(socketPath string) string {
+func ResolveSocket(socketPath string) string {
 	if socketPath != "" {
 		return socketPath
 	}

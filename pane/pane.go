@@ -32,7 +32,7 @@ type Pane struct {
 	RenameText string
 
 	// ServerSessionID is non-empty when this pane is backed by a zurm-server session (Mode B).
-	// Persisted in session.json so the session can be re-attached on restore.
+	// Not persisted in session.json — use --attach <id> or the palette to reattach.
 	ServerSessionID string
 }
 

@@ -10,13 +10,12 @@ import (
 
 // PaneLayout represents a single pane or split in the layout tree.
 type PaneLayout struct {
-	Kind            string      `json:"kind"`                        // "leaf", "hsplit", or "vsplit"
-	Ratio           float64     `json:"ratio,omitempty"`             // split ratio (0.0-1.0)
-	Cwd             string      `json:"cwd,omitempty"`               // working directory for leaf panes
-	CustomName      string      `json:"custom_name,omitempty"`       // user-set pane name
-	ServerSessionID string      `json:"server_session_id,omitempty"` // zurm-server session ID (Mode B)
-	Left            *PaneLayout `json:"left,omitempty"`              // left/top child for splits
-	Right           *PaneLayout `json:"right,omitempty"`             // right/bottom child for splits
+	Kind       string      `json:"kind"`                  // "leaf", "hsplit", or "vsplit"
+	Ratio      float64     `json:"ratio,omitempty"`       // split ratio (0.0-1.0)
+	Cwd        string      `json:"cwd,omitempty"`         // working directory for leaf panes
+	CustomName string      `json:"custom_name,omitempty"` // user-set pane name
+	Left       *PaneLayout `json:"left,omitempty"`        // left/top child for splits
+	Right      *PaneLayout `json:"right,omitempty"`       // right/bottom child for splits
 }
 
 // TabData holds the persisted state of a single tab.

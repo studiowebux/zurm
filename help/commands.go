@@ -61,6 +61,7 @@ func AllCommands() []Command {
 		{Name: "Toggle Stats Overlay", Shortcut: "Cmd+I"},
 		// Session
 		{Name: "Save Session", Shortcut: ""},
+		{Name: "Attach to Server Session", Shortcut: ""},
 		// Recording
 		{Name: "Take Screenshot", Shortcut: "Cmd+Shift+S"},
 		{Name: "Toggle Recording", Shortcut: "Cmd+Shift+."},
