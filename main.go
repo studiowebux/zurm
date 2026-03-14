@@ -147,7 +147,8 @@ type Game struct {
 
 	// Status bar state.
 	statusBarState renderer.StatusBarState
-	gitInfoCh     chan gitInfo     // receives async git status results
+	gitInfoCh     chan gitInfoResult  // persistent channel — receives async git status results
+	gitInfoGen    uint64             // incremented each query; stale results are discarded
 	gitInfoCancel context.CancelFunc // cancels the previous git info goroutine
 
 	// Tab switcher overlay state (pin-style).
@@ -417,6 +418,7 @@ func main() {
 		recDone:          make(chan string, 1),
 		screenshotDone:   make(chan string, 1),
 		tabHoverState:    renderer.TabHoverState{TabIdx: -1},
+		gitInfoCh:        make(chan gitInfoResult, 1),
 	}
 
 	game.renderer.BlocksEnabled = game.blocksEnabled
@@ -434,7 +436,8 @@ func main() {
 				histPath = filepath.Join(home, ".zsh_history")
 			}
 		}
-		game.vault = vault.Init(config.ConfigDir(), histPath, cfg.Vault.IgnorePrefix)
+		syncInterval := time.Duration(cfg.Vault.SyncIntervalSecs) * time.Second
+		game.vault = vault.Init(config.ConfigDir(), histPath, cfg.Vault.IgnorePrefix, cfg.Vault.MaxEntries, syncInterval)
 	}
 
 	// Seed focus history with the initial tab so Cmd+; can return to it.
@@ -1641,6 +1644,14 @@ type gitInfo struct {
 	Behind  int
 }
 
+// gitInfoResult pairs a query generation counter with the git status result.
+// drainGitBranch discards results whose gen no longer matches g.gitInfoGen,
+// preventing stale goroutines from overwriting a newer query's output.
+type gitInfoResult struct {
+	gen  uint64
+	info gitInfo
+}
+
 // llmsFetchResult is the result of an async llms.txt HTTP fetch.
 // Both files are fetched in parallel; either may be empty if unavailable.
 type llmsFetchResult struct {
@@ -1674,14 +1685,19 @@ func (g *Game) drainCwd() {
 			g.statusBarState.GitAhead = 0
 			g.statusBarState.GitBehind = 0
 			if g.cfg.StatusBar.ShowGit {
-				// Cancel any in-flight git query before starting a new one.
+				// Cancel any in-flight git query and drain its stale result.
 				if g.gitInfoCancel != nil {
 					g.gitInfoCancel()
 				}
+				select {
+				case <-g.gitInfoCh:
+				default:
+				}
+				g.gitInfoGen++
+				gen := g.gitInfoGen
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				g.gitInfoCancel = cancel
-				g.gitInfoCh = make(chan gitInfo, 1)
-				ch := g.gitInfoCh
+				ch := g.gitInfoCh // persistent channel, never replaced
 				go func() {
 					defer cancel()
 					info := gitInfo{}
@@ -1690,7 +1706,10 @@ func (g *Game) drainCwd() {
 					if out, err := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil { // #nosec G204
 						info.Branch = strings.TrimSpace(string(out))
 					} else {
-						ch <- info
+						select {
+						case ch <- gitInfoResult{gen: gen, info: info}:
+						default:
+						}
 						return
 					}
 
@@ -1725,7 +1744,10 @@ func (g *Game) drainCwd() {
 						}
 					}
 
-					ch <- info
+					select {
+					case ch <- gitInfoResult{gen: gen, info: info}:
+					default:
+					}
 				}()
 			}
 			g.screenDirty = true
@@ -1851,7 +1873,7 @@ func (g *Game) drainBlockDone() {
 // and queries the vault for a prefix-matched suggestion. The result is stored in
 // g.vaultSuggest for the renderer to draw as ghost text.
 func (g *Game) updateVaultSuggestion() {
-	if g.vault == nil {
+	if g.vault == nil || !g.cfg.Vault.GhostText {
 		g.vaultSuggest = ""
 		return
 	}
@@ -1899,19 +1921,19 @@ func (g *Game) updateVaultSuggestion() {
 }
 
 // drainGitBranch reads a completed async git info result when available.
+// Results from cancelled goroutines are discarded via generation check.
 func (g *Game) drainGitBranch() {
-	if g.gitInfoCh == nil {
-		return
-	}
 	select {
-	case info := <-g.gitInfoCh:
-		g.statusBarState.GitBranch = info.Branch
-		g.statusBarState.GitCommit = info.Commit
-		g.statusBarState.GitDirty = info.Dirty
-		g.statusBarState.GitStaged = info.Staged
-		g.statusBarState.GitAhead = info.Ahead
-		g.statusBarState.GitBehind = info.Behind
-		g.gitInfoCh = nil
+	case res := <-g.gitInfoCh:
+		if res.gen != g.gitInfoGen {
+			return // stale result from a superseded query — discard
+		}
+		g.statusBarState.GitBranch = res.info.Branch
+		g.statusBarState.GitCommit = res.info.Commit
+		g.statusBarState.GitDirty = res.info.Dirty
+		g.statusBarState.GitStaged = res.info.Staged
+		g.statusBarState.GitAhead = res.info.Ahead
+		g.statusBarState.GitBehind = res.info.Behind
 		g.screenDirty = true
 	default:
 	}

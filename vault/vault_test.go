@@ -154,7 +154,7 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 
 func TestLoadSaveRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	v := New(dir, " ")
+	v := New(dir, " ", 0)
 	v.Add("ls -la")
 	v.Add("git status")
 	v.Add(" secret") // should be ignored
@@ -163,7 +163,7 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	v2 := New(dir, " ")
+	v2 := New(dir, " ", 0)
 	if err := v2.Load(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}

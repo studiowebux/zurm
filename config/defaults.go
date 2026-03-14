@@ -130,7 +130,10 @@ var Defaults = Config{
 	},
 	Vault: VaultConfig{
 		Enabled:         false,
+		GhostText:       true,
 		IgnorePrefix:    " ",
 		SuggestionColor: "#555570",
+		MaxEntries:      0,
+		SyncIntervalSecs: 0,
 	},
 }

@@ -117,12 +117,15 @@ read_lines = 10         # lines to read on Cmd+Shift+U
 
 [vault]
 enabled          = false        # encrypted local command history + ghost suggestions
+ghost_text       = true         # show inline ghost suggestions while typing; false = keep history without suggestions
 history_path     = ""           # path to zsh history file; empty = ~/.zsh_history
 vault_path       = ""           # encrypted vault file path; empty = ~/.config/zurm/vault.enc
 ignore_prefix    = " "          # commands starting with a space are never stored (type " ssh ..." to hide it)
 suggestion_color = "#555570"    # ghost text color for inline suggestions
+max_entries      = 0            # cap on stored commands; 0 = unlimited
+sync_interval    = 0            # seconds between zsh history re-imports; 0 = import once at startup
 # Encryption key: ~/.config/zurm/vault.key (auto-generated, 32-byte AES-256 key, mode 0600)
-# Right arrow accepts the ghost suggestion; Tab cycles through matches; space-prefix keeps commands private.
+# Right arrow accepts the ghost suggestion; space-prefix keeps commands private.
 
 [theme]
 name = ""   # theme filename without .toml (e.g. "dark"); empty = no theme
