@@ -263,6 +263,7 @@ type Game struct {
 	vault          *vault.Vault
 	vaultSuggest   string // current ghost text (completion tail)
 	vaultLineCache string // last line used for suggestion (avoids recomputing every frame)
+	vaultSkip      int    // Tab cycles through matches: 0=most recent, 1=next, etc.
 
 	// Speech-to-text via macOS SFSpeechRecognizer.
 	listener              voice.Listener
@@ -1253,12 +1254,23 @@ func (g *Game) handleInput() {
 					sentToPTY = true
 				}
 
-			// Vault ghost accept: right-arrow accepts the suggestion (fish-style).
+			// Vault ghost accept: right-arrow accepts the current suggestion.
 			case !ctrl && !alt && !meta && key == ebiten.KeyArrowRight && g.vaultSuggest != "":
 				g.focused.Term.SendBytes([]byte(g.vaultSuggest))
 				g.vaultSuggest = ""
 				g.vaultLineCache = ""
+				g.vaultSkip = 0
 				sentToPTY = true
+
+			// Vault ghost cycle: Tab shows the next match.
+			case !ctrl && !alt && !meta && !shift && key == ebiten.KeyTab && g.vaultSuggest != "" && g.vault != nil:
+				g.vaultSkip++
+				next := g.vault.Suggest(g.vaultLineCache, g.vaultSkip)
+				if next == "" {
+					g.vaultSkip = 0 // wrap around to most recent
+					next = g.vault.Suggest(g.vaultLineCache, 0)
+				}
+				g.vaultSuggest = next
 
 			case ctrl || isSpecialKey(key):
 				g.focused.Term.Buf.RLock()
@@ -1891,7 +1903,8 @@ func (g *Game) updateVaultSuggestion() {
 		return // no change — keep current suggestion
 	}
 	g.vaultLineCache = lineStr
-	g.vaultSuggest = g.vault.Suggest(lineStr)
+	g.vaultSkip = 0
+	g.vaultSuggest = g.vault.Suggest(lineStr, g.vaultSkip)
 }
 
 // drainGitBranch reads a completed async git info result when available.

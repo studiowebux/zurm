@@ -120,14 +120,14 @@ func (v *Vault) Save() error {
 	return nil
 }
 
-// Suggest returns the completion tail for the best prefix-matched command.
-// The input is matched against the end of the visible line text (handles prompt).
-// Returns empty string if no match found.
+// Suggest returns the completion tail for a prefix-matched command.
+// skip=0 returns the most recent match, skip=1 the next, etc.
+// Returns empty string if no match at the given skip offset.
 //
 // Algorithm: for each history command (most recent first), check if the line
 // ends with a prefix of the command. The longest such prefix wins. This handles
 // arbitrary prompt formats without needing shell integration.
-func (v *Vault) Suggest(line string) string {
+func (v *Vault) Suggest(line string, skip int) string {
 	line = strings.TrimRight(line, " ")
 	if len(line) < 2 {
 		return ""
@@ -136,7 +136,7 @@ func (v *Vault) Suggest(line string) string {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
-	// Try each history command from most recent.
+	matched := 0
 	for i := len(v.commands) - 1; i >= 0; i-- {
 		cmd := v.commands[i]
 		if len(cmd) < 2 {
@@ -151,7 +151,11 @@ func (v *Vault) Suggest(line string) string {
 		}
 		for pfxLen := maxPfx; pfxLen >= 2; pfxLen-- {
 			if strings.HasSuffix(line, cmd[:pfxLen]) && len(cmd) > pfxLen {
-				return cmd[pfxLen:]
+				if matched == skip {
+					return cmd[pfxLen:]
+				}
+				matched++
+				break
 			}
 		}
 	}

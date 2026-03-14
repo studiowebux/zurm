@@ -37,7 +37,7 @@ func TestSuggestPrefixMatch(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := v.Suggest(tt.line)
+		got := v.Suggest(tt.line, 0)
 		if got != tt.want {
 			t.Errorf("Suggest(%q) = %q, want %q", tt.line, got, tt.want)
 		}
@@ -55,9 +55,45 @@ func TestSuggestMostRecent(t *testing.T) {
 	}
 
 	// Should match most recent (last in slice).
-	got := v.Suggest("$ git commit")
+	got := v.Suggest("$ git commit", 0)
 	if got != " -m 'new'" {
 		t.Errorf("Suggest() = %q, want %q", got, " -m 'new'")
+	}
+}
+
+func TestSuggestSkipCycle(t *testing.T) {
+	v := &Vault{index: make(map[string]struct{})}
+	v.commands = []string{
+		"git commit -m 'first'",
+		"git commit -m 'second'",
+		"git commit -m 'third'",
+	}
+	for _, cmd := range v.commands {
+		v.index[cmd] = struct{}{}
+	}
+
+	// skip=0 → most recent (third)
+	got := v.Suggest("$ git commit", 0)
+	if got != " -m 'third'" {
+		t.Errorf("skip=0: got %q, want %q", got, " -m 'third'")
+	}
+
+	// skip=1 → second most recent
+	got = v.Suggest("$ git commit", 1)
+	if got != " -m 'second'" {
+		t.Errorf("skip=1: got %q, want %q", got, " -m 'second'")
+	}
+
+	// skip=2 → oldest
+	got = v.Suggest("$ git commit", 2)
+	if got != " -m 'first'" {
+		t.Errorf("skip=2: got %q, want %q", got, " -m 'first'")
+	}
+
+	// skip=3 → no more matches, returns empty (caller wraps around)
+	got = v.Suggest("$ git commit", 3)
+	if got != "" {
+		t.Errorf("skip=3: got %q, want empty", got)
 	}
 }
 
