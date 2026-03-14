@@ -13,11 +13,12 @@ import (
 
 // OverlayState holds the rendering state for the keybinding overlay.
 type OverlayState struct {
-	Open         bool
-	SearchQuery  string
-	ScrollOffset int
-	MaxScroll    int // written by renderer each frame
-	RowH         int // written by renderer each frame
+	Open            bool
+	SearchQuery     string
+	SearchCursorPos int // rune index of the text cursor within SearchQuery
+	ScrollOffset    int
+	MaxScroll       int // written by renderer each frame
+	RowH            int // written by renderer each frame
 }
 
 // ConfirmState holds the rendering state for the close-confirmation dialog.
@@ -35,9 +36,10 @@ type DictationState struct {
 
 // URLInputState holds the rendering state for the llms.txt URL input overlay.
 type URLInputState struct {
-	Open    bool
-	Query   string
-	Loading bool
+	Open      bool
+	Query     string
+	CursorPos int // rune index of the text cursor within Query
+	Loading   bool
 }
 
 // SearchMatch stores the position of a search hit within a styled line.
@@ -65,10 +67,11 @@ type MarkdownViewerState struct {
 	RowH         int // written by renderer each frame
 
 	// Search state (Cmd+F / /).
-	SearchOpen    bool
-	SearchQuery   string
-	SearchMatches []SearchMatch // matches with position info
-	SearchIdx     int           // current match index (-1 = none)
+	SearchOpen      bool
+	SearchQuery     string
+	SearchCursorPos int // rune index of the text cursor within SearchQuery
+	SearchMatches   []SearchMatch // matches with position info
+	SearchIdx       int           // current match index (-1 = none)
 
 	// HasAlt is true when an alternate view is available (e.g. llms.txt ↔ llms-full.txt).
 	// When set, the hint bar shows "Tab switch".
@@ -241,7 +244,7 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 	searchBoxRect := image.Rect(panelX+panelPad, searchY, panelX+panelW-panelPad, searchY+searchH-2)
 	r.modalLayer.SubImage(searchBoxRect).(*ebiten.Image).Fill(r.ui.HoverBg)
 	r.drawOverlayBorder(searchBoxRect)
-	searchText := "Search: " + state.SearchQuery + "_"
+	searchText := "Search: " + inputWithCursor(state.SearchQuery, state.SearchCursorPos)
 	r.font.DrawString(r.modalLayer, searchText, panelX+panelPad+cw/2, searchY+3, r.ui.Fg)
 
 	// Divider.
@@ -774,7 +777,7 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 		label := "/"
 		r.font.DrawString(r.modalLayer, label, panelX+panelPad, barY+4, r.ui.Dim)
 		queryX := panelX + panelPad + cw*2
-		query := state.SearchQuery + "_" // cursor
+		query := inputWithCursor(state.SearchQuery, state.SearchCursorPos)
 		r.font.DrawString(r.modalLayer, query, queryX, barY+4, r.ui.Fg)
 
 		// Match count.
@@ -813,7 +816,7 @@ func (r *Renderer) drawURLInput(state *URLInputState) {
 
 	title := "Open llms.txt"
 	hint := "[Enter] fetch    [Esc] cancel"
-	inputText := state.Query + "_"
+	inputText := inputWithCursor(state.Query, state.CursorPos)
 	if state.Loading {
 		inputText = state.Query
 		hint = "Fetching..."

@@ -12,10 +12,11 @@ import (
 
 // SearchState holds the live state of the in-buffer search (Cmd+F).
 type SearchState struct {
-	Open    bool
-	Query   string
-	Matches []terminal.SearchMatch
-	Current int // index of the active (highlighted) match
+	Open      bool
+	Query     string
+	CursorPos int // rune index of the text cursor within Query
+	Matches   []terminal.SearchMatch
+	Current   int // index of the active (highlighted) match
 }
 
 // drawSearchBar renders the find bar above the status bar when search is open.
@@ -46,8 +47,8 @@ func (r *Renderer) drawSearchBar(state *SearchState) {
 	r.font.DrawString(r.offscreen, label, x, textY, dimFg)
 	x += len([]rune(label)) * r.font.CellW
 
-	// Query + blinking cursor marker.
-	r.font.DrawString(r.offscreen, state.Query+"_", x, textY, fg)
+	// Query + cursor at insertion point.
+	r.font.DrawString(r.offscreen, inputWithCursor(state.Query, state.CursorPos), x, textY, fg)
 
 	// Right side: match count then navigation hint.
 	hint := "↑↓ navigate · Esc close"

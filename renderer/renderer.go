@@ -310,7 +310,7 @@ func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int,
 					label = fmt.Sprintf("Pane %d", i+1)
 				}
 				if p.Renaming {
-					label = p.RenameText + "_"
+					label = inputWithCursor(p.RenameText, p.RenameCursorPos)
 				}
 				r.drawPaneOverlay(p.Rect, label, multiPane, viewOff, sbLen)
 
@@ -463,9 +463,9 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int, hintMode bool) {
 		// Tabs with notes show a trailing * indicator.
 		var title string
 		if t.Noting {
-			title = "Note: " + t.NoteText + "_"
+			title = "Note: " + inputWithCursor(t.NoteText, t.NoteCursorPos)
 		} else if t.Renaming {
-			title = t.RenameText + "_"
+			title = inputWithCursor(t.RenameText, t.RenameCursorPos)
 		} else {
 			title = t.DisplayTitle(i)
 			if t.PinnedSlot != 0 {

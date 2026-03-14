@@ -58,6 +58,7 @@ func AllBindings() []KeyBinding {
 		{Category: "Copy / Paste", Key: "Cmd+C", Description: "Copy selection"},
 		{Category: "Copy / Paste", Key: "Cmd+V", Description: "Paste"},
 		{Category: "Copy / Paste", Key: "Click+drag", Description: "Select text (auto-scrolls)"},
+		{Category: "Copy / Paste", Key: "Shift+Click", Description: "Extend selection to click"},
 		{Category: "Copy / Paste", Key: "Double-click", Description: "Select word"},
 		{Category: "Copy / Paste", Key: "Triple-click", Description: "Select line"},
 		{Category: "URLs", Key: "Cmd+Click", Description: "Open URL in browser"},

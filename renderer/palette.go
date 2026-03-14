@@ -17,9 +17,10 @@ type PaletteEntry struct {
 
 // PaletteState is the rendering + interaction state for the command palette.
 type PaletteState struct {
-	Open   bool
-	Query  string
-	Cursor int // index into the filtered list
+	Open      bool
+	Query     string
+	CursorPos int // rune index of the text cursor within Query
+	Cursor    int // index into the filtered list
 }
 
 
@@ -126,8 +127,8 @@ func (r *Renderer) drawPalette(allEntries []PaletteEntry, state *PaletteState) {
 	} else {
 		r.font.DrawString(r.modalLayer, query, queryX, promptY, ui.Fg)
 	}
-	// Cursor bar after query text.
-	cursorX := queryX + len([]rune(query))*r.font.CellW
+	// Cursor bar at CursorPos within query text.
+	cursorX := queryX + state.CursorPos*r.font.CellW
 	r.modalLayer.SubImage(image.Rect(cursorX, promptY, cursorX+2, promptY+r.font.CellH)).(*ebiten.Image).Fill(ui.Accent)
 
 	// Divider below input.
