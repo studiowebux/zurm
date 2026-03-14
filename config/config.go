@@ -134,6 +134,13 @@ volume   = 1.0     # volume (0.0–1.0; 1.0 = full)
 locale     = "en-US" # speech recognition language
 read_lines = 10     # lines to read on bell or Cmd+Shift+U (recent buffer)
 
+[vault]
+enabled        = false  # enable command vault (encrypted local command history + ghost suggestions)
+history_path   = ""     # path to zsh history file; empty = ~/.zsh_history
+vault_path     = ""     # path to encrypted vault file; empty = ~/.config/zurm/vault.enc
+ignore_prefix  = " "    # commands starting with this prefix are never stored (matches zsh HIST_IGNORE_SPACE)
+suggestion_color = "#555570"  # ghost text color for inline suggestions
+
 [theme]
 name = ""   # theme file name without .toml (e.g. "dark", "light"); empty = no theme
 
@@ -349,6 +356,19 @@ type VoiceConfig struct {
 	ReadLines int `toml:"read_lines"`
 }
 
+type VaultConfig struct {
+	// Enabled controls whether the command vault is active.
+	Enabled bool `toml:"enabled"`
+	// HistoryPath is the path to the zsh history file. Empty = ~/.zsh_history.
+	HistoryPath string `toml:"history_path"`
+	// VaultPath is the path to the encrypted vault file. Empty = ~/.config/zurm/vault.enc.
+	VaultPath string `toml:"vault_path"`
+	// IgnorePrefix excludes commands starting with this string (default: space).
+	IgnorePrefix string `toml:"ignore_prefix"`
+	// SuggestionColor is the hex color for ghost text suggestions.
+	SuggestionColor string `toml:"suggestion_color"`
+}
+
 type ThemeConfig struct {
 	// Name is the theme filename without .toml extension (e.g. "dark", "light").
 	// Empty string means no theme — uses config colors directly.
@@ -403,6 +423,7 @@ type Config struct {
 	Bell         BellConfig         `toml:"bell"`
 	Voice        VoiceConfig        `toml:"voice"`
 	Theme        ThemeConfig        `toml:"theme"`
+	Vault        VaultConfig        `toml:"vault"`
 }
 
 // ConfigDir returns the zurm configuration directory (~/.config/zurm).

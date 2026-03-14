@@ -82,6 +82,9 @@ Discord: https://discord.gg/BG5Erm9fNv
 | | Hint-mode links | Follow links by label, keyboard-driven navigation |
 | | History nav | Back/forward through browsed pages |
 | | Send to pane | Pipe content from llms.txt browser to the focused terminal |
+| **Vault** | Command history | Encrypted local command vault; imports ~/.zsh_history on first run |
+| | Ghost suggestions | Fish-style inline ghost text as you type; right arrow to accept |
+| | Privacy | Space-prefixed commands excluded; AES-256-GCM encryption at rest |
 | **Recording** | Screenshot | Cmd+Shift+S — PNG capture to ~/Pictures/zurm-screenshots/ |
 | | Screen recording | Cmd+Shift+. — FFMPEG MP4 at 30fps to ~/Movies/zurm-recordings/ |
 | | Status indicator | Elapsed time and file size shown in status bar while recording |
