@@ -6,6 +6,19 @@ import (
 	"github.com/studiowebux/zurm/config"
 )
 
+// inputWithCursor returns text with a block cursor character (|) inserted at
+// the given rune index. Used by all input field renderers instead of appending "_".
+func inputWithCursor(text string, pos int) string {
+	runes := []rune(text)
+	if pos < 0 {
+		pos = 0
+	}
+	if pos > len(runes) {
+		pos = len(runes)
+	}
+	return string(runes[:pos]) + "|" + string(runes[pos:])
+}
+
 // UIColors holds all derived UI chrome colors for overlays, menus, and panels.
 // Computed once from config.Config so draw functions never hard-code color literals.
 // Pattern: derived value — computed at renderer init, re-derived on config reload.

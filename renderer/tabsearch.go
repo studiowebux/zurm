@@ -11,9 +11,10 @@ import (
 
 // TabSearchState holds rendering and interaction state for the Cmd+J tab search overlay.
 type TabSearchState struct {
-	Open   bool
-	Query  string
-	Cursor int // index into the filtered list
+	Open      bool
+	Query     string
+	CursorPos int // rune index of the text cursor within Query
+	Cursor    int // index into the filtered list
 }
 
 const (
@@ -131,8 +132,8 @@ func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearc
 	} else {
 		r.font.DrawString(r.modalLayer, query, queryX, promptY, ui.Fg)
 	}
-	// Cursor bar.
-	cursorX := queryX + len([]rune(query))*cw
+	// Cursor bar at CursorPos within query text.
+	cursorX := queryX + state.CursorPos*cw
 	r.modalLayer.SubImage(image.Rect(cursorX, promptY, cursorX+2, promptY+ch)).(*ebiten.Image).Fill(ui.Accent)
 
 	// Divider below input.

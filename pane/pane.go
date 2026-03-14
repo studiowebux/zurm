@@ -28,8 +28,9 @@ type Pane struct {
 	// CustomName is set by the user via rename. Overrides ProcName in the pane label.
 	CustomName string
 	// Renaming is true while the user is typing a new pane name inline.
-	Renaming   bool
-	RenameText string
+	Renaming        bool
+	RenameText      string
+	RenameCursorPos int // rune index of the text cursor during rename
 
 	// ServerSessionID is non-empty when this pane is backed by a zurm-server session (Mode B).
 	// Not persisted in session.json — use --attach <id> or the palette to reattach.

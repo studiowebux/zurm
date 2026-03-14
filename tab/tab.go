@@ -20,16 +20,18 @@ type Tab struct {
 	UserRenamed bool
 
 	// Renaming is true while the user is typing a new name inline.
-	Renaming   bool
-	RenameText string
+	Renaming        bool
+	RenameText      string
+	RenameCursorPos int // rune index of the text cursor during rename
 
 	// Note is a persistent text annotation attached to this tab.
 	// Users can edit it via Cmd+Shift+N or the command palette.
 	Note string
 
 	// Noting is true while the user is editing the tab note inline.
-	Noting   bool
-	NoteText string
+	Noting        bool
+	NoteText      string
+	NoteCursorPos int // rune index of the text cursor during note edit
 
 	// PinnedSlot is a home-row letter ('a','s','d','f','g','h','j','k','l') if this
 	// tab is pinned to a pin slot, or 0 if not pinned.
