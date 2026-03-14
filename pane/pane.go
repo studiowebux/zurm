@@ -9,7 +9,6 @@ import (
 
 	"github.com/studiowebux/zurm/config"
 	"github.com/studiowebux/zurm/terminal"
-	"github.com/studiowebux/zurm/zserver"
 )
 
 // Pane wraps a Terminal with a physical pixel rect.
@@ -80,7 +79,7 @@ func New(cfg *config.Config, rect image.Rectangle, cellW, cellH int, dir, server
 
 // connectServer tries to attach to serverSessionID (if non-empty) or create a
 // new session via zurm-server.
-func connectServer(cfg *config.Config, serverSessionID string, cols, rows int, dir string) (*zserver.ServerBackend, error) {
+func connectServer(cfg *config.Config, serverSessionID string, cols, rows int, dir string) (*terminal.ServerBackend, error) {
 	addr := cfg.Server.Address
 	if addr == "" {
 		home, err := os.UserHomeDir()
@@ -91,7 +90,7 @@ func connectServer(cfg *config.Config, serverSessionID string, cols, rows int, d
 	}
 
 	if serverSessionID != "" {
-		return zserver.AttachServerBackend(addr, serverSessionID)
+		return terminal.AttachServerBackend(addr, serverSessionID)
 	}
 
 	shell := cfg.Shell.Program
@@ -102,5 +101,5 @@ func connectServer(cfg *config.Config, serverSessionID string, cols, rows int, d
 		}
 	}
 	env := terminal.BuildEnv(cols, rows)
-	return zserver.NewServerBackend(addr, shell, cfg.Shell.Args, cols, rows, env, dir)
+	return terminal.NewServerBackend(addr, shell, cfg.Shell.Args, cols, rows, env, dir)
 }
