@@ -1262,17 +1262,6 @@ func (g *Game) handleInput() {
 				g.vaultSkip = 0
 				sentToPTY = true
 
-			// Vault ghost cycle: Tab shows the next match.
-			case !ctrl && !alt && !meta && !shift && key == ebiten.KeyTab && g.vaultSuggest != "" && g.vault != nil:
-				g.vaultSkip++
-				next := g.vault.Suggest(g.vaultLineCache, g.vaultSkip)
-				if next == "" {
-					g.vaultSkip = 0 // wrap around to most recent
-					next = g.vault.Suggest(g.vaultLineCache, 0)
-				}
-				g.vaultSuggest = next
-				g.screenDirty = true
-
 			case ctrl || isSpecialKey(key):
 				g.focused.Term.Buf.RLock()
 				appCursor := g.focused.Term.Buf.AppCursorKeys
@@ -1863,6 +1852,7 @@ func (g *Game) drainBlockDone() {
 // g.vaultSuggest for the renderer to draw as ghost text.
 func (g *Game) updateVaultSuggestion() {
 	if g.vault == nil {
+		g.vaultSuggest = ""
 		return
 	}
 
@@ -5373,6 +5363,14 @@ func (g *Game) reloadConfig() {
 
 	// Rebuild palette to pick up new theme files.
 	g.buildPalette()
+
+	// Vault enable/disable: nil out vault and clear ghost when disabled.
+	if !g.cfg.Vault.Enabled && g.vault != nil {
+		g.vault = nil
+		g.vaultSuggest = ""
+		g.vaultLineCache = ""
+		g.vaultSkip = 0
+	}
 
 	g.screenDirty = true
 	g.flashStatus("Config reloaded")
