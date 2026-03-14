@@ -36,6 +36,7 @@ import (
 	"github.com/studiowebux/zurm/session"
 	"github.com/studiowebux/zurm/tab"
 	"github.com/studiowebux/zurm/terminal"
+	"github.com/studiowebux/zurm/vault"
 	"github.com/studiowebux/zurm/voice"
 )
 
@@ -258,6 +259,11 @@ type Game struct {
 	urlRepeatLast   time.Time
 	urlRepeatAlt    bool
 
+	// Command vault — encrypted history with ghost text suggestions.
+	vault          *vault.Vault
+	vaultSuggest   string // current ghost text (completion tail)
+	vaultLineCache string // last line used for suggestion (avoids recomputing every frame)
+
 	// Speech-to-text via macOS SFSpeechRecognizer.
 	listener              voice.Listener
 	dictationState        renderer.DictationState
@@ -419,6 +425,17 @@ func main() {
 	game.listener.InitListener()
 	game.buildPalette()
 
+	// Initialize command vault (encrypted local history + ghost suggestions).
+	if cfg.Vault.Enabled {
+		histPath := cfg.Vault.HistoryPath
+		if histPath == "" {
+			if home, err := os.UserHomeDir(); err == nil {
+				histPath = filepath.Join(home, ".zsh_history")
+			}
+		}
+		game.vault = vault.Init(config.ConfigDir(), histPath, cfg.Vault.IgnorePrefix)
+	}
+
 	// Seed focus history with the initial tab so Cmd+; can return to it.
 	game.focusHistory = []focusEntry{{tabIdx: initialActive, pane: initialTabs[initialActive].Focused}}
 	initialTabs[initialActive].SnapshotGen()
@@ -449,9 +466,14 @@ func main() {
 	if err := ebiten.RunGame(game); err != nil && err != ebiten.Termination {
 		log.Fatalf("ebiten: %v", err)
 	}
-	// Save session after the game loop exits, regardless of how it was terminated
-	// (Cmd+Q, red X button, last tab closed, or OS-level quit signal).
+	// Save session and vault after the game loop exits, regardless of how it was
+	// terminated (Cmd+Q, red X button, last tab closed, or OS-level quit signal).
 	game.saveSession()
+	if game.vault != nil {
+		if err := game.vault.Save(); err != nil {
+			log.Printf("vault save: %v", err)
+		}
+	}
 }
 
 // Update is called at 60 TPS by Ebitengine.
@@ -700,6 +722,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.lastPtySeq = terminal.RenderSeq()
 
 	g.renderer.HoveredURL = g.hoveredURL
+	g.renderer.VaultSuggestion = g.vaultSuggest
 	if g.activeTab >= 0 && g.activeTab < len(g.tabs) {
 		g.statusBarState.TabNote = g.tabs[g.activeTab].Note
 	}
@@ -1230,6 +1253,13 @@ func (g *Game) handleInput() {
 					sentToPTY = true
 				}
 
+			// Vault ghost accept: right-arrow accepts the suggestion (fish-style).
+			case !ctrl && !alt && !meta && key == ebiten.KeyArrowRight && g.vaultSuggest != "":
+				g.focused.Term.SendBytes([]byte(g.vaultSuggest))
+				g.vaultSuggest = ""
+				g.vaultLineCache = ""
+				sentToPTY = true
+
 			case ctrl || isSpecialKey(key):
 				g.focused.Term.Buf.RLock()
 				appCursor := g.focused.Term.Buf.AppCursorKeys
@@ -1258,6 +1288,9 @@ func (g *Game) handleInput() {
 		g.focused.Term.Buf.ClearSelection()
 		g.focused.Term.Buf.Unlock()
 	}
+
+	// Vault suggestion update — extract current line from buffer and query vault.
+	g.updateVaultSuggestion()
 
 	if g.repeatActive && ebiten.IsKeyPressed(g.repeatKey) {
 		now := time.Now()
@@ -1768,15 +1801,31 @@ func (g *Game) drainBell() {
 // When TTS is enabled, speaks output from the focused pane aloud.
 // Background tab channels are drained silently to prevent buildup.
 func (g *Game) drainBlockDone() {
-	// Drain all active tab panes — speak focused pane output if TTS enabled.
+	// Drain all active tab panes — speak focused pane output if TTS enabled,
+	// and capture completed commands for the vault.
 	for _, leaf := range g.layout.Leaves() {
 		select {
 		case text := <-leaf.Pane.Term.Buf.BlockDoneCh:
 			if g.cfg.Voice.Enabled && leaf.Pane == g.focused {
-				text = strings.TrimSpace(text)
-				if text != "" {
-					g.speaker.Speak(text, g.cfg.Voice.VoiceID, g.cfg.Voice.Rate, g.cfg.Voice.Pitch, g.cfg.Voice.Volume)
+				trimmed := strings.TrimSpace(text)
+				if trimmed != "" {
+					g.speaker.Speak(trimmed, g.cfg.Voice.VoiceID, g.cfg.Voice.Rate, g.cfg.Voice.Pitch, g.cfg.Voice.Volume)
 				}
+			}
+			// Capture the command text from the completed block for the vault.
+			if g.vault != nil {
+				leaf.Pane.Term.Buf.RLock()
+				if ab := leaf.Pane.Term.Buf.ActiveBlock(); ab == nil {
+					// Active block is nil after D fires — check the most recent completed block.
+					blocks := leaf.Pane.Term.Buf.Blocks
+					if len(blocks) > 0 {
+						cmd := strings.TrimSpace(blocks[len(blocks)-1].CommandText)
+						if cmd != "" {
+							g.vault.Add(cmd)
+						}
+					}
+				}
+				leaf.Pane.Term.Buf.RUnlock()
 			}
 		default:
 		}
@@ -1794,6 +1843,55 @@ func (g *Game) drainBlockDone() {
 			}
 		}
 	}
+}
+
+// updateVaultSuggestion extracts the current line from the focused pane's buffer
+// and queries the vault for a prefix-matched suggestion. The result is stored in
+// g.vaultSuggest for the renderer to draw as ghost text.
+func (g *Game) updateVaultSuggestion() {
+	if g.vault == nil {
+		return
+	}
+
+	buf := g.focused.Term.Buf
+	buf.RLock()
+	// No suggestions when scrolled back, in alt screen, or cursor is hidden.
+	if buf.ViewOffset != 0 || buf.IsAltActive() || !buf.CursorVisible {
+		buf.RUnlock()
+		g.vaultSuggest = ""
+		return
+	}
+
+	// Extract the text on the cursor row up to the cursor column.
+	row := buf.CursorRow
+	col := buf.CursorCol
+	cells := buf.Cells
+	if row < 0 || row >= len(cells) || col <= 0 {
+		buf.RUnlock()
+		g.vaultSuggest = ""
+		return
+	}
+
+	var line strings.Builder
+	for c := 0; c < col && c < len(cells[row]); c++ {
+		cell := cells[row][c]
+		if cell.Width == 0 {
+			continue // skip continuation cells
+		}
+		ch := cell.Char
+		if ch == 0 {
+			ch = ' '
+		}
+		line.WriteRune(ch)
+	}
+	buf.RUnlock()
+
+	lineStr := line.String()
+	if lineStr == g.vaultLineCache {
+		return // no change — keep current suggestion
+	}
+	g.vaultLineCache = lineStr
+	g.vaultSuggest = g.vault.Suggest(lineStr)
 }
 
 // drainGitBranch reads a completed async git info result when available.

@@ -93,6 +93,10 @@ type Renderer struct {
 	// HoveredURL is the URL currently under the cursor, if any.
 	// Set by main.go before DrawAll; read by DrawPane to render hover underline.
 	HoveredURL *terminal.URLMatch
+
+	// VaultSuggestion is the ghost text to display after the cursor.
+	// Set by main.go before DrawAll; cleared when no suggestion is available.
+	VaultSuggestion string
 }
 
 // CopyTarget identifies which part of a block to copy.
@@ -687,6 +691,19 @@ func (r *Renderer) drawPaneTo(dst *ebiten.Image, buf *terminal.ScreenBuffer, cur
 					config.ParseHexColor(r.cfg.Colors.Background),
 					r.cursorColor,
 					cell.Bold, cell.Underline, curW)
+			}
+
+			// Ghost text — vault suggestion rendered after cursor in dim color.
+			if r.VaultSuggestion != "" {
+				ghostColor := config.ParseHexColor(r.cfg.Vault.SuggestionColor)
+				ghostX := x + curW*cellW
+				for _, gr := range r.VaultSuggestion {
+					if ghostX >= rect.Max.X-pad {
+						break // clip at pane edge
+					}
+					r.font.DrawGlyph(dst, gr, ghostX, y, ghostColor, bg, false, false, 1)
+					ghostX += cellW
+				}
 			}
 		}
 	}

@@ -128,4 +128,9 @@ var Defaults = Config{
 		BgColor:      "",
 		BgAlpha:      0.0,
 	},
+	Vault: VaultConfig{
+		Enabled:         false,
+		IgnorePrefix:    " ",
+		SuggestionColor: "#555570",
+	},
 }

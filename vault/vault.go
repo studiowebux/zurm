@@ -1,0 +1,218 @@
+package vault
+
+import (
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+)
+
+// Vault stores and retrieves encrypted command history for autosuggestion.
+// Pattern: repository — single access point for persisted command data.
+type Vault struct {
+	mu       sync.RWMutex
+	commands []string           // deduplicated, most recent last
+	index    map[string]struct{} // O(1) dedup check
+	dirty    bool
+
+	vaultPath string
+	keyPath   string
+	ignorePfx string
+}
+
+// New creates a Vault configured for the given config directory.
+// Call Load() then ImportZshHistory() to populate.
+func New(configDir, ignorePfx string) *Vault {
+	return &Vault{
+		vaultPath: filepath.Join(configDir, "vault.enc"),
+		keyPath:   filepath.Join(configDir, "vault.key"),
+		ignorePfx: ignorePfx,
+		index:     make(map[string]struct{}),
+	}
+}
+
+// Load reads the encrypted vault file. Starts empty if the file is missing.
+func (v *Vault) Load() error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	data, err := os.ReadFile(v.vaultPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	key, err := loadOrCreateKey(v.keyPath)
+	if err != nil {
+		return err
+	}
+
+	plain, err := decrypt(data, key)
+	if err != nil {
+		return err
+	}
+
+	for _, line := range strings.Split(string(plain), "\n") {
+		cmd := strings.TrimSpace(line)
+		if cmd == "" {
+			continue
+		}
+		if _, exists := v.index[cmd]; !exists {
+			v.commands = append(v.commands, cmd)
+			v.index[cmd] = struct{}{}
+		}
+	}
+	return nil
+}
+
+// ImportZshHistory parses a zsh history file and merges new entries.
+// Commands matching the ignore prefix are skipped.
+func (v *Vault) ImportZshHistory(histPath string) error {
+	commands, err := ParseZshHistory(histPath)
+	if err != nil {
+		return err
+	}
+
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	for _, cmd := range commands {
+		if v.ignorePfx != "" && strings.HasPrefix(cmd, v.ignorePfx) {
+			continue
+		}
+		if _, exists := v.index[cmd]; !exists {
+			v.commands = append(v.commands, cmd)
+			v.index[cmd] = struct{}{}
+			v.dirty = true
+		}
+	}
+	return nil
+}
+
+// Save writes the vault to disk encrypted. No-op if nothing changed.
+func (v *Vault) Save() error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if !v.dirty {
+		return nil
+	}
+
+	data := []byte(strings.Join(v.commands, "\n"))
+
+	key, err := loadOrCreateKey(v.keyPath)
+	if err != nil {
+		return err
+	}
+
+	enc, err := encrypt(data, key)
+	if err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(v.vaultPath, enc, 0o600); err != nil {
+		return err
+	}
+	v.dirty = false
+	return nil
+}
+
+// Suggest returns the completion tail for the best prefix-matched command.
+// The input is matched against the end of the visible line text (handles prompt).
+// Returns empty string if no match found.
+//
+// Algorithm: for each history command (most recent first), check if the line
+// ends with a prefix of the command. The longest such prefix wins. This handles
+// arbitrary prompt formats without needing shell integration.
+func (v *Vault) Suggest(line string) string {
+	line = strings.TrimRight(line, " ")
+	if len(line) < 2 {
+		return ""
+	}
+
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	// Try each history command from most recent.
+	for i := len(v.commands) - 1; i >= 0; i-- {
+		cmd := v.commands[i]
+		if len(cmd) < 2 {
+			continue
+		}
+
+		// Check if line ends with a prefix of cmd.
+		// Try the longest prefix first (most specific match).
+		maxPfx := len(cmd)
+		if maxPfx > len(line) {
+			maxPfx = len(line)
+		}
+		for pfxLen := maxPfx; pfxLen >= 2; pfxLen-- {
+			if strings.HasSuffix(line, cmd[:pfxLen]) && len(cmd) > pfxLen {
+				return cmd[pfxLen:]
+			}
+		}
+	}
+	return ""
+}
+
+// Add inserts a command into the vault. Duplicates are moved to the end
+// (most recent position). Commands matching the ignore prefix are skipped.
+func (v *Vault) Add(cmd string) {
+	if v.ignorePfx != "" && strings.HasPrefix(cmd, v.ignorePfx) {
+		return
+	}
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return
+	}
+
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if _, exists := v.index[cmd]; exists {
+		// Move to end (most recent).
+		for i, c := range v.commands {
+			if c == cmd {
+				v.commands = append(v.commands[:i], v.commands[i+1:]...)
+				break
+			}
+		}
+	}
+	v.commands = append(v.commands, cmd)
+	v.index[cmd] = struct{}{}
+	v.dirty = true
+}
+
+// Len returns the number of stored commands.
+func (v *Vault) Len() int {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	return len(v.commands)
+}
+
+// Init loads the vault and imports zsh history in the background.
+// Errors are logged, not returned — the vault degrades gracefully.
+func Init(configDir, historyPath, ignorePfx string) *Vault {
+	v := New(configDir, ignorePfx)
+
+	go func() {
+		if err := v.Load(); err != nil {
+			log.Printf("vault load: %v", err)
+		}
+
+		if historyPath != "" {
+			if err := v.ImportZshHistory(historyPath); err != nil {
+				log.Printf("vault history import: %v", err)
+			}
+			if err := v.Save(); err != nil {
+				log.Printf("vault save: %v", err)
+			}
+			log.Printf("vault: loaded %d commands", v.Len())
+		}
+	}()
+
+	return v
+}
