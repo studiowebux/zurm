@@ -45,7 +45,8 @@ lines = 10000
 wheel_lines_per_tick = 3   # lines scrolled per mouse wheel tick
 
 [performance]
-tps = 30   # Ebitengine tick rate (Update calls/sec); lower = less idle CPU
+tps       = 30     # Ebitengine tick rate (Update calls/sec); lower = less idle CPU
+auto_idle = true   # reduce TPS when unfocused to save CPU; false = keep rendering
 
 [input]
 double_click_ms = 300   # max ms between clicks to register as double-click
@@ -139,8 +140,10 @@ sync_interval    = 0            # seconds between zsh history re-imports; 0 = im
 # Right arrow accepts the ghost suggestion; space-prefix keeps commands private.
 
 [server]
-enabled = false   # delegate PTY sessions to zurm-server for persistence + remote access
 address = ""      # Unix socket path; empty = ~/.config/zurm/server.sock
+binary  = ""      # zurm-server binary path; empty = next to zurm binary, then PATH
+# Server mode is per-pane opt-in: Cmd+Shift+B (tab), Cmd+Shift+H/V (splits).
+# zurm-server auto-starts on demand — no manual launch needed.
 
 [theme]
 name = ""   # theme file name without .toml (e.g. "dark", "light"); empty = no theme
