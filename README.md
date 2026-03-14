@@ -82,6 +82,12 @@ Discord: https://discord.gg/BG5Erm9fNv
 | | Hint-mode links | Follow links by label, keyboard-driven navigation |
 | | History nav | Back/forward through browsed pages |
 | | Send to pane | Pipe content from llms.txt browser to the focused terminal |
+| **Server (Mode B)** | Session persistence | Optional `zurm-server` daemon manages PTY sessions in the background |
+| | Auto-start | Server spawns on demand when you create a server pane — no manual setup |
+| | Per-pane opt-in | Cmd+Shift+B (tab), Cmd+Shift+H/V (split) — local panes unaffected |
+| | Reattach | Cmd+P → "Attach to Server Session" or `zurm -a <id>` (prefix match) |
+| | CLI | `zurm -ls` lists sessions; `zurm -a 7ff` attaches by short ID |
+| | Status indicator | [SERVER] badge in status bar when focused pane is server-backed |
 | **Vault** | Command history | Encrypted local command vault; imports ~/.zsh_history on first run |
 | | Ghost suggestions | Fish-style inline ghost text as you type; right arrow to accept |
 | | Privacy | Space-prefixed commands excluded; AES-256-GCM encryption at rest |
