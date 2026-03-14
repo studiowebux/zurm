@@ -17,7 +17,7 @@ import (
 type Terminal struct {
 	Buf              *ScreenBuffer
 	Cursor           *Cursor
-	pty              *PTYManager
+	pty              PtyBackend
 	parser           *Parser
 	cfg              *config.Config
 	TitleCh          chan string
@@ -79,7 +79,7 @@ func (t *Terminal) Start(dir string) error {
 		}
 	}
 
-	env := buildEnv(t.cfg.Window.Columns, t.cfg.Window.Rows)
+	env := BuildEnv(t.cfg.Window.Columns, t.cfg.Window.Rows)
 
 	pty, err := NewPTYManager(shell, t.cfg.Shell.Args, t.cfg.Window.Columns, t.cfg.Window.Rows, env, dir)
 	if err != nil {
@@ -92,13 +92,21 @@ func (t *Terminal) Start(dir string) error {
 
 // StartCmd launches a specific command (instead of the user's shell) in the PTY.
 func (t *Terminal) StartCmd(program string, args []string, dir string) error {
-	env := buildEnv(t.cfg.Window.Columns, t.cfg.Window.Rows)
+	env := BuildEnv(t.cfg.Window.Columns, t.cfg.Window.Rows)
 	pty, err := NewPTYManager(program, args, t.cfg.Window.Columns, t.cfg.Window.Rows, env, dir)
 	if err != nil {
 		return fmt.Errorf("terminal start cmd: %w", err)
 	}
 	t.pty = pty
 	t.pty.StartReader(t.parser, t.Buf, &t.paused)
+	return nil
+}
+
+// StartWithBackend attaches a pre-created PtyBackend (e.g. from zserver)
+// and starts its reader. The backend must already have a live session.
+func (t *Terminal) StartWithBackend(backend PtyBackend) error {
+	t.pty = backend
+	backend.StartReader(t.parser, t.Buf, &t.paused)
 	return nil
 }
 
@@ -387,8 +395,9 @@ func (t *Terminal) RefreshForeground() {
 	}()
 }
 
-// buildEnv constructs the child process environment.
-func buildEnv(cols, rows int) []string {
+// BuildEnv constructs the child process environment.
+// Exported so external backends (e.g. zserver) can build a compatible env.
+func BuildEnv(cols, rows int) []string {
 	env := os.Environ()
 	filtered := make([]string, 0, len(env)+4)
 	skip := map[string]bool{

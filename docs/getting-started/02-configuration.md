@@ -127,6 +127,12 @@ sync_interval    = 0            # seconds between zsh history re-imports; 0 = im
 # Encryption key: ~/.config/zurm/vault.key (auto-generated, 32-byte AES-256 key, mode 0600)
 # Right arrow accepts the ghost suggestion; space-prefix keeps commands private.
 
+[server]
+address = ""      # Unix socket path of zurm-server; empty = ~/.config/zurm/server.sock
+binary  = ""      # path to zurm-server binary; empty = look next to zurm binary, then PATH
+# Use Cmd+Shift+B to open a server-backed tab on demand. zurm-server is
+# auto-started when needed — no manual launch or enabled flag required.
+
 [theme]
 name = ""   # theme filename without .toml (e.g. "dark"); empty = no theme
             # themes live in ~/.config/zurm/themes/

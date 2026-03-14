@@ -135,10 +135,10 @@ locale     = "en-US" # speech recognition language
 read_lines = 10     # lines to read on bell or Cmd+Shift+U (recent buffer)
 
 [vault]
-enabled        = false  # enable command vault (encrypted local command history + ghost suggestions)
-history_path   = ""     # path to zsh history file; empty = ~/.zsh_history
-vault_path     = ""     # path to encrypted vault file; empty = ~/.config/zurm/vault.enc
-ignore_prefix  = " "    # commands starting with this prefix are never stored (matches zsh HIST_IGNORE_SPACE)
+enabled          = false  # enable command vault (encrypted local command history + ghost suggestions)
+history_path     = ""     # path to zsh history file; empty = ~/.zsh_history
+vault_path       = ""     # path to encrypted vault file; empty = ~/.config/zurm/vault.enc
+ignore_prefix    = " "    # commands starting with this prefix are never stored (matches zsh HIST_IGNORE_SPACE)
 suggestion_color = "#555570"  # ghost text color for inline suggestions
 
 [theme]
@@ -377,6 +377,15 @@ type VaultConfig struct {
 	SyncIntervalSecs int `toml:"sync_interval"`
 }
 
+type ServerConfig struct {
+	// Address is the Unix socket path of the zurm-server.
+	// Empty = ~/.config/zurm/server.sock
+	Address string `toml:"address"`
+	// Binary is the path to the zurm-server executable.
+	// Empty = look in the same directory as the zurm binary, then PATH.
+	Binary string `toml:"binary"`
+}
+
 type ThemeConfig struct {
 	// Name is the theme filename without .toml extension (e.g. "dark", "light").
 	// Empty string means no theme — uses config colors directly.
@@ -432,6 +441,7 @@ type Config struct {
 	Voice        VoiceConfig        `toml:"voice"`
 	Theme        ThemeConfig        `toml:"theme"`
 	Vault        VaultConfig        `toml:"vault"`
+	Server       ServerConfig       `toml:"server"`
 }
 
 // ConfigDir returns the zurm configuration directory (~/.config/zurm).

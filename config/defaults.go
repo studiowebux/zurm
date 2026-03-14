@@ -129,11 +129,15 @@ var Defaults = Config{
 		BgAlpha:      0.0,
 	},
 	Vault: VaultConfig{
-		Enabled:         false,
-		GhostText:       true,
-		IgnorePrefix:    " ",
-		SuggestionColor: "#555570",
-		MaxEntries:      0,
+		Enabled:          false,
+		GhostText:        true,
+		IgnorePrefix:     " ",
+		SuggestionColor:  "#555570",
+		MaxEntries:       0,
 		SyncIntervalSecs: 0,
+	},
+	Server: ServerConfig{
+		Address: "",
+		Binary:  "",
 	},
 }

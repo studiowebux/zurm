@@ -7,6 +7,7 @@
   - [Installation](getting-started/01-installation.md)
   - [Configuration](getting-started/02-configuration.md)
   - [Optional Fonts](getting-started/03-optional-fonts.md)
+  - [Server Mode](getting-started/04-server-mode.md)
 - Reference
   - [Emoji Limitations](reference/emoji-limitations.md)
 - Resources

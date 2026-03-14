@@ -1,10 +1,13 @@
 VERSION ?= dev
 LDFLAGS := -trimpath -ldflags "-s -w -X main.version=$(VERSION)"
 
-.PHONY: build bundle dmg install clean
+.PHONY: build build-server bundle dmg install clean
 
 build:
 	go build $(LDFLAGS) -o zurm .
+
+build-server:
+	go build $(LDFLAGS) -o zurm-server ./cmd/zurm-server
 
 bundle: build
 	rm -rf zurm.app
