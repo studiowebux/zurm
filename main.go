@@ -1271,6 +1271,7 @@ func (g *Game) handleInput() {
 					next = g.vault.Suggest(g.vaultLineCache, 0)
 				}
 				g.vaultSuggest = next
+				g.screenDirty = true
 
 			case ctrl || isSpecialKey(key):
 				g.focused.Term.Buf.RLock()
