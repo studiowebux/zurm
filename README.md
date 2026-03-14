@@ -144,6 +144,52 @@ go build -o zurm .
 ```bash
 ./zurm
 ./zurm --no-restore   # skip session restore, open a single fresh tab
+./zurm -ls            # list active zurm-server sessions
+./zurm -a 7ff         # attach to a server session by short ID prefix
+```
+
+## Server Mode (Mode B)
+
+zurm can delegate PTY sessions to a background daemon (`zurm-server`) so they survive GUI restarts. This is opt-in per pane — local panes are never affected.
+
+### Quick start
+
+1. Build: `make build && make build-server`
+2. Open zurm and press **Cmd+Shift+B** to create a server-backed tab
+3. zurm-server auto-starts in the background (no manual setup)
+4. Quit zurm, relaunch — the server pane reconnects with output preserved
+
+### Keybindings
+
+| Key | Action |
+|-----|--------|
+| Cmd+Shift+B | New server tab |
+| Cmd+Shift+H | Split horizontal (server pane) |
+| Cmd+Shift+V | Split vertical (server pane) |
+| Cmd+P → "Attach" | Attach to an existing server session |
+
+### CLI
+
+```bash
+zurm -ls              # list active sessions (ID, PID, size, dir)
+zurm -a <id>          # attach by full or short ID (Docker-style prefix matching)
+```
+
+### How it works
+
+- `zurm-server` is a headless daemon that owns PTY sessions
+- Each server pane connects over a Unix socket (`~/.config/zurm/server.sock`)
+- Sessions persist after zurm closes; reattach restores from a 64KB output replay buffer
+- Server auto-starts on first Cmd+Shift+B and stays alive in the background
+- `[SERVER]` indicator appears in the status bar for server-backed panes
+- If the server is unreachable, panes fall back to a local PTY silently
+
+### Config
+
+```toml
+[server]
+address = ""   # Unix socket path; empty = ~/.config/zurm/server.sock
+binary  = ""   # zurm-server binary path; empty = next to zurm or PATH
 ```
 
 ## Getting Started
