@@ -66,9 +66,11 @@ func (srv *Server) handleConn(conn net.Conn) {
 		}
 		s, err := srv.manager.Create(req.Shell, req.Args, req.Cols, req.Rows, req.Env, req.Dir)
 		if err != nil {
+			log.Printf("zserver: create session failed: %v", err)
 			WriteMessage(conn, MsgError, []byte(err.Error())) //nolint:errcheck
 			return
 		}
+		log.Printf("zserver: created session %s (pid %d, %dx%d, dir=%s)", s.ID, s.pid(), req.Cols, req.Rows, req.Dir)
 		info := SessionInfo{ID: s.ID, PID: s.pid(), Cols: s.Cols, Rows: s.Rows, Dir: s.Dir}
 		data, _ := json.Marshal(info)
 		WriteMessage(conn, MsgSessionInfo, data) //nolint:errcheck
@@ -82,9 +84,11 @@ func (srv *Server) handleConn(conn net.Conn) {
 		}
 		s, ok := srv.manager.Get(req.ID)
 		if !ok {
+			log.Printf("zserver: attach failed — session not found: %s", req.ID)
 			WriteMessage(conn, MsgError, []byte("session not found: "+req.ID)) //nolint:errcheck
 			return
 		}
+		log.Printf("zserver: client attached to session %s (pid %d)", s.ID, s.pid())
 		info := SessionInfo{ID: s.ID, PID: s.pid(), Cols: s.Cols, Rows: s.Rows, Dir: s.Dir}
 		data, _ := json.Marshal(info)
 		WriteMessage(conn, MsgSessionInfo, data) //nolint:errcheck
