@@ -128,8 +128,10 @@ sync_interval    = 0            # seconds between zsh history re-imports; 0 = im
 # Right arrow accepts the ghost suggestion; space-prefix keeps commands private.
 
 [server]
-enabled = false   # delegate PTY sessions to zurm-server for persistence + remote access
-address = ""      # Unix socket path; empty = ~/.config/zurm/server.sock
+address = ""      # Unix socket path of zurm-server; empty = ~/.config/zurm/server.sock
+binary  = ""      # path to zurm-server binary; empty = look next to zurm binary, then PATH
+# Use Cmd+Shift+B to open a server-backed tab on demand. zurm-server is
+# auto-started when needed — no manual launch or enabled flag required.
 
 [theme]
 name = ""   # theme filename without .toml (e.g. "dark"); empty = no theme

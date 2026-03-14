@@ -191,7 +191,7 @@ func (n *LayoutNode) FindParent(p *Pane) (*LayoutNode, bool) {
 // as the right child. Returns the new tree root and the new pane.
 func (n *LayoutNode) SplitH(p *Pane, cfg *config.Config, cellW, cellH int, dir string) (*LayoutNode, *Pane, error) {
 	// New pane gets a placeholder rect; ComputeRects will fix it after.
-	newPane, err := New(cfg, p.Rect, cellW, cellH, dir, "")
+	newPane, err := New(cfg, p.Rect, cellW, cellH, dir)
 	if err != nil {
 		return n, nil, err
 	}
@@ -213,7 +213,7 @@ func (n *LayoutNode) SplitH(p *Pane, cfg *config.Config, cellW, cellH int, dir s
 // SplitV splits the pane p vertically (top / bottom), creating a new pane
 // as the bottom child. Returns the new tree root and the new pane.
 func (n *LayoutNode) SplitV(p *Pane, cfg *config.Config, cellW, cellH int, dir string) (*LayoutNode, *Pane, error) {
-	newPane, err := New(cfg, p.Rect, cellW, cellH, dir, "")
+	newPane, err := New(cfg, p.Rect, cellW, cellH, dir)
 	if err != nil {
 		return n, nil, err
 	}

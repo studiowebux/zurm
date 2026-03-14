@@ -13,6 +13,7 @@ type KeyBinding struct {
 func AllBindings() []KeyBinding {
 	return []KeyBinding{
 		{Category: "Navigation", Key: "Cmd+T", Description: "New tab"},
+		{Category: "Navigation", Key: "Cmd+Shift+B", Description: "New server tab (Mode B)"},
 		{Category: "Navigation", Key: "Cmd+Shift+T", Description: "Tab switcher"},
 		{Category: "Navigation", Key: "Cmd+Shift+R", Description: "Rename tab"},
 		{Category: "Navigation", Key: "Cmd+Shift+N", Description: "Edit tab note"},

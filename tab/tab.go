@@ -72,7 +72,7 @@ func (t *Tab) CheckActivity() {
 // New creates a Tab with a single pane covering rect.
 // dir is the working directory for the shell; empty string inherits the parent process CWD.
 func New(cfg *config.Config, rect image.Rectangle, cellW, cellH int, dir string) (*Tab, error) {
-	p, err := pane.New(cfg, rect, cellW, cellH, dir, "")
+	p, err := pane.New(cfg, rect, cellW, cellH, dir)
 	if err != nil {
 		return nil, fmt.Errorf("tab new: %w", err)
 	}

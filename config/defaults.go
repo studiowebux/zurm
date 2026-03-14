@@ -137,7 +137,7 @@ var Defaults = Config{
 		SyncIntervalSecs: 0,
 	},
 	Server: ServerConfig{
-		Enabled: false,
 		Address: "",
+		Binary:  "",
 	},
 }

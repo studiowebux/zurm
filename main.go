@@ -1130,6 +1130,9 @@ func (g *Game) handleInput() {
 				g.screenDirty = true
 			case meta && key == ebiten.KeyT:
 				g.newTab()
+			case meta && shift && key == ebiten.KeyB:
+				// Cmd+Shift+B — new server-backed tab (Mode B); falls back to local PTY.
+				g.newServerTab()
 			case meta && shift && key == ebiten.KeyR:
 				g.startRenameTab(g.activeTab)
 			case meta && shift && key == ebiten.KeyN:
@@ -3652,6 +3655,45 @@ func (g *Game) newTab() {
 	g.switchTab(len(g.tabs) - 1)
 }
 
+// newServerTab creates a new tab whose root pane is backed by zurm-server (Mode B).
+// If the server binary is not found or the connection fails, the pane falls back
+// to a local PTY — the tab is always created.
+func (g *Game) newServerTab() {
+	physW := int(float64(g.winW) * g.dpi)
+	physH := int(float64(g.winH) * g.dpi)
+	tabBarH := g.renderer.TabBarHeight()
+	statusBarH := g.renderer.StatusBarHeight()
+	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
+
+	var dir string
+	switch g.cfg.Tabs.NewTabDir {
+	case "home":
+		if home, err := os.UserHomeDir(); err == nil {
+			dir = home
+		}
+	default: // "cwd"
+		dir = g.statusBarState.Cwd
+	}
+	dir = sanitizeDirectory(dir)
+
+	p, err := pane.NewServer(g.cfg, paneRect, g.font.CellW, g.font.CellH, dir, "")
+	if err != nil {
+		return
+	}
+	layout := pane.NewLeaf(p)
+	layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
+	for _, leaf := range layout.Leaves() {
+		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
+	}
+	t := &tab.Tab{
+		Layout:  layout,
+		Focused: p,
+		Title:   fmt.Sprintf("tab %d", len(g.tabs)+1),
+	}
+	g.tabs = append(g.tabs, t)
+	g.switchTab(len(g.tabs) - 1)
+}
+
 // closeActiveTab closes all panes in the active tab and removes it.
 func (g *Game) closeActiveTab() {
 	g.dismissTabHover()
@@ -5877,9 +5919,17 @@ func deserializePaneLayout(cfg *config.Config, rect image.Rectangle, cellW, cell
 
 	switch layout.Kind {
 	case "leaf":
-		// Create a new pane with the saved CWD
+		// Create a new pane with the saved CWD.
+		// When ServerSessionID is set the pane was backed by zurm-server;
+		// re-attach via NewServer so the live session is resumed.
 		dir := sanitizeDirectory(layout.Cwd)
-		p, err := pane.New(cfg, rect, cellW, cellH, dir, layout.ServerSessionID)
+		var p *pane.Pane
+		var err error
+		if layout.ServerSessionID != "" {
+			p, err = pane.NewServer(cfg, rect, cellW, cellH, dir, layout.ServerSessionID)
+		} else {
+			p, err = pane.New(cfg, rect, cellW, cellH, dir)
+		}
 		if err != nil {
 			return nil, err
 		}
