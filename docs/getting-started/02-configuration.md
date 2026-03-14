@@ -115,6 +115,13 @@ volume     = 1.0        # volume (0.0-1.0; 1.0 = full)
 locale     = "en-US"    # speech recognition language
 read_lines = 10         # lines to read on Cmd+Shift+U
 
+[vault]
+enabled          = false        # encrypted local command history + ghost suggestions
+history_path     = ""           # path to zsh history file; empty = ~/.zsh_history
+vault_path       = ""           # encrypted vault file path; empty = ~/.config/zurm/vault.enc
+ignore_prefix    = " "          # commands starting with this prefix are never stored
+suggestion_color = "#555570"    # ghost text color for inline suggestions
+
 [theme]
 name = ""   # theme filename without .toml (e.g. "dark"); empty = no theme
             # themes live in ~/.config/zurm/themes/
