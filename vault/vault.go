@@ -6,29 +6,32 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Vault stores and retrieves encrypted command history for autosuggestion.
 // Pattern: repository — single access point for persisted command data.
 type Vault struct {
 	mu       sync.RWMutex
-	commands []string           // deduplicated, most recent last
+	commands []string            // deduplicated, most recent last
 	index    map[string]struct{} // O(1) dedup check
 	dirty    bool
 
-	vaultPath string
-	keyPath   string
-	ignorePfx string
+	vaultPath  string
+	keyPath    string
+	ignorePfx  string
+	maxEntries int // 0 = unlimited
 }
 
 // New creates a Vault configured for the given config directory.
 // Call Load() then ImportZshHistory() to populate.
-func New(configDir, ignorePfx string) *Vault {
+func New(configDir, ignorePfx string, maxEntries int) *Vault {
 	return &Vault{
-		vaultPath: filepath.Join(configDir, "vault.enc"),
-		keyPath:   filepath.Join(configDir, "vault.key"),
-		ignorePfx: ignorePfx,
-		index:     make(map[string]struct{}),
+		vaultPath:  filepath.Join(configDir, "vault.enc"),
+		keyPath:    filepath.Join(configDir, "vault.key"),
+		ignorePfx:  ignorePfx,
+		maxEntries: maxEntries,
+		index:      make(map[string]struct{}),
 	}
 }
 
@@ -164,6 +167,7 @@ func (v *Vault) Suggest(line string, skip int) string {
 
 // Add inserts a command into the vault. Duplicates are moved to the end
 // (most recent position). Commands matching the ignore prefix are skipped.
+// When maxEntries > 0, the oldest entry is evicted to stay within the cap.
 func (v *Vault) Add(cmd string) {
 	if v.ignorePfx != "" && strings.HasPrefix(cmd, v.ignorePfx) {
 		return
@@ -184,6 +188,13 @@ func (v *Vault) Add(cmd string) {
 				break
 			}
 		}
+	} else {
+		// Evict oldest entry when cap is reached.
+		if v.maxEntries > 0 && len(v.commands) >= v.maxEntries {
+			oldest := v.commands[0]
+			v.commands = v.commands[1:]
+			delete(v.index, oldest)
+		}
 	}
 	v.commands = append(v.commands, cmd)
 	v.index[cmd] = struct{}{}
@@ -198,23 +209,41 @@ func (v *Vault) Len() int {
 }
 
 // Init loads the vault and imports zsh history in the background.
+// syncInterval > 0 enables periodic re-import of zsh history on that cadence.
 // Errors are logged, not returned — the vault degrades gracefully.
-func Init(configDir, historyPath, ignorePfx string) *Vault {
-	v := New(configDir, ignorePfx)
+func Init(configDir, historyPath, ignorePfx string, maxEntries int, syncInterval time.Duration) *Vault {
+	v := New(configDir, ignorePfx, maxEntries)
 
 	go func() {
 		if err := v.Load(); err != nil {
 			log.Printf("vault load: %v", err)
 		}
 
-		if historyPath != "" {
+		if historyPath == "" {
+			log.Printf("vault: loaded %d commands (no history path)", v.Len())
+			return
+		}
+
+		syncHistory := func() {
 			if err := v.ImportZshHistory(historyPath); err != nil {
 				log.Printf("vault history import: %v", err)
+				return
 			}
 			if err := v.Save(); err != nil {
 				log.Printf("vault save: %v", err)
 			}
-			log.Printf("vault: loaded %d commands", v.Len())
+		}
+
+		syncHistory()
+		log.Printf("vault: loaded %d commands", v.Len())
+
+		if syncInterval <= 0 {
+			return
+		}
+		ticker := time.NewTicker(syncInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			syncHistory()
 		}
 	}()
 

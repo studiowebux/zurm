@@ -359,6 +359,9 @@ type VoiceConfig struct {
 type VaultConfig struct {
 	// Enabled controls whether the command vault is active.
 	Enabled bool `toml:"enabled"`
+	// GhostText controls whether inline ghost suggestions are drawn while typing.
+	// Set to false to keep vault history without showing suggestions.
+	GhostText bool `toml:"ghost_text"`
 	// HistoryPath is the path to the zsh history file. Empty = ~/.zsh_history.
 	HistoryPath string `toml:"history_path"`
 	// VaultPath is the path to the encrypted vault file. Empty = ~/.config/zurm/vault.enc.
@@ -367,6 +370,11 @@ type VaultConfig struct {
 	IgnorePrefix string `toml:"ignore_prefix"`
 	// SuggestionColor is the hex color for ghost text suggestions.
 	SuggestionColor string `toml:"suggestion_color"`
+	// MaxEntries caps the number of commands stored in the vault. 0 = unlimited.
+	MaxEntries int `toml:"max_entries"`
+	// SyncIntervalSecs is how often (in seconds) the vault re-imports zsh history.
+	// 0 = import once at startup only.
+	SyncIntervalSecs int `toml:"sync_interval"`
 }
 
 type ThemeConfig struct {
