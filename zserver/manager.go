@@ -29,9 +29,10 @@ func (m *Manager) Create(shell string, args []string, cols, rows int, env []stri
 	m.sessions[id] = s
 	m.mu.Unlock()
 
-	// Remove from map when shell exits.
+	// Remove from map and close PTY when shell exits.
 	go func() {
 		<-s.Dead()
+		s.spty.close()
 		m.mu.Lock()
 		delete(m.sessions, id)
 		m.mu.Unlock()

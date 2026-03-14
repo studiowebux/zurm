@@ -146,7 +146,7 @@ func (srv *Server) serveSession(conn net.Conn, s *Session) {
 			}
 		case MsgDetachSession:
 			conn.Close()
-			break
+			return
 		}
 	}
 
