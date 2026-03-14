@@ -1070,7 +1070,7 @@ func (g *Game) handleInput() {
 			case meta && key == ebiten.KeyC:
 				g.copySelection()
 
-			case meta && key == ebiten.KeyV:
+			case meta && !shift && key == ebiten.KeyV:
 				g.handlePaste()
 				sentToPTY = true
 
