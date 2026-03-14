@@ -61,6 +61,10 @@ func AllCommands() []Command {
 		{Name: "Toggle Stats Overlay", Shortcut: "Cmd+I"},
 		// Session
 		{Name: "Save Session", Shortcut: ""},
+		// Server (Mode B)
+		{Name: "New Server Tab", Shortcut: "Cmd+Shift+B"},
+		{Name: "Split Horizontal (Server)", Shortcut: "Cmd+Shift+H"},
+		{Name: "Split Vertical (Server)", Shortcut: "Cmd+Shift+V"},
 		{Name: "Attach to Server Session", Shortcut: ""},
 		// Recording
 		{Name: "Take Screenshot", Shortcut: "Cmd+Shift+S"},

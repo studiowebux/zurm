@@ -1205,7 +1205,11 @@ func (g *Game) handleInput() {
 				g.toggleZoom()
 			case meta && shift && key == ebiten.KeyD:
 				g.splitV()
-			case meta && key == ebiten.KeyD:
+			case meta && shift && key == ebiten.KeyH:
+				g.splitHServer()
+			case meta && shift && key == ebiten.KeyV:
+				g.splitVServer()
+			case meta && !shift && key == ebiten.KeyD:
 				g.splitH()
 			case meta && key == ebiten.KeyW:
 				// Close pane if 2+ panes in tab; close tab if last pane.
@@ -4347,6 +4351,54 @@ func (g *Game) splitV() {
 	g.setFocus(newPane)
 }
 
+// splitHServer splits the focused pane horizontally with a server-backed pane (Cmd+Shift+H).
+func (g *Game) splitHServer() {
+	g.zoomed = false
+	physW := int(float64(g.winW) * g.dpi)
+	physH := int(float64(g.winH) * g.dpi)
+	tabBarH := g.renderer.TabBarHeight()
+	statusBarH := g.renderer.StatusBarHeight()
+	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
+
+	dir := sanitizeDirectory(g.statusBarState.Cwd)
+	newRoot, newPane, err := g.layout.SplitHServer(g.focused, g.cfg, g.font.CellW, g.font.CellH, dir)
+	if err != nil {
+		return
+	}
+	g.updateLayout(newRoot)
+	setPaneHeaders(g.layout, g.font.CellH)
+	g.layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
+	for _, leaf := range g.layout.Leaves() {
+		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
+	}
+	g.renderer.SetLayoutDirty()
+	g.setFocus(newPane)
+}
+
+// splitVServer splits the focused pane vertically with a server-backed pane (Cmd+Shift+V).
+func (g *Game) splitVServer() {
+	g.zoomed = false
+	physW := int(float64(g.winW) * g.dpi)
+	physH := int(float64(g.winH) * g.dpi)
+	tabBarH := g.renderer.TabBarHeight()
+	statusBarH := g.renderer.StatusBarHeight()
+	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
+
+	dir := sanitizeDirectory(g.statusBarState.Cwd)
+	newRoot, newPane, err := g.layout.SplitVServer(g.focused, g.cfg, g.font.CellW, g.font.CellH, dir)
+	if err != nil {
+		return
+	}
+	g.updateLayout(newRoot)
+	setPaneHeaders(g.layout, g.font.CellH)
+	g.layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
+	for _, leaf := range g.layout.Leaves() {
+		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
+	}
+	g.renderer.SetLayoutDirty()
+	g.setFocus(newPane)
+}
+
 // closePane removes a pane. Focuses the nearest remaining pane.
 func (g *Game) closePane(p *pane.Pane) {
 	g.zoomed = false
@@ -5596,6 +5648,10 @@ func (g *Game) buildPalette() {
 		},
 		// Session
 		g.manualSaveSession,
+		// Server (Mode B)
+		g.newServerTab,
+		g.splitHServer,
+		g.splitVServer,
 		g.attachServerSession,
 		// Recording
 		func() { g.screenshotPending = true; g.screenDirty = true },

@@ -232,6 +232,34 @@ func (n *LayoutNode) SplitV(p *Pane, cfg *config.Config, cellW, cellH int, dir s
 	return result, newPane, nil
 }
 
+// SplitHServer is like SplitH but the new pane is backed by zurm-server (Mode B).
+func (n *LayoutNode) SplitHServer(p *Pane, cfg *config.Config, cellW, cellH int, dir string) (*LayoutNode, *Pane, error) {
+	newPane, err := NewServer(cfg, p.Rect, cellW, cellH, dir, "")
+	if err != nil {
+		return n, nil, err
+	}
+	oldLeaf := NewLeaf(p)
+	newLeaf := NewLeaf(newPane)
+	split := &LayoutNode{Kind: HSplit, Left: oldLeaf, Right: newLeaf, Ratio: 0.5}
+	result := replaceLeaf(n, p, split)
+	result.InvalidateLeaves()
+	return result, newPane, nil
+}
+
+// SplitVServer is like SplitV but the new pane is backed by zurm-server (Mode B).
+func (n *LayoutNode) SplitVServer(p *Pane, cfg *config.Config, cellW, cellH int, dir string) (*LayoutNode, *Pane, error) {
+	newPane, err := NewServer(cfg, p.Rect, cellW, cellH, dir, "")
+	if err != nil {
+		return n, nil, err
+	}
+	oldLeaf := NewLeaf(p)
+	newLeaf := NewLeaf(newPane)
+	split := &LayoutNode{Kind: VSplit, Left: oldLeaf, Right: newLeaf, Ratio: 0.5}
+	result := replaceLeaf(n, p, split)
+	result.InvalidateLeaves()
+	return result, newPane, nil
+}
+
 // replaceLeaf returns a new tree with the leaf containing p replaced by replacement.
 func replaceLeaf(n *LayoutNode, p *Pane, replacement *LayoutNode) *LayoutNode {
 	if n.Kind == Leaf {

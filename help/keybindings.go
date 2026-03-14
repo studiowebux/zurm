@@ -42,6 +42,8 @@ func AllBindings() []KeyBinding {
 		{Category: "Panes", Key: "palette", Description: "Move pane to next/prev tab"},
 		{Category: "Panes", Key: "Cmd+D", Description: "Split horizontal"},
 		{Category: "Panes", Key: "Cmd+Shift+D", Description: "Split vertical"},
+		{Category: "Panes", Key: "Cmd+Shift+H", Description: "Split horizontal (server)"},
+		{Category: "Panes", Key: "Cmd+Shift+V", Description: "Split vertical (server)"},
 		{Category: "Panes", Key: "Cmd+Arrow", Description: "Focus adjacent pane"},
 		{Category: "Panes", Key: "Cmd+Opt+Arrow", Description: "Resize pane split"},
 		{Category: "Panes", Key: "Cmd+[ / ]", Description: "Cycle panes"},
