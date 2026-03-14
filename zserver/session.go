@@ -66,14 +66,14 @@ func (s *Session) unsubscribe(ch chan []byte) {
 	close(ch)
 }
 
-func (s *Session) write(p []byte) { s.spty.write(p) } //nolint:errcheck
+func (s *Session) write(p []byte) { s.spty.write(p) } // #nosec G104 — best-effort PTY write; process may already be dead
 
 func (s *Session) resize(cols, rows int) {
 	s.mu.Lock()
 	s.Cols = cols
 	s.Rows = rows
 	s.mu.Unlock()
-	s.spty.resize(cols, rows) //nolint:errcheck
+	s.spty.resize(cols, rows) // #nosec G104 — best-effort resize; PTY may be gone if process exited
 }
 
 func (s *Session) pid() int { return s.spty.pid() }

@@ -17,13 +17,13 @@ type Server struct {
 // NewServer creates a Server bound to the given Unix socket path.
 // Any stale socket file at socketPath is removed before binding.
 func NewServer(socketPath string) (*Server, error) {
-	os.Remove(socketPath) //nolint:errcheck
+	os.Remove(socketPath) // #nosec G104 — stale socket cleanup; file may not exist, error is irrelevant
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
 		return nil, err
 	}
 	if err := os.Chmod(socketPath, 0o600); err != nil {
-		ln.Close()
+		ln.Close() // #nosec G104 — error cleanup path, socket is being abandoned
 		return nil, err
 	}
 	return &Server{manager: NewManager(), listener: ln}, nil
@@ -41,7 +41,7 @@ func (srv *Server) Serve() {
 }
 
 // Close shuts the server down.
-func (srv *Server) Close() { srv.listener.Close() }
+func (srv *Server) Close() { srv.listener.Close() } // #nosec G104 — shutdown; error is unactionable
 
 func (srv *Server) handleConn(conn net.Conn) {
 	defer conn.Close()
@@ -55,47 +55,47 @@ func (srv *Server) handleConn(conn net.Conn) {
 	case MsgListSessions:
 		list := srv.manager.List()
 		data, _ := json.Marshal(list)
-		WriteMessage(conn, MsgSessionList, data) //nolint:errcheck
+		WriteMessage(conn, MsgSessionList, data) // #nosec G104 — fire-and-forget response; client may have disconnected
 		return
 
 	case MsgCreateSession:
 		var req CreateSessionRequest
 		if err := json.Unmarshal(msg.Payload, &req); err != nil {
-			WriteMessage(conn, MsgError, []byte("invalid create request: "+err.Error())) //nolint:errcheck
+			WriteMessage(conn, MsgError, []byte("invalid create request: "+err.Error())) // #nosec G104 — error response; client may have disconnected
 			return
 		}
 		s, err := srv.manager.Create(req.Shell, req.Args, req.Cols, req.Rows, req.Env, req.Dir)
 		if err != nil {
 			log.Printf("zserver: create session failed: %v", err)
-			WriteMessage(conn, MsgError, []byte(err.Error())) //nolint:errcheck
+			WriteMessage(conn, MsgError, []byte(err.Error())) // #nosec G104 — error response; client may have disconnected
 			return
 		}
 		log.Printf("zserver: created session %s (pid %d, %dx%d, dir=%s)", s.ID, s.pid(), req.Cols, req.Rows, req.Dir)
 		info := SessionInfo{ID: s.ID, PID: s.pid(), Cols: s.Cols, Rows: s.Rows, Dir: s.Dir}
 		data, _ := json.Marshal(info)
-		WriteMessage(conn, MsgSessionInfo, data) //nolint:errcheck
+		WriteMessage(conn, MsgSessionInfo, data) // #nosec G104 — fire-and-forget; if write fails serveSession will detect the broken connection
 		srv.serveSession(conn, s)
 
 	case MsgAttachSession:
 		var req AttachSessionRequest
 		if err := json.Unmarshal(msg.Payload, &req); err != nil {
-			WriteMessage(conn, MsgError, []byte("invalid attach request: "+err.Error())) //nolint:errcheck
+			WriteMessage(conn, MsgError, []byte("invalid attach request: "+err.Error())) // #nosec G104 — error response; client may have disconnected
 			return
 		}
 		s, ok := srv.manager.Get(req.ID)
 		if !ok {
 			log.Printf("zserver: attach failed — session not found: %s", req.ID)
-			WriteMessage(conn, MsgError, []byte("session not found: "+req.ID)) //nolint:errcheck
+			WriteMessage(conn, MsgError, []byte("session not found: "+req.ID)) // #nosec G104 — error response; client may have disconnected
 			return
 		}
 		log.Printf("zserver: client attached to session %s (pid %d)", s.ID, s.pid())
 		info := SessionInfo{ID: s.ID, PID: s.pid(), Cols: s.Cols, Rows: s.Rows, Dir: s.Dir}
 		data, _ := json.Marshal(info)
-		WriteMessage(conn, MsgSessionInfo, data) //nolint:errcheck
+		WriteMessage(conn, MsgSessionInfo, data) // #nosec G104 — fire-and-forget; if write fails serveSession will detect the broken connection
 		srv.serveSession(conn, s)
 
 	default:
-		WriteMessage(conn, MsgError, []byte("unexpected message type")) //nolint:errcheck
+		WriteMessage(conn, MsgError, []byte("unexpected message type")) // #nosec G104 — error response; client may have disconnected
 	}
 }
 
@@ -106,7 +106,7 @@ func (srv *Server) serveSession(conn net.Conn, s *Session) {
 
 	// Replay buffered output so the client sees recent terminal state.
 	if snap := s.replay.snapshot(); len(snap) > 0 {
-		WriteMessage(conn, MsgOutput, snap) //nolint:errcheck
+		WriteMessage(conn, MsgOutput, snap) // #nosec G104 — fire-and-forget replay; connection loss detected in reader goroutine
 	}
 
 	// Goroutine: session output → client.
@@ -123,7 +123,7 @@ func (srv *Server) serveSession(conn net.Conn, s *Session) {
 					return
 				}
 			case <-s.Dead():
-				WriteMessage(conn, MsgSessionDead, nil) //nolint:errcheck
+				WriteMessage(conn, MsgSessionDead, nil) // #nosec G104 — best-effort notification; client may have already disconnected
 				return
 			}
 		}
@@ -145,7 +145,7 @@ func (srv *Server) serveSession(conn net.Conn, s *Session) {
 				s.resize(cols, rows)
 			}
 		case MsgDetachSession:
-			conn.Close()
+			conn.Close() // #nosec G104 — intentional teardown; error is unactionable
 			return
 		}
 	}

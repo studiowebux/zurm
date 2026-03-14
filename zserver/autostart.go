@@ -70,7 +70,7 @@ func isReachable(addr string) bool {
 	if err != nil {
 		return false
 	}
-	conn.Close()
+	conn.Close() // #nosec G104 — probe connection; only checking reachability, error is irrelevant
 	return true
 }
 

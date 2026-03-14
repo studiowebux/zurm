@@ -48,9 +48,9 @@ func (s *sessionPTY) pid() int {
 
 func (s *sessionPTY) close() {
 	if s.cmd.Process != nil {
-		s.cmd.Process.Signal(syscall.SIGHUP) //nolint:errcheck
+		s.cmd.Process.Signal(syscall.SIGHUP) // #nosec G104 — best-effort signal; process may already be dead
 	}
-	s.ptmx.Close()
+	s.ptmx.Close() // #nosec G104 — cleanup; error is unactionable during shutdown
 }
 
 // startReader launches the goroutine that reads raw PTY output.
@@ -59,7 +59,7 @@ func (s *sessionPTY) startReader(handler func([]byte)) {
 	go func() {
 		defer func() {
 			close(s.dead)
-			s.cmd.Wait() //nolint:errcheck
+			s.cmd.Wait() // #nosec G104 — reap the child process; exit status is tracked via the dead channel, not the error
 		}()
 		buf := make([]byte, 4096)
 		for {

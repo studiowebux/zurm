@@ -30,26 +30,29 @@ func NewServerBackend(address, shell string, args []string, cols, rows int, env 
 	req := zserver.CreateSessionRequest{Shell: shell, Args: args, Cols: cols, Rows: rows, Env: env, Dir: dir}
 	data, _ := json.Marshal(req)
 	if err := zserver.WriteMessage(conn, zserver.MsgCreateSession, data); err != nil {
-		conn.Close()
+		conn.Close() // #nosec G104 — error cleanup; already returning an error
 		return nil, fmt.Errorf("send create: %w", err)
 	}
 
 	msg, err := zserver.ReadMessage(conn)
 	if err != nil {
-		conn.Close()
+		conn.Close() // #nosec G104 — error cleanup; already returning an error
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 	if msg.Type == zserver.MsgError {
-		conn.Close()
+		conn.Close() // #nosec G104 — error cleanup; already returning an error
 		return nil, fmt.Errorf("server: %s", msg.Payload)
 	}
 	if msg.Type != zserver.MsgSessionInfo {
-		conn.Close()
+		conn.Close() // #nosec G104 — error cleanup; already returning an error
 		return nil, fmt.Errorf("unexpected response type 0x%02x", msg.Type)
 	}
 
 	var info zserver.SessionInfo
-	json.Unmarshal(msg.Payload, &info) //nolint:errcheck
+	if err := json.Unmarshal(msg.Payload, &info); err != nil {
+		conn.Close() // #nosec G104 — error cleanup; already returning an error
+		return nil, fmt.Errorf("decode session info: %w", err)
+	}
 
 	return &ServerBackend{
 		conn:      conn,
@@ -69,26 +72,29 @@ func AttachServerBackend(address, sessionID string) (*ServerBackend, error) {
 	req := zserver.AttachSessionRequest{ID: sessionID}
 	data, _ := json.Marshal(req)
 	if err := zserver.WriteMessage(conn, zserver.MsgAttachSession, data); err != nil {
-		conn.Close()
+		conn.Close() // #nosec G104 — error cleanup; already returning an error
 		return nil, fmt.Errorf("send attach: %w", err)
 	}
 
 	msg, err := zserver.ReadMessage(conn)
 	if err != nil {
-		conn.Close()
+		conn.Close() // #nosec G104 — error cleanup; already returning an error
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 	if msg.Type == zserver.MsgError {
-		conn.Close()
+		conn.Close() // #nosec G104 — error cleanup; already returning an error
 		return nil, fmt.Errorf("server: %s", msg.Payload)
 	}
 	if msg.Type != zserver.MsgSessionInfo {
-		conn.Close()
+		conn.Close() // #nosec G104 — error cleanup; already returning an error
 		return nil, fmt.Errorf("unexpected response type 0x%02x", msg.Type)
 	}
 
 	var info zserver.SessionInfo
-	json.Unmarshal(msg.Payload, &info) //nolint:errcheck
+	if err := json.Unmarshal(msg.Payload, &info); err != nil {
+		conn.Close() // #nosec G104 — error cleanup; already returning an error
+		return nil, fmt.Errorf("decode session info: %w", err)
+	}
 
 	return &ServerBackend{
 		conn:      conn,
@@ -112,8 +118,8 @@ func (b *ServerBackend) Write(p []byte) (int, error) {
 // Resize sends a resize request to the server.
 func (b *ServerBackend) Resize(cols, rows int) error {
 	payload := make([]byte, 4)
-	binary.LittleEndian.PutUint16(payload[0:2], uint16(cols)) //nolint:gosec
-	binary.LittleEndian.PutUint16(payload[2:4], uint16(rows)) //nolint:gosec
+	binary.LittleEndian.PutUint16(payload[0:2], uint16(cols)) // #nosec G115 — terminal dimensions always fit uint16
+	binary.LittleEndian.PutUint16(payload[2:4], uint16(rows)) // #nosec G115 — terminal dimensions always fit uint16
 	return zserver.WriteMessage(b.conn, zserver.MsgResize, payload)
 }
 
@@ -122,8 +128,8 @@ func (b *ServerBackend) Dead() <-chan struct{} { return b.dead }
 
 // Close detaches from the session. The session remains alive on the server.
 func (b *ServerBackend) Close() {
-	zserver.WriteMessage(b.conn, zserver.MsgDetachSession, nil) //nolint:errcheck
-	b.conn.Close()
+	zserver.WriteMessage(b.conn, zserver.MsgDetachSession, nil) // #nosec G104 — best-effort detach notification; connection is being torn down
+	b.conn.Close()                                               // #nosec G104 — intentional teardown; error is unactionable
 }
 
 // Pid returns the shell PID reported by the server.

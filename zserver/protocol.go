@@ -53,7 +53,7 @@ type SessionInfo struct {
 // WriteMessage writes a length-prefixed message: [4-byte LE length][1-byte type][payload].
 func WriteMessage(w io.Writer, msgType uint8, payload []byte) error {
 	hdr := make([]byte, 5)
-	binary.LittleEndian.PutUint32(hdr[:4], uint32(len(payload)))
+	binary.LittleEndian.PutUint32(hdr[:4], uint32(len(payload))) // #nosec G115 — payload length bounded by 64MB check in ReadMessage
 	hdr[4] = msgType
 	if _, err := w.Write(hdr); err != nil {
 		return fmt.Errorf("write header: %w", err)
