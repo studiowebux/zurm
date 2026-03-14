@@ -403,9 +403,14 @@ func main() {
 		}
 	}
 	if *attachID != "" {
-		// --attach: open a single server-backed tab for the given session ID,
-		// replacing any session-restored tabs.
-		p, aErr := pane.NewServer(cfg, paneRect, fontR.CellW, fontR.CellH, "", *attachID)
+		// --attach: resolve prefix (like Docker short IDs), then open a single
+		// server-backed tab for the matched session.
+		addr := zserver.ResolveSocket(cfg.Server.Address)
+		fullID, resolveErr := resolveSessionPrefix(addr, *attachID)
+		if resolveErr != nil {
+			log.Fatalf("attach: %v", resolveErr)
+		}
+		p, aErr := pane.NewServer(cfg, paneRect, fontR.CellW, fontR.CellH, "", fullID)
 		if aErr != nil {
 			log.Fatalf("attach: %v", aErr)
 		}
@@ -7292,6 +7297,59 @@ func (g *Game) sendViewerToPane() {
 	g.screenDirty = true
 }
 
+// fetchSessions connects to zurm-server and returns the list of active sessions.
+func fetchSessions(addr string) ([]zserver.SessionInfo, error) {
+	conn, err := net.Dial("unix", addr)
+	if err != nil {
+		return nil, fmt.Errorf("cannot connect to zurm-server at %s: %w", addr, err)
+	}
+	defer conn.Close()
+
+	if err := zserver.WriteMessage(conn, zserver.MsgListSessions, nil); err != nil {
+		return nil, fmt.Errorf("send list request: %w", err)
+	}
+
+	msg, err := zserver.ReadMessage(conn)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if msg.Type != zserver.MsgSessionList {
+		return nil, fmt.Errorf("unexpected response type 0x%02x", msg.Type)
+	}
+
+	var sessions []zserver.SessionInfo
+	if len(msg.Payload) > 0 {
+		if err := json.Unmarshal(msg.Payload, &sessions); err != nil {
+			return nil, fmt.Errorf("decode session list: %w", err)
+		}
+	}
+	return sessions, nil
+}
+
+// resolveSessionPrefix matches a short prefix (like Docker short IDs) against
+// active server sessions. Returns the full ID or an error if zero or multiple
+// sessions match.
+func resolveSessionPrefix(addr, prefix string) (string, error) {
+	sessions, err := fetchSessions(addr)
+	if err != nil {
+		return "", err
+	}
+	var matches []string
+	for _, s := range sessions {
+		if len(s.ID) >= len(prefix) && s.ID[:len(prefix)] == prefix {
+			matches = append(matches, s.ID)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no session matching prefix %q", prefix)
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("ambiguous prefix %q matches %d sessions: %v", prefix, len(matches), matches)
+	}
+}
+
 // runListSessions connects to zurm-server, fetches the session list, prints a
 // table to stdout, and returns. Called by the --list-sessions / -ls flag before
 // the GUI starts.
@@ -7302,29 +7360,9 @@ func runListSessions() error {
 	}
 
 	addr := zserver.ResolveSocket(cfg.Server.Address)
-	conn, err := net.Dial("unix", addr)
+	sessions, err := fetchSessions(addr)
 	if err != nil {
-		return fmt.Errorf("cannot connect to zurm-server at %s: %w", addr, err)
-	}
-	defer conn.Close()
-
-	if err := zserver.WriteMessage(conn, zserver.MsgListSessions, nil); err != nil {
-		return fmt.Errorf("send list request: %w", err)
-	}
-
-	msg, err := zserver.ReadMessage(conn)
-	if err != nil {
-		return fmt.Errorf("read response: %w", err)
-	}
-	if msg.Type != zserver.MsgSessionList {
-		return fmt.Errorf("unexpected response type 0x%02x", msg.Type)
-	}
-
-	var sessions []zserver.SessionInfo
-	if len(msg.Payload) > 0 {
-		if err := json.Unmarshal(msg.Payload, &sessions); err != nil {
-			return fmt.Errorf("decode session list: %w", err)
-		}
+		return err
 	}
 
 	if len(sessions) == 0 {
@@ -7347,30 +7385,10 @@ func runListSessions() error {
 // Called from the "Attach to Server Session" palette action.
 func (g *Game) attachServerSession() {
 	addr := zserver.ResolveSocket(g.cfg.Server.Address)
-	conn, err := net.Dial("unix", addr)
+	sessions, err := fetchSessions(addr)
 	if err != nil {
 		g.flashStatus("zurm-server unreachable")
 		return
-	}
-	defer conn.Close()
-
-	if err := zserver.WriteMessage(conn, zserver.MsgListSessions, nil); err != nil {
-		g.flashStatus("Session list request failed")
-		return
-	}
-
-	msg, err := zserver.ReadMessage(conn)
-	if err != nil {
-		g.flashStatus("Session list read failed")
-		return
-	}
-
-	var sessions []zserver.SessionInfo
-	if msg.Type == zserver.MsgSessionList && len(msg.Payload) > 0 {
-		if err := json.Unmarshal(msg.Payload, &sessions); err != nil {
-			g.flashStatus("Session list decode failed")
-			return
-		}
 	}
 
 	if len(sessions) == 0 {
