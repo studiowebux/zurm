@@ -45,28 +45,43 @@ func trimTrailingPunct(u string) string {
 }
 
 // DetectURLs scans the visible buffer rows and returns all URL matches
-// with display-space coordinates. Continuation cells (Width=0) are skipped
-// when building the search text; a colMap converts rune positions back to
-// column indices so highlights cover the correct cells.
+// with display-space coordinates. Consecutive soft-wrapped physical rows are
+// merged into a single logical line before the regex runs, so URLs that wrap
+// across row boundaries are detected correctly.
+// Continuation cells (Width=0) are skipped; rowMap/colMap convert rune
+// positions back to (display row, display column) pairs.
 // Caller must hold at least an RLock.
 func (sb *ScreenBuffer) DetectURLs() []URLMatch {
 	var matches []URLMatch
-	for row := 0; row < sb.Rows; row++ {
-		// Build clean text and colMap skipping continuation cells.
-		var runes []rune
-		var colMap []int // colMap[runeIdx] = display column
-		for col := 0; col < sb.Cols; col++ {
-			cell := sb.GetDisplayCell(row, col)
-			if cell.Width == 0 {
-				continue
-			}
-			ch := cell.Char
-			if ch == 0 {
-				ch = ' '
-			}
-			runes = append(runes, ch)
-			colMap = append(colMap, col)
+	row := 0
+	for row < sb.Rows {
+		// Find the last physical row of this logical line.
+		// A row R is a continuation when IsDisplayRowWrapped(R) is true.
+		last := row
+		for last+1 < sb.Rows && sb.IsDisplayRowWrapped(last+1) {
+			last++
 		}
+
+		// Build combined text and per-rune coordinate maps for rows [row..last].
+		var runes []rune
+		var rowMap []int // rowMap[runeIdx] = display row
+		var colMap []int // colMap[runeIdx] = display column
+		for r := row; r <= last; r++ {
+			for col := 0; col < sb.Cols; col++ {
+				cell := sb.GetDisplayCell(r, col)
+				if cell.Width == 0 {
+					continue
+				}
+				ch := cell.Char
+				if ch == 0 {
+					ch = ' '
+				}
+				runes = append(runes, ch)
+				rowMap = append(rowMap, r)
+				colMap = append(colMap, col)
+			}
+		}
+
 		text := string(runes)
 		locs := urlPattern.FindAllStringIndex(text, -1)
 		for _, loc := range locs {
@@ -75,25 +90,29 @@ func (sb *ScreenBuffer) DetectURLs() []URLMatch {
 			if cleaned == "" {
 				continue
 			}
-			// Convert byte offsets to rune indices, then to columns via colMap.
+			// Convert byte offsets to rune indices, then to (row, col) via maps.
 			runeStart := len([]rune(text[:loc[0]]))
 			runeEnd := runeStart + len([]rune(cleaned)) - 1
 			if runeStart >= len(colMap) || runeEnd >= len(colMap) {
 				continue
 			}
+			startRow := rowMap[runeStart]
 			startCol := colMap[runeStart]
+			endRow := rowMap[runeEnd]
 			endCol := colMap[runeEnd]
 			// Extend endCol to include continuation cell of a trailing wide char.
-			endCell := sb.GetDisplayCell(row, endCol)
+			endCell := sb.GetDisplayCell(endRow, endCol)
 			if endCell.Width == 2 && endCol+1 < sb.Cols {
 				endCol++
 			}
 			matches = append(matches, URLMatch{
-				StartRow: row, StartCol: startCol,
-				EndRow: row, EndCol: endCol,
+				StartRow: startRow, StartCol: startCol,
+				EndRow: endRow, EndCol: endCol,
 				Text: cleaned,
 			})
 		}
+
+		row = last + 1
 	}
 	return matches
 }
@@ -102,14 +121,22 @@ func (sb *ScreenBuffer) DetectURLs() []URLMatch {
 func URLAt(matches []URLMatch, row, col int) *URLMatch {
 	for i := range matches {
 		m := &matches[i]
-		if row == m.StartRow && col >= m.StartCol && col <= m.EndCol {
+		if m.StartRow == m.EndRow {
+			// Single-row match: col must be within [StartCol, EndCol].
+			if row == m.StartRow && col >= m.StartCol && col <= m.EndCol {
+				return m
+			}
+			continue
+		}
+		// Multi-row match: start row (any col from StartCol onward), middle
+		// rows (any col), end row (any col up to EndCol).
+		if row == m.StartRow && col >= m.StartCol {
 			return m
 		}
-		// Multi-row URLs are unlikely but handle them.
 		if row > m.StartRow && row < m.EndRow {
 			return m
 		}
-		if row == m.EndRow && row != m.StartRow && col <= m.EndCol {
+		if row == m.EndRow && col <= m.EndCol {
 			return m
 		}
 	}

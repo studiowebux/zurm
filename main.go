@@ -3565,6 +3565,8 @@ func (g *Game) handleMouse() {
 }
 
 // wordSelection returns a Selection covering the word at (row, col).
+// Scans across soft-wrap boundaries so that a word split across two or more
+// display rows is selected in full.
 // Must be called with Buf write lock held.
 func (g *Game) wordSelection(row, col int) terminal.Selection {
 	buf := g.focused.Term.Buf
@@ -3574,8 +3576,6 @@ func (g *Game) wordSelection(row, col int) terminal.Selection {
 				r == '_' || r == '.' || r == '/')
 	}
 
-	absRow := buf.DisplayToAbsRow(row)
-
 	// Snap to parent cell if clicking on a continuation cell.
 	cell := buf.GetDisplayCell(row, col)
 	if cell.Width == 0 && col > 0 {
@@ -3583,37 +3583,80 @@ func (g *Game) wordSelection(row, col int) terminal.Selection {
 		cell = buf.GetDisplayCell(row, col)
 	}
 
+	absRow := buf.DisplayToAbsRow(row)
 	if !isWordChar(cell.Char) {
 		return terminal.Selection{Active: true, StartRow: absRow, StartCol: col, EndRow: absRow, EndCol: col}
 	}
 
-	startCol := col
-	for startCol > 0 {
-		prev := buf.GetDisplayCell(row, startCol-1)
-		if prev.Width == 0 {
+	startRow, startCol := row, col
+scanBackward:
+	for {
+		for startCol > 0 {
+			prev := buf.GetDisplayCell(startRow, startCol-1)
+			if prev.Width == 0 {
+				startCol--
+				continue
+			}
+			if !isWordChar(prev.Char) {
+				break scanBackward
+			}
 			startCol--
-			continue
 		}
-		if !isWordChar(prev.Char) {
-			break
+		// Reached column 0. Cross soft-wrap boundary to the previous row.
+		if startRow > 0 && buf.IsDisplayRowWrapped(startRow) {
+			// Peek at the last usable cell of the previous row (skip trailing continuation).
+			peekCol := buf.Cols - 1
+			if buf.GetDisplayCell(startRow-1, peekCol).Width == 0 && peekCol > 0 {
+				peekCol--
+			}
+			if !isWordChar(buf.GetDisplayCell(startRow-1, peekCol).Char) {
+				break scanBackward
+			}
+			startRow--
+			startCol = peekCol
+			// Inner loop continues scanning leftward from peekCol.
+		} else {
+			break scanBackward
 		}
-		startCol--
 	}
 
-	endCol := col
-	for endCol < buf.Cols-1 {
-		next := buf.GetDisplayCell(row, endCol+1)
-		if next.Width == 0 {
+	endRow, endCol := row, col
+scanForward:
+	for {
+		for endCol < buf.Cols-1 {
+			next := buf.GetDisplayCell(endRow, endCol+1)
+			if next.Width == 0 {
+				endCol++
+				continue
+			}
+			if !isWordChar(next.Char) {
+				break scanForward
+			}
 			endCol++
-			continue
 		}
-		if !isWordChar(next.Char) {
-			break
+		// Reached last column. Cross soft-wrap boundary to the next row.
+		if endRow+1 < buf.Rows && buf.IsDisplayRowWrapped(endRow+1) {
+			// Peek at the first usable cell of the next row (skip leading continuation).
+			peekCol := 0
+			if buf.GetDisplayCell(endRow+1, peekCol).Width == 0 && buf.Cols > 1 {
+				peekCol++
+			}
+			if !isWordChar(buf.GetDisplayCell(endRow+1, peekCol).Char) {
+				break scanForward
+			}
+			endRow++
+			endCol = peekCol
+			// Inner loop continues scanning rightward from peekCol.
+		} else {
+			break scanForward
 		}
-		endCol++
 	}
 
-	return terminal.Selection{Active: true, StartRow: absRow, StartCol: startCol, EndRow: absRow, EndCol: endCol}
+	return terminal.Selection{
+		Active:   true,
+		StartRow: buf.DisplayToAbsRow(startRow), StartCol: startCol,
+		EndRow:   buf.DisplayToAbsRow(endRow), EndCol: endCol,
+	}
 }
 
 // copySelection copies the current selection text to the clipboard via pbcopy.
