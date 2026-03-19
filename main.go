@@ -160,11 +160,12 @@ type Game struct {
 	// Tab search overlay state (Cmd+J).
 	tabSearchState renderer.TabSearchState
 
-	// Key repeat state for tab search navigation (arrow keys).
+	// Key repeat state for tab search navigation (arrow keys) and text input.
 	tabSearchRepeatKey    ebiten.Key
 	tabSearchRepeatActive bool
 	tabSearchRepeatStart  time.Time
 	tabSearchRepeatLast   time.Time
+	tabSearchInputRepeat  TextInputRepeat // backspace/cursor in the search text field
 
 	// Command palette state (Cmd+P).
 	paletteState   renderer.PaletteState
@@ -187,18 +188,23 @@ type Game struct {
 	explorerRepeatStart  time.Time
 	explorerRepeatLast   time.Time
 
-	// Key repeat state for command palette navigation (arrow keys).
+	// Key repeat state for file explorer text inputs (search / rename / new).
+	explorerInputRepeat TextInputRepeat
+
+	// Key repeat state for command palette navigation (arrow keys) and text input.
 	paletteRepeatKey    ebiten.Key
 	paletteRepeatActive bool
 	paletteRepeatStart  time.Time
 	paletteRepeatLast   time.Time
+	paletteInputRepeat  TextInputRepeat // backspace/cursor in the query field
 
-	// Key repeat state for tab rename text input (backspace).
-	renameRepeatKey    ebiten.Key
-	renameRepeatActive bool
-	renameRepeatStart  time.Time
-	renameRepeatLast   time.Time
-	renameRepeatAlt    bool // Remember if alt was pressed when repeat started
+	// Key repeat state for text input overlays.
+	renameRepeat     TextInputRepeat // tab rename
+	noteRepeat       TextInputRepeat // tab note
+	paneRenameRepeat TextInputRepeat // pane rename
+	searchRepeat     TextInputRepeat // in-buffer search (Cmd+F)
+	overlayRepeat    TextInputRepeat // help overlay search
+	mdSearchRepeat   TextInputRepeat // markdown viewer search
 
 	// Dirty-render state — screen is only redrawn when something changes.
 	screenDirty  bool
@@ -256,12 +262,8 @@ type Game struct {
 	llmsHistory      []llmsHistoryEntry // back stack
 	llmsForward      []llmsHistoryEntry // forward stack
 
-	// Key repeat state for URL input backspace.
-	urlRepeatKey    ebiten.Key
-	urlRepeatActive bool
-	urlRepeatStart  time.Time
-	urlRepeatLast   time.Time
-	urlRepeatAlt    bool
+	// Key repeat state for URL input text field.
+	urlRepeat TextInputRepeat
 
 	// Command vault — encrypted history with ghost text suggestions.
 	vault          *vault.Vault
@@ -2129,6 +2131,7 @@ func (g *Game) searchPrev() {
 // handleSearchInput routes keyboard events while the search bar is open.
 func (g *Game) handleSearchInput() {
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 
 	// inpututil.IsKeyJustPressed catches sub-frame taps that polling misses.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
@@ -2137,78 +2140,42 @@ func (g *Game) handleSearchInput() {
 		return
 	}
 
-	edgeKeys := []ebiten.Key{
-		ebiten.KeyBackspace,
-		ebiten.KeyArrowDown, ebiten.KeyArrowUp,
-		ebiten.KeyArrowLeft, ebiten.KeyArrowRight,
-		ebiten.KeyHome, ebiten.KeyEnd,
-	}
-	for _, key := range edgeKeys {
+	// Arrow up/down navigate search results (edge-triggered).
+	for _, key := range []ebiten.Key{ebiten.KeyArrowDown, ebiten.KeyArrowUp} {
 		pressed := ebiten.IsKeyPressed(key)
 		wasPressed := g.prevKeys[key]
 		if pressed && !wasPressed {
-			ti := &TextInput{Text: g.searchState.Query, CursorPos: g.searchState.CursorPos}
-			switch {
-			case key == ebiten.KeyArrowDown:
+			if key == ebiten.KeyArrowDown {
 				g.searchNext()
-			case key == ebiten.KeyArrowUp:
+			} else {
 				g.searchPrev()
-			case key == ebiten.KeyArrowLeft:
-				ti.MoveLeft()
-				g.searchState.CursorPos = ti.CursorPos
-				g.screenDirty = true
-			case key == ebiten.KeyArrowRight:
-				ti.MoveRight()
-				g.searchState.CursorPos = ti.CursorPos
-				g.screenDirty = true
-			case key == ebiten.KeyHome:
-				ti.MoveToStart()
-				g.searchState.CursorPos = ti.CursorPos
-				g.screenDirty = true
-			case key == ebiten.KeyEnd:
-				ti.MoveToEnd()
-				g.searchState.CursorPos = ti.CursorPos
-				g.screenDirty = true
-			case key == ebiten.KeyBackspace && !meta:
-				if ebiten.IsKeyPressed(ebiten.KeyAlt) {
-					ti.DeleteWord()
-				} else {
-					ti.DeleteLastChar()
-				}
-				g.searchState.Query = ti.Text
-				g.searchState.CursorPos = ti.CursorPos
-				g.screenDirty = true
 			}
 		}
 		g.prevKeys[key] = pressed
 	}
+
+	ti := &TextInput{Text: g.searchState.Query, CursorPos: g.searchState.CursorPos}
 
 	// Cmd+V — paste clipboard into search query.
 	if meta && inpututil.IsKeyJustPressed(ebiten.KeyV) {
 		if out, err := exec.Command("pbpaste").Output(); err == nil {
 			line := strings.TrimSpace(strings.SplitN(strings.ToValidUTF8(string(out), ""), "\n", 2)[0])
 			if line != "" {
-				ti := &TextInput{Text: g.searchState.Query, CursorPos: g.searchState.CursorPos}
 				ti.AddString(line)
-				g.searchState.Query = ti.Text
-				g.searchState.CursorPos = ti.CursorPos
 				g.screenDirty = true
 			}
 		}
 	}
 
-	// Printable character input.
-	if !meta {
-		ti := &TextInput{Text: g.searchState.Query, CursorPos: g.searchState.CursorPos}
-		for _, r := range ebiten.AppendInputChars(nil) {
-			ti.AddChar(r)
-		}
-		if ti.Text != g.searchState.Query {
-			g.searchState.Query = ti.Text
-			g.searchState.CursorPos = ti.CursorPos
-			g.screenDirty = true
-		}
+	prevQuery := g.searchState.Query
+	prevCursor := g.searchState.CursorPos
+	ti.Update(&g.searchRepeat, meta, alt)
+	if ti.Text != prevQuery || ti.CursorPos != prevCursor {
+		g.screenDirty = true
 	}
+
+	g.searchState.Query = ti.Text
+	g.searchState.CursorPos = ti.CursorPos
 }
 
 // --- File explorer (Cmd+E) ---
@@ -2778,36 +2745,7 @@ func (g *Game) handleExplorerSearchInput() {
 		return
 	}
 
-	// Cursor navigation.
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowLeft) {
-		ti.MoveLeft()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowRight) {
-		ti.MoveRight()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyHome) {
-		ti.MoveToStart()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyEnd) {
-		ti.MoveToEnd()
-	}
-
-	// Backspace with key repeat and alt+backspace (delete word) support.
-	now := time.Now()
-	if !meta && g.updateExplorerRepeat(ebiten.KeyBackspace, now) {
-		if alt {
-			ti.DeleteWord()
-		} else {
-			ti.DeleteLastChar()
-		}
-	}
-
-	// Printable character input.
-	if !meta {
-		for _, r := range ebiten.AppendInputChars(nil) {
-			ti.AddChar(r)
-		}
-	}
+	ti.Update(&g.explorerInputRepeat, meta, alt)
 
 	st.SearchQuery = ti.Text
 	st.SearchCursorPos = ti.CursorPos
@@ -2835,30 +2773,6 @@ func (g *Game) handleExplorerInputMode() {
 
 	ti := &TextInput{Text: st.InputText, CursorPos: st.InputCursorPos}
 
-	// Cursor navigation.
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowLeft) {
-		ti.MoveLeft()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowRight) {
-		ti.MoveRight()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyHome) {
-		ti.MoveToStart()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyEnd) {
-		ti.MoveToEnd()
-	}
-
-	// Backspace with key repeat and alt+backspace (delete word) support.
-	now := time.Now()
-	if !meta && g.updateExplorerRepeat(ebiten.KeyBackspace, now) {
-		if alt {
-			ti.DeleteWord()
-		} else {
-			ti.DeleteLastChar()
-		}
-	}
-
 	// Enter — commit the operation.
 	enterPressed := ebiten.IsKeyPressed(ebiten.KeyEnter)
 	enterWas := g.prevKeys[ebiten.KeyEnter]
@@ -2870,12 +2784,7 @@ func (g *Game) handleExplorerInputMode() {
 		return
 	}
 
-	// Printable character input.
-	if !meta {
-		for _, r := range ebiten.AppendInputChars(nil) {
-			ti.AddChar(r)
-		}
-	}
+	ti.Update(&g.explorerInputRepeat, meta, alt)
 
 	st.InputText = ti.Text
 	st.InputCursorPos = ti.CursorPos
@@ -4360,6 +4269,8 @@ func (g *Game) updateTabSearchRepeat(key ebiten.Key, now time.Time) bool {
 // handleTabSearchInput processes keyboard input while the tab search overlay is open.
 func (g *Game) handleTabSearchInput() {
 	now := time.Now()
+	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 
 	filtered := renderer.FilterTabSearch(g.tabs, g.tabSearchState.Query)
 
@@ -4384,68 +4295,33 @@ func (g *Game) handleTabSearchInput() {
 	}
 
 	// Cmd+J toggles off.
-	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
 	if meta && inpututil.IsKeyJustPressed(ebiten.KeyJ) {
 		g.closeTabSearch()
 		g.prevKeys[ebiten.KeyJ] = true
 		return
 	}
 
-	keys := []ebiten.Key{
-		ebiten.KeyEnter, ebiten.KeyNumpadEnter,
-		ebiten.KeyBackspace,
-		ebiten.KeyArrowLeft, ebiten.KeyArrowRight,
-	}
-	for _, key := range keys {
+	// Enter — select the highlighted tab.
+	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyNumpadEnter} {
 		pressed := ebiten.IsKeyPressed(key)
 		wasPressed := g.prevKeys[key]
-		if pressed && !wasPressed {
-			switch key {
-			case ebiten.KeyEnter, ebiten.KeyNumpadEnter:
-				if len(filtered) > 0 && g.tabSearchState.Cursor < len(filtered) {
-					g.switchTab(filtered[g.tabSearchState.Cursor].OrigIdx)
-					g.closeTabSearch()
-				}
-				g.prevKeys[key] = pressed
-				return
-			case ebiten.KeyBackspace:
-				if g.tabSearchState.Query != "" {
-					ti := &TextInput{Text: g.tabSearchState.Query, CursorPos: g.tabSearchState.CursorPos}
-					if ebiten.IsKeyPressed(ebiten.KeyAlt) {
-						ti.DeleteWord()
-					} else {
-						ti.DeleteLastChar()
-					}
-					g.tabSearchState.Query = ti.Text
-					g.tabSearchState.CursorPos = ti.CursorPos
-					g.tabSearchState.Cursor = 0
-				}
-			case ebiten.KeyArrowLeft:
-				ti := &TextInput{Text: g.tabSearchState.Query, CursorPos: g.tabSearchState.CursorPos}
-				ti.MoveLeft()
-				g.tabSearchState.CursorPos = ti.CursorPos
-			case ebiten.KeyArrowRight:
-				ti := &TextInput{Text: g.tabSearchState.Query, CursorPos: g.tabSearchState.CursorPos}
-				ti.MoveRight()
-				g.tabSearchState.CursorPos = ti.CursorPos
-			}
-		}
 		g.prevKeys[key] = pressed
+		if pressed && !wasPressed {
+			if len(filtered) > 0 && g.tabSearchState.Cursor < len(filtered) {
+				g.switchTab(filtered[g.tabSearchState.Cursor].OrigIdx)
+				g.closeTabSearch()
+			}
+			return
+		}
 	}
 
-	// Typing — append printable runes at cursor position.
-	{
-		ti := &TextInput{Text: g.tabSearchState.Query, CursorPos: g.tabSearchState.CursorPos}
-		for _, r := range ebiten.AppendInputChars(nil) {
-			if r >= 32 {
-				ti.AddChar(r)
-			}
-		}
-		if ti.Text != g.tabSearchState.Query {
-			g.tabSearchState.Query = ti.Text
-			g.tabSearchState.CursorPos = ti.CursorPos
-			g.tabSearchState.Cursor = 0
-		}
+	prevQuery := g.tabSearchState.Query
+	ti := &TextInput{Text: g.tabSearchState.Query, CursorPos: g.tabSearchState.CursorPos}
+	ti.Update(&g.tabSearchInputRepeat, meta, alt)
+	g.tabSearchState.Query = ti.Text
+	g.tabSearchState.CursorPos = ti.CursorPos
+	if g.tabSearchState.Query != prevQuery {
+		g.tabSearchState.Cursor = 0
 	}
 
 	g.screenDirty = true
@@ -5194,7 +5070,6 @@ func (g *Game) handleNoteInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.cancelNote()
 		g.prevKeys[ebiten.KeyEscape] = true
-		g.renameRepeatActive = false
 		return
 	}
 
@@ -5205,50 +5080,6 @@ func (g *Game) handleNoteInput() {
 
 	ti := &TextInput{Text: g.tabs[idx].NoteText, CursorPos: g.tabs[idx].NoteCursorPos}
 
-	// Arrow keys — cursor movement.
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowLeft) {
-		ti.MoveLeft()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowRight) {
-		ti.MoveRight()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyHome) {
-		ti.MoveToStart()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyEnd) {
-		ti.MoveToEnd()
-	}
-
-	// Backspace with repeat support (reuses rename repeat state).
-	backspacePressed := ebiten.IsKeyPressed(ebiten.KeyBackspace)
-	if backspacePressed {
-		now := time.Now()
-		if !g.renameRepeatActive || g.renameRepeatKey != ebiten.KeyBackspace {
-			g.renameRepeatActive = true
-			g.renameRepeatKey = ebiten.KeyBackspace
-			g.renameRepeatStart = now
-			g.renameRepeatLast = now
-			g.renameRepeatAlt = alt
-			if alt {
-				ti.DeleteWord()
-			} else {
-				ti.DeleteLastChar()
-			}
-		} else if now.Sub(g.renameRepeatStart) >= keyRepeatDelay &&
-			now.Sub(g.renameRepeatLast) >= keyRepeatInterval {
-			g.renameRepeatLast = now
-			if g.renameRepeatAlt {
-				ti.DeleteWord()
-			} else {
-				ti.DeleteLastChar()
-			}
-		}
-	} else {
-		if g.renameRepeatKey == ebiten.KeyBackspace {
-			g.renameRepeatActive = false
-		}
-	}
-
 	// Edge-triggered: Enter commits.
 	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyNumpadEnter} {
 		pressed := ebiten.IsKeyPressed(key)
@@ -5256,7 +5087,6 @@ func (g *Game) handleNoteInput() {
 			g.tabs[idx].NoteText = ti.Text
 			g.tabs[idx].NoteCursorPos = ti.CursorPos
 			g.commitNote()
-			g.renameRepeatActive = false
 		}
 		g.prevKeys[key] = pressed
 	}
@@ -5270,12 +5100,7 @@ func (g *Game) handleNoteInput() {
 		}
 	}
 
-	// Printable characters.
-	if !meta {
-		for _, r := range ebiten.AppendInputChars(nil) {
-			ti.AddChar(r)
-		}
-	}
+	ti.Update(&g.noteRepeat, meta, alt)
 
 	g.tabs[idx].NoteText = ti.Text
 	g.tabs[idx].NoteCursorPos = ti.CursorPos
@@ -5290,7 +5115,6 @@ func (g *Game) handleRenameInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.cancelRename()
 		g.prevKeys[ebiten.KeyEscape] = true
-		g.renameRepeatActive = false
 		return
 	}
 
@@ -5301,52 +5125,6 @@ func (g *Game) handleRenameInput() {
 
 	ti := &TextInput{Text: g.tabs[idx].RenameText, CursorPos: g.tabs[idx].RenameCursorPos}
 
-	// Arrow keys — cursor movement.
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowLeft) {
-		ti.MoveLeft()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowRight) {
-		ti.MoveRight()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyHome) {
-		ti.MoveToStart()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyEnd) {
-		ti.MoveToEnd()
-	}
-
-	// Handle backspace with repeat support.
-	backspacePressed := ebiten.IsKeyPressed(ebiten.KeyBackspace)
-	if backspacePressed {
-		now := time.Now()
-
-		if !g.renameRepeatActive || g.renameRepeatKey != ebiten.KeyBackspace {
-			g.renameRepeatActive = true
-			g.renameRepeatKey = ebiten.KeyBackspace
-			g.renameRepeatStart = now
-			g.renameRepeatLast = now
-			g.renameRepeatAlt = alt
-
-			if alt {
-				ti.DeleteWord()
-			} else {
-				ti.DeleteLastChar()
-			}
-		} else if now.Sub(g.renameRepeatStart) >= keyRepeatDelay &&
-			now.Sub(g.renameRepeatLast) >= keyRepeatInterval {
-			g.renameRepeatLast = now
-			if g.renameRepeatAlt {
-				ti.DeleteWord()
-			} else {
-				ti.DeleteLastChar()
-			}
-		}
-	} else {
-		if g.renameRepeatKey == ebiten.KeyBackspace {
-			g.renameRepeatActive = false
-		}
-	}
-
 	// Edge-triggered: Enter commits.
 	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyNumpadEnter} {
 		pressed := ebiten.IsKeyPressed(key)
@@ -5354,7 +5132,6 @@ func (g *Game) handleRenameInput() {
 			g.tabs[idx].RenameText = ti.Text
 			g.tabs[idx].RenameCursorPos = ti.CursorPos
 			g.commitRename()
-			g.renameRepeatActive = false
 		}
 		g.prevKeys[key] = pressed
 	}
@@ -5368,12 +5145,7 @@ func (g *Game) handleRenameInput() {
 		}
 	}
 
-	// Regular text input.
-	if !meta {
-		for _, r := range ebiten.AppendInputChars(nil) {
-			ti.AddChar(r)
-		}
-	}
+	ti.Update(&g.renameRepeat, meta, alt)
 
 	g.tabs[idx].RenameText = ti.Text
 	g.tabs[idx].RenameCursorPos = ti.CursorPos
@@ -5382,6 +5154,7 @@ func (g *Game) handleRenameInput() {
 // handlePaneRenameInput processes keyboard input while a pane rename is in progress.
 func (g *Game) handlePaneRenameInput() {
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.cancelPaneRename()
@@ -5390,29 +5163,6 @@ func (g *Game) handlePaneRenameInput() {
 	}
 
 	ti := &TextInput{Text: g.focused.RenameText, CursorPos: g.focused.RenameCursorPos}
-
-	// Arrow keys — cursor movement.
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowLeft) {
-		ti.MoveLeft()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowRight) {
-		ti.MoveRight()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyHome) {
-		ti.MoveToStart()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyEnd) {
-		ti.MoveToEnd()
-	}
-
-	// Backspace
-	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) {
-		if ebiten.IsKeyPressed(ebiten.KeyAlt) {
-			ti.DeleteWord()
-		} else {
-			ti.DeleteLastChar()
-		}
-	}
 
 	// Enter — commit
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyNumpadEnter) {
@@ -5429,12 +5179,7 @@ func (g *Game) handlePaneRenameInput() {
 		}
 	}
 
-	// Regular text input
-	if !meta {
-		for _, r := range ebiten.AppendInputChars(nil) {
-			ti.AddChar(r)
-		}
-	}
+	ti.Update(&g.paneRenameRepeat, meta, alt)
 
 	g.focused.RenameText = ti.Text
 	g.focused.RenameCursorPos = ti.CursorPos
@@ -5892,6 +5637,7 @@ func (g *Game) buildPalette() {
 // handlePaletteInput processes keyboard input while the command palette is open.
 func (g *Game) handlePaletteInput() {
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 
 	filtered, origIdx := renderer.FilterPalette(g.paletteEntries, g.paletteState.Query)
 
@@ -5919,15 +5665,8 @@ func (g *Game) handlePaletteInput() {
 		return
 	}
 
-	// Single-shot keys — edge-triggered only.
-	edgeKeys := []ebiten.Key{
-		ebiten.KeyBackspace,
-		ebiten.KeyEnter,
-		ebiten.KeyP,
-		ebiten.KeyArrowLeft,
-		ebiten.KeyArrowRight,
-	}
-	for _, key := range edgeKeys {
+	// Enter and Cmd+P — edge-triggered only.
+	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyP} {
 		pressed := ebiten.IsKeyPressed(key)
 		wasPressed := g.prevKeys[key]
 		g.prevKeys[key] = pressed
@@ -5935,30 +5674,6 @@ func (g *Game) handlePaletteInput() {
 			continue
 		}
 		switch {
-		case key == ebiten.KeyBackspace:
-			if !meta {
-				ti := &TextInput{Text: g.paletteState.Query, CursorPos: g.paletteState.CursorPos}
-				if ebiten.IsKeyPressed(ebiten.KeyAlt) {
-					ti.DeleteWord()
-				} else {
-					ti.DeleteLastChar()
-				}
-				g.paletteState.Query = ti.Text
-				g.paletteState.CursorPos = ti.CursorPos
-				g.paletteState.Cursor = 0
-			}
-		case key == ebiten.KeyArrowLeft:
-			if !meta {
-				ti := &TextInput{Text: g.paletteState.Query, CursorPos: g.paletteState.CursorPos}
-				ti.MoveLeft()
-				g.paletteState.CursorPos = ti.CursorPos
-			}
-		case key == ebiten.KeyArrowRight:
-			if !meta {
-				ti := &TextInput{Text: g.paletteState.Query, CursorPos: g.paletteState.CursorPos}
-				ti.MoveRight()
-				g.paletteState.CursorPos = ti.CursorPos
-			}
 		case key == ebiten.KeyEnter:
 			if g.paletteState.Cursor < len(origIdx) {
 				orig := origIdx[g.paletteState.Cursor]
@@ -5973,17 +5688,13 @@ func (g *Game) handlePaletteInput() {
 	}
 	g.prevKeys[ebiten.KeyMeta] = meta
 
-	// Printable characters append to the query; reset list cursor on any query change.
-	if !meta {
-		ti := &TextInput{Text: g.paletteState.Query, CursorPos: g.paletteState.CursorPos}
-		for _, r := range ebiten.AppendInputChars(nil) {
-			ti.AddChar(r)
-		}
-		if ti.Text != g.paletteState.Query {
-			g.paletteState.Query = ti.Text
-			g.paletteState.CursorPos = ti.CursorPos
-			g.paletteState.Cursor = 0
-		}
+	prevQuery := g.paletteState.Query
+	ti := &TextInput{Text: g.paletteState.Query, CursorPos: g.paletteState.CursorPos}
+	ti.Update(&g.paletteInputRepeat, meta, alt)
+	g.paletteState.Query = ti.Text
+	g.paletteState.CursorPos = ti.CursorPos
+	if g.paletteState.Query != prevQuery {
+		g.paletteState.Cursor = 0
 	}
 }
 
@@ -5992,6 +5703,7 @@ func (g *Game) handlePaletteInput() {
 // character; Escape clears the query or closes the overlay; Cmd+/ closes it.
 func (g *Game) handleOverlayInput() {
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 
 	// ESC: clear search query if non-empty, otherwise close. Uses inpututil to
 	// catch sub-frame taps that polling misses.
@@ -6007,45 +5719,20 @@ func (g *Game) handleOverlayInput() {
 		return
 	}
 
-	edgeKeys := []ebiten.Key{
-		ebiten.KeyBackspace,
+	// Scroll and Cmd+/ — edge-triggered only.
+	scrollKeys := []ebiten.Key{
 		ebiten.KeySlash,
 		ebiten.KeyArrowUp,
 		ebiten.KeyArrowDown,
-		ebiten.KeyArrowLeft,
-		ebiten.KeyArrowRight,
-		ebiten.KeyHome,
-		ebiten.KeyEnd,
 		ebiten.KeyPageUp,
 		ebiten.KeyPageDown,
 	}
 	prevQuery := g.overlayState.SearchQuery
-	for _, key := range edgeKeys {
+	for _, key := range scrollKeys {
 		pressed := ebiten.IsKeyPressed(key)
 		wasPressed := g.prevKeys[key]
 		if pressed && !wasPressed {
-			ti := &TextInput{Text: g.overlayState.SearchQuery, CursorPos: g.overlayState.SearchCursorPos}
 			switch {
-			case key == ebiten.KeyBackspace && !meta:
-				if ebiten.IsKeyPressed(ebiten.KeyAlt) {
-					ti.DeleteWord()
-				} else {
-					ti.DeleteLastChar()
-				}
-				g.overlayState.SearchQuery = ti.Text
-				g.overlayState.SearchCursorPos = ti.CursorPos
-			case key == ebiten.KeyArrowLeft:
-				ti.MoveLeft()
-				g.overlayState.SearchCursorPos = ti.CursorPos
-			case key == ebiten.KeyArrowRight:
-				ti.MoveRight()
-				g.overlayState.SearchCursorPos = ti.CursorPos
-			case key == ebiten.KeyHome:
-				ti.MoveToStart()
-				g.overlayState.SearchCursorPos = ti.CursorPos
-			case key == ebiten.KeyEnd:
-				ti.MoveToEnd()
-				g.overlayState.SearchCursorPos = ti.CursorPos
 			case key == ebiten.KeySlash && meta:
 				g.overlayState = renderer.OverlayState{}
 			case key == ebiten.KeyArrowUp:
@@ -6062,6 +5749,11 @@ func (g *Game) handleOverlayInput() {
 	}
 	g.prevKeys[ebiten.KeyMeta] = meta
 
+	ti := &TextInput{Text: g.overlayState.SearchQuery, CursorPos: g.overlayState.SearchCursorPos}
+	ti.Update(&g.overlayRepeat, meta, alt)
+	g.overlayState.SearchQuery = ti.Text
+	g.overlayState.SearchCursorPos = ti.CursorPos
+
 	// Reset scroll when search query changes so new results start at top.
 	if g.overlayState.SearchQuery != prevQuery {
 		g.overlayState.ScrollOffset = 0
@@ -6073,18 +5765,6 @@ func (g *Game) handleOverlayInput() {
 	}
 	if g.overlayState.ScrollOffset > g.overlayState.MaxScroll {
 		g.overlayState.ScrollOffset = g.overlayState.MaxScroll
-	}
-
-	// Printable character input goes to the search query.
-	if !meta {
-		ti := &TextInput{Text: g.overlayState.SearchQuery, CursorPos: g.overlayState.SearchCursorPos}
-		for _, r := range ebiten.AppendInputChars(nil) {
-			ti.AddChar(r)
-		}
-		if ti.Text != g.overlayState.SearchQuery {
-			g.overlayState.SearchQuery = ti.Text
-			g.overlayState.SearchCursorPos = ti.CursorPos
-		}
 	}
 }
 
@@ -6769,7 +6449,6 @@ func (g *Game) handleURLInputInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.urlInputState = renderer.URLInputState{}
 		g.llmsFetchCh = nil
-		g.urlRepeatActive = false
 		g.prevKeys[ebiten.KeyEscape] = true
 		return
 	}
@@ -6780,50 +6459,6 @@ func (g *Game) handleURLInputInput() {
 	}
 
 	ti := &TextInput{Text: g.urlInputState.Query, CursorPos: g.urlInputState.CursorPos}
-
-	// Arrow keys — cursor movement.
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowLeft) {
-		ti.MoveLeft()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowRight) {
-		ti.MoveRight()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyHome) {
-		ti.MoveToStart()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyEnd) {
-		ti.MoveToEnd()
-	}
-
-	// Backspace with key repeat.
-	backspacePressed := ebiten.IsKeyPressed(ebiten.KeyBackspace)
-	if backspacePressed && !meta {
-		now := time.Now()
-		if !g.urlRepeatActive || g.urlRepeatKey != ebiten.KeyBackspace {
-			g.urlRepeatActive = true
-			g.urlRepeatKey = ebiten.KeyBackspace
-			g.urlRepeatStart = now
-			g.urlRepeatLast = now
-			g.urlRepeatAlt = alt
-			if alt {
-				ti.DeleteWord()
-			} else {
-				ti.DeleteLastChar()
-			}
-		} else if now.Sub(g.urlRepeatStart) >= keyRepeatDelay &&
-			now.Sub(g.urlRepeatLast) >= keyRepeatInterval {
-			g.urlRepeatLast = now
-			if g.urlRepeatAlt {
-				ti.DeleteWord()
-			} else {
-				ti.DeleteLastChar()
-			}
-		}
-	} else {
-		if g.urlRepeatKey == ebiten.KeyBackspace {
-			g.urlRepeatActive = false
-		}
-	}
 
 	// Edge-triggered: Enter submits.
 	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyNumpadEnter} {
@@ -6847,12 +6482,7 @@ func (g *Game) handleURLInputInput() {
 		}
 	}
 
-	// Printable character input.
-	if !meta {
-		for _, r := range ebiten.AppendInputChars(nil) {
-			ti.AddChar(r)
-		}
-	}
+	ti.Update(&g.urlRepeat, meta, alt)
 
 	g.urlInputState.Query = ti.Text
 	g.urlInputState.CursorPos = ti.CursorPos
@@ -7201,6 +6831,8 @@ func (g *Game) handleMarkdownViewerInput() {
 
 // handleMarkdownSearchInput processes keyboard input while the search bar is active.
 func (g *Game) handleMarkdownSearchInput() {
+	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 	shift := ebiten.IsKeyPressed(ebiten.KeyShift)
 
 	// ESC — close search bar (matches stay visible for n/N in normal mode).
@@ -7211,6 +6843,7 @@ func (g *Game) handleMarkdownSearchInput() {
 	}
 
 	// Enter/n — next match; Shift+Enter/N — previous match.
+	// Checked before Update so n/N navigation takes priority over text input.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyN) {
 		if shift {
 			g.mdViewerSearchPrev()
@@ -7220,48 +6853,15 @@ func (g *Game) handleMarkdownSearchInput() {
 		return
 	}
 
-	// Arrow keys — cursor movement within search query.
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowLeft) {
-		ti := &TextInput{Text: g.mdViewerState.SearchQuery, CursorPos: g.mdViewerState.SearchCursorPos}
-		ti.MoveLeft()
-		g.mdViewerState.SearchCursorPos = ti.CursorPos
-		g.screenDirty = true
-		return
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowRight) {
-		ti := &TextInput{Text: g.mdViewerState.SearchQuery, CursorPos: g.mdViewerState.SearchCursorPos}
-		ti.MoveRight()
-		g.mdViewerState.SearchCursorPos = ti.CursorPos
-		g.screenDirty = true
-		return
-	}
+	ti := &TextInput{Text: g.mdViewerState.SearchQuery, CursorPos: g.mdViewerState.SearchCursorPos}
+	prevQuery := g.mdViewerState.SearchQuery
 
-	// Backspace — delete character before cursor.
-	if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) {
-		if len(g.mdViewerState.SearchQuery) > 0 {
-			ti := &TextInput{Text: g.mdViewerState.SearchQuery, CursorPos: g.mdViewerState.SearchCursorPos}
-			ti.DeleteLastChar()
-			g.mdViewerState.SearchQuery = ti.Text
-			g.mdViewerState.SearchCursorPos = ti.CursorPos
-			g.mdViewerUpdateSearch()
-		}
-		g.screenDirty = true
-		return
-	}
+	ti.Update(&g.mdSearchRepeat, meta, alt)
 
-	// Text input — filter out n/N when navigating matches to avoid typing them.
-	runes := ebiten.AppendInputChars(nil)
-	if len(runes) > 0 {
-		ti := &TextInput{Text: g.mdViewerState.SearchQuery, CursorPos: g.mdViewerState.SearchCursorPos}
-		for _, r := range runes {
-			// Skip 'n' and 'N' when they were consumed by match navigation above.
-			if (r == 'n' || r == 'N') && len(g.mdViewerState.SearchMatches) > 0 {
-				continue
-			}
-			ti.AddChar(r)
-		}
-		g.mdViewerState.SearchQuery = ti.Text
-		g.mdViewerState.SearchCursorPos = ti.CursorPos
+	g.mdViewerState.SearchQuery = ti.Text
+	g.mdViewerState.SearchCursorPos = ti.CursorPos
+
+	if g.mdViewerState.SearchQuery != prevQuery {
 		g.mdViewerUpdateSearch()
 		g.screenDirty = true
 	}
