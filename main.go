@@ -2325,6 +2325,7 @@ func (g *Game) handleFileExplorerInput() {
 		} else if st.SearchQuery != "" {
 			// Clear search filter but stay in explorer
 			st.SearchQuery = ""
+			st.SearchCursorPos = 0
 			st.FilteredIndices = nil
 		} else {
 			// Normal close
@@ -2558,6 +2559,7 @@ func (g *Game) handleFileExplorerInput() {
 				st.Mode = renderer.ExplorerModeRename
 				st.InputLabel = "Rename:"
 				st.InputText = st.Entries[st.Cursor].Name
+				st.InputCursorPos = len([]rune(st.InputText))
 				g.prevKeys[ebiten.KeyEnter] = ebiten.IsKeyPressed(ebiten.KeyEnter)
 				g.prevKeys[ebiten.KeyBackspace] = ebiten.IsKeyPressed(ebiten.KeyBackspace)
 			}
@@ -2566,6 +2568,7 @@ func (g *Game) handleFileExplorerInput() {
 			st.Mode = renderer.ExplorerModeNewFile
 			st.InputLabel = "New file:"
 			st.InputText = ""
+			st.InputCursorPos = 0
 			g.prevKeys[ebiten.KeyEnter] = ebiten.IsKeyPressed(ebiten.KeyEnter)
 			g.prevKeys[ebiten.KeyBackspace] = ebiten.IsKeyPressed(ebiten.KeyBackspace)
 
@@ -2573,6 +2576,7 @@ func (g *Game) handleFileExplorerInput() {
 			st.Mode = renderer.ExplorerModeNewDir
 			st.InputLabel = "New dir:"
 			st.InputText = ""
+			st.InputCursorPos = 0
 			g.prevKeys[ebiten.KeyEnter] = ebiten.IsKeyPressed(ebiten.KeyEnter)
 			g.prevKeys[ebiten.KeyBackspace] = ebiten.IsKeyPressed(ebiten.KeyBackspace)
 
@@ -2591,9 +2595,9 @@ func (g *Game) handleFileExplorerInput() {
 			}
 
 		case key == ebiten.KeySlash && !meta:
-			// Enter search mode
+			// Enter search mode — position cursor at end of any existing query.
 			st.SearchMode = true
-			// Don't clear existing search query - allow editing it
+			st.SearchCursorPos = len([]rune(st.SearchQuery))
 			g.prevKeys[ebiten.KeyEnter] = ebiten.IsKeyPressed(ebiten.KeyEnter)
 			g.prevKeys[ebiten.KeyBackspace] = ebiten.IsKeyPressed(ebiten.KeyBackspace)
 		}
@@ -2754,15 +2758,18 @@ func (g *Game) handleExplorerConfirmInput() {
 func (g *Game) handleExplorerSearchInput() {
 	st := &g.fileExplorerState
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 	prevQuery := st.SearchQuery
 
-	// Handle Enter to accept search and exit search mode
+	ti := &TextInput{Text: st.SearchQuery, CursorPos: st.SearchCursorPos}
+
+	// Enter — accept and exit search mode.
 	enterPressed := ebiten.IsKeyPressed(ebiten.KeyEnter)
 	enterWas := g.prevKeys[ebiten.KeyEnter]
 	g.prevKeys[ebiten.KeyEnter] = enterPressed
 	if enterPressed && !enterWas {
 		st.SearchMode = false
-		// If we have search results and selected one, insert its path
+		st.SearchCursorPos = ti.CursorPos
 		if len(st.SearchResults) > 0 && st.Cursor >= 0 && st.Cursor < len(st.SearchResults) {
 			selected := st.SearchResults[st.Cursor]
 			g.focused.Term.SendBytes([]byte(selected.Path))
@@ -2771,36 +2778,47 @@ func (g *Game) handleExplorerSearchInput() {
 		return
 	}
 
-	// Handle Backspace with alt+backspace support
-	backspacePressed := ebiten.IsKeyPressed(ebiten.KeyBackspace)
-	backspaceWas := g.prevKeys[ebiten.KeyBackspace]
-	g.prevKeys[ebiten.KeyBackspace] = backspacePressed
-	if backspacePressed && !backspaceWas && !meta {
-		ti := &TextInput{Text: st.SearchQuery}
-		if ebiten.IsKeyPressed(ebiten.KeyAlt) {
+	// Cursor navigation.
+	if inpututil.IsKeyJustPressed(ebiten.KeyArrowLeft) {
+		ti.MoveLeft()
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyArrowRight) {
+		ti.MoveRight()
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyHome) {
+		ti.MoveToStart()
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnd) {
+		ti.MoveToEnd()
+	}
+
+	// Backspace with key repeat and alt+backspace (delete word) support.
+	now := time.Now()
+	if !meta && g.updateExplorerRepeat(ebiten.KeyBackspace, now) {
+		if alt {
 			ti.DeleteWord()
 		} else {
 			ti.DeleteLastChar()
 		}
-		st.SearchQuery = ti.Text
 	}
 
-	// Handle text input
+	// Printable character input.
 	if !meta {
 		for _, r := range ebiten.AppendInputChars(nil) {
-			if r >= 0x20 && r != 0x7f {
-				st.SearchQuery += string(r)
-			}
+			ti.AddChar(r)
 		}
 	}
 
-	// If query changed, perform search of current directory only
+	st.SearchQuery = ti.Text
+	st.SearchCursorPos = ti.CursorPos
+
+	// If query changed, re-run search.
 	if st.SearchQuery != prevQuery {
 		if st.SearchQuery == "" {
 			st.SearchResults = nil
+			st.SearchCursorPos = 0
 			st.Cursor = 0
 		} else {
-			// Search only current directory level (fast and safe)
 			st.SearchResults = fileexplorer.SearchCurrentLevel(st.Root, st.SearchQuery)
 			st.Cursor = 0
 		}
@@ -2813,37 +2831,54 @@ func (g *Game) handleExplorerSearchInput() {
 func (g *Game) handleExplorerInputMode() {
 	st := &g.fileExplorerState
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
+	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 
-	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyBackspace} {
-		pressed := ebiten.IsKeyPressed(key)
-		wasPressed := g.prevKeys[key]
-		g.prevKeys[key] = pressed
-		if !pressed || wasPressed {
-			continue
-		}
-		switch key {
-		case ebiten.KeyBackspace:
-			if !meta {
-				ti := &TextInput{Text: st.InputText}
-				if ebiten.IsKeyPressed(ebiten.KeyAlt) {
-					ti.DeleteWord()
-				} else {
-					ti.DeleteLastChar()
-				}
-				st.InputText = ti.Text
-			}
-		case ebiten.KeyEnter:
-			g.executeExplorerInputMode()
+	ti := &TextInput{Text: st.InputText, CursorPos: st.InputCursorPos}
+
+	// Cursor navigation.
+	if inpututil.IsKeyJustPressed(ebiten.KeyArrowLeft) {
+		ti.MoveLeft()
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyArrowRight) {
+		ti.MoveRight()
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyHome) {
+		ti.MoveToStart()
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnd) {
+		ti.MoveToEnd()
+	}
+
+	// Backspace with key repeat and alt+backspace (delete word) support.
+	now := time.Now()
+	if !meta && g.updateExplorerRepeat(ebiten.KeyBackspace, now) {
+		if alt {
+			ti.DeleteWord()
+		} else {
+			ti.DeleteLastChar()
 		}
 	}
 
+	// Enter — commit the operation.
+	enterPressed := ebiten.IsKeyPressed(ebiten.KeyEnter)
+	enterWas := g.prevKeys[ebiten.KeyEnter]
+	g.prevKeys[ebiten.KeyEnter] = enterPressed
+	if enterPressed && !enterWas {
+		st.InputText = ti.Text
+		st.InputCursorPos = ti.CursorPos
+		g.executeExplorerInputMode()
+		return
+	}
+
+	// Printable character input.
 	if !meta {
 		for _, r := range ebiten.AppendInputChars(nil) {
-			if r >= 0x20 && r != 0x7f {
-				st.InputText += string(r)
-			}
+			ti.AddChar(r)
 		}
 	}
+
+	st.InputText = ti.Text
+	st.InputCursorPos = ti.CursorPos
 }
 
 // executeExplorerInputMode commits the rename/new-file/new-dir operation.

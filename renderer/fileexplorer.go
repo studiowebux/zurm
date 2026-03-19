@@ -30,9 +30,10 @@ type FileExplorerState struct {
 	MaxScroll    int // written by renderer each frame
 	RowH         int // written by renderer each frame
 
-	Mode       ExplorerMode
-	InputText  string
-	InputLabel string
+	Mode            ExplorerMode
+	InputText       string
+	InputLabel      string
+	InputCursorPos  int // rune index of text cursor within InputText
 
 	Clipboard *fileexplorer.Clipboard
 
@@ -47,6 +48,7 @@ type FileExplorerState struct {
 
 	// Search/filter functionality
 	SearchQuery     string
+	SearchCursorPos int                   // rune index of text cursor within SearchQuery
 	SearchMode      bool                  // true when search input is active
 	FilteredIndices []int                 // indices of entries matching search
 	SearchResults   []fileexplorer.Entry  // Full recursive search results
@@ -130,9 +132,11 @@ func (r *Renderer) drawFileExplorer(state *FileExplorerState) {
 
 	// Show search query in header if searching
 	if state.SearchMode || state.SearchQuery != "" {
-		searchLabel := "Search: " + state.SearchQuery
+		var searchLabel string
 		if state.SearchMode {
-			searchLabel += "_"
+			searchLabel = "Search: " + inputWithCursor(state.SearchQuery, state.SearchCursorPos)
+		} else {
+			searchLabel = "Search: " + state.SearchQuery
 		}
 		// Truncate if needed
 		maxSearchChars := (panelW - 10*cw) / cw
@@ -301,7 +305,7 @@ func (r *Renderer) drawFileExplorer(state *FileExplorerState) {
 		inputRect := image.Rect(panelX, inputY, panelX+panelW, inputY+inputH)
 		r.modalLayer.SubImage(inputRect).(*ebiten.Image).Fill(r.ui.HoverBg)
 		r.modalLayer.SubImage(image.Rect(panelX, inputY, panelX+panelW, inputY+1)).(*ebiten.Image).Fill(r.ui.Border)
-		label := state.InputLabel + " " + state.InputText + "_"
+		label := state.InputLabel + " " + inputWithCursor(state.InputText, state.InputCursorPos)
 		r.font.DrawString(r.modalLayer, label, panelX+cw/2, inputY+4, r.ui.Fg)
 	}
 
