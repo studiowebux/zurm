@@ -980,7 +980,11 @@ func (g *Game) handleInput() {
 	altActive := g.focused.Term.Buf.IsAltActive()
 	g.focused.Term.Buf.RUnlock()
 
-	scrolled := false
+	// keyScrolled is true only when an explicit keyboard scroll key (PageUp/Down/Ctrl+K)
+	// was pressed. This causes an early return to prevent the key from leaking into the
+	// PTY input path. Mouse wheel scroll does NOT set this flag — keyboard input must
+	// always be processed even when trackpad momentum keeps the wheel delta non-zero.
+	keyScrolled := false
 	if !altActive {
 		for _, key := range allKeys {
 			if !ebiten.IsKeyPressed(key) || g.prevKeys[key] {
@@ -991,18 +995,18 @@ func (g *Game) handleInput() {
 				g.focused.Term.Buf.Lock()
 				g.focused.Term.Buf.ScrollViewUp(halfPage)
 				g.focused.Term.Buf.Unlock()
-				scrolled = true
+				keyScrolled = true
 			case key == ebiten.KeyPageDown:
 				g.focused.Term.Buf.Lock()
 				g.focused.Term.Buf.ScrollViewDown(halfPage)
 				g.focused.Term.Buf.Unlock()
-				scrolled = true
+				keyScrolled = true
 			case (meta || ctrl) && key == ebiten.KeyK:
 				g.focused.Term.Buf.Lock()
 				g.focused.Term.Buf.ClearScrollback()
 				g.focused.Term.Buf.ClearSelection()
 				g.focused.Term.Buf.Unlock()
-				scrolled = true
+				keyScrolled = true
 			}
 		}
 	}
@@ -1026,12 +1030,15 @@ func (g *Game) handleInput() {
 					g.focused.Term.Buf.ScrollViewDown(-lines)
 				}
 				g.focused.Term.Buf.Unlock()
-				scrolled = true
+				// Do NOT set keyScrolled here. Trackpad momentum keeps wy non-zero
+				// for several frames after the finger lifts; suppressing keyboard input
+				// during that window causes keystrokes to be silently dropped.
+				// handleMouse() already sets screenDirty for wheel events.
 			}
 		}
 	}
 
-	if scrolled {
+	if keyScrolled {
 		return
 	}
 
@@ -1337,6 +1344,7 @@ func (g *Game) handleInput() {
 		g.focused.Term.Buf.ResetView() // snap back to live output on keystroke
 		g.focused.Term.Buf.ClearSelection()
 		g.focused.Term.Buf.Unlock()
+		g.screenDirty = true // ensure snap-back renders immediately without waiting for PTY output
 	}
 
 	// Vault suggestion update — extract current line from buffer and query vault.
