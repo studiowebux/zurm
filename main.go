@@ -18,6 +18,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
+	"runtime/metrics"
 	"slices"
 	"strings"
 	"text/tabwriter"
@@ -5773,18 +5775,28 @@ func (g *Game) handleOverlayInput() {
 }
 
 // collectStats populates the stats overlay with current runtime metrics.
+// Uses runtime/metrics (non-STW) for heap data and debug.ReadGCStats for
+// GC pause data, avoiding the stop-the-world pause from runtime.ReadMemStats.
 func (g *Game) collectStats() {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	// Heap stats — non-STW via runtime/metrics.
+	samples := []metrics.Sample{
+		{Name: "/memory/classes/heap/objects:bytes"},
+		{Name: "/memory/classes/total:bytes"},
+	}
+	metrics.Read(samples)
+
+	// GC stats — lighter than ReadMemStats; holds heap lock briefly, not STW.
+	var gcStats debug.GCStats
+	debug.ReadGCStats(&gcStats)
 
 	g.statsState.TPS = ebiten.ActualTPS()
 	g.statsState.FPS = ebiten.ActualFPS()
 	g.statsState.Goroutines = runtime.NumGoroutine()
-	g.statsState.HeapAlloc = m.HeapAlloc
-	g.statsState.HeapSys = m.HeapSys
-	g.statsState.NumGC = m.NumGC
-	if m.NumGC > 0 {
-		g.statsState.GCPauseNs = m.PauseNs[(m.NumGC+255)%256]
+	g.statsState.HeapAlloc = samples[0].Value.Uint64()
+	g.statsState.HeapSys = samples[1].Value.Uint64()
+	g.statsState.NumGC = uint32(gcStats.NumGC) //nolint:gosec // GC count never overflows uint32
+	if len(gcStats.Pause) > 0 {
+		g.statsState.GCPauseNs = uint64(gcStats.Pause[0]) //nolint:gosec // pause duration fits uint64
 	}
 	g.statsState.TabCount = len(g.tabs)
 	paneCount := 0

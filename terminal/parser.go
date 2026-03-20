@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"unicode/utf8"
 )
 
@@ -34,9 +35,10 @@ type Parser struct {
 	params     []int
 	paramStr   string
 	oscBuf  strings.Builder
-	titleCh chan<- string       // optional: notified on OSC 0/2 title changes
-	cwdCh   chan<- string       // optional: notified on OSC 7 CWD changes
-	bellCh  chan<- struct{}     // optional: notified on BEL (0x07) in ground state
+	titleCh    chan<- string       // optional: notified on OSC 0/2 title changes
+	cwdCh      chan<- string       // optional: notified on OSC 7 CWD changes
+	bellCh     chan<- struct{}     // optional: notified on BEL (0x07) in ground state
+	osc7Active *atomic.Bool        // optional: set true on first OSC 7 receipt; disables lsof fallback
 
 	// Tab stops (every 8 columns by default).
 	tabStops []bool
@@ -58,13 +60,16 @@ type Parser struct {
 }
 
 // NewParser creates a parser attached to the given buffer.
-func NewParser(sb *ScreenBuffer, titleCh chan<- string, cwdCh chan<- string, bellCh chan<- struct{}) *Parser {
+// osc7Active is optional (may be nil); when non-nil it is set to true on the
+// first OSC 7 receipt, signalling that lsof-based CWD polling can be skipped.
+func NewParser(sb *ScreenBuffer, titleCh chan<- string, cwdCh chan<- string, bellCh chan<- struct{}, osc7Active *atomic.Bool) *Parser {
 	p := &Parser{
-		sb:      sb,
-		palette: sb.Palette,
-		titleCh: titleCh,
-		cwdCh:   cwdCh,
-		bellCh:  bellCh,
+		sb:         sb,
+		palette:    sb.Palette,
+		titleCh:    titleCh,
+		cwdCh:      cwdCh,
+		bellCh:     bellCh,
+		osc7Active: osc7Active,
 	}
 	p.resetTabStops()
 	return p
@@ -373,8 +378,11 @@ func (p *Parser) dispatchOSC(s string) {
 			}
 		}
 	case "7": // working directory — OSC 7 ; file://hostname/path
-		if p.cwdCh != nil {
-			if path := parseOSC7Path(value); path != "" {
+		if path := parseOSC7Path(value); path != "" {
+			if p.osc7Active != nil {
+				p.osc7Active.Store(true) // shell supports OSC 7 — lsof fallback no longer needed
+			}
+			if p.cwdCh != nil {
 				select {
 				case p.cwdCh <- path:
 				default:

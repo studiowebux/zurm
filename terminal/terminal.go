@@ -36,6 +36,10 @@ type Terminal struct {
 	// paused is set when the window is idle/unfocused. Polling goroutines
 	// (pollCWD, pollForeground) skip work while this is true.
 	paused atomic.Bool
+
+	// osc7Active is set true on the first OSC 7 CWD notification from the shell.
+	// Once set, QueryCWD skips the lsof fallback — the shell delivers CWD itself.
+	osc7Active atomic.Bool
 }
 
 // New creates a Terminal from the given config.
@@ -49,23 +53,23 @@ func New(cfg *config.Config) *Terminal {
 	cwdCh := make(chan string, 4)
 	bellCh := make(chan struct{}, 4)
 	buf := NewScreenBuffer(cfg.Window.Rows, cfg.Window.Columns, cfg.Scrollback.Lines, cfg.Blocks.MaxHistory, fg, bg, palette)
-	parser := NewParser(buf, titleCh, cwdCh, bellCh)
 
 	cur := NewCursor()
 	if cfg.Input.CursorBlink {
 		cur.EnableBlink()
 	}
 
-	return &Terminal{
+	t := &Terminal{
 		Buf:              buf,
 		Cursor:           cur,
-		parser:           parser,
 		cfg:              cfg,
 		TitleCh:          titleCh,
 		CwdCh:            cwdCh,
 		BellCh:           bellCh,
 		ForegroundProcCh: make(chan string, 4),
 	}
+	t.parser = NewParser(buf, titleCh, cwdCh, bellCh, &t.osc7Active)
+	return t
 }
 
 // Start spawns the shell process.
@@ -325,10 +329,10 @@ func (t *Terminal) RenameSession(name string) {
 }
 
 // QueryCWD performs a one-shot CWD query via lsof and sends the result
-// to CwdCh. Safe to call from a goroutine. This is the fallback for shells
-// that do not send OSC 7.
+// to CwdCh. No-op when the shell already delivers CWD via OSC 7 (osc7Active)
+// or when the terminal is idle-suspended.
 func (t *Terminal) QueryCWD() {
-	if t.paused.Load() {
+	if t.paused.Load() || t.osc7Active.Load() {
 		return
 	}
 	pid := t.Pid()
