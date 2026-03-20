@@ -147,8 +147,10 @@ type Game struct {
 	confirmPendingAction func()
 
 	// In-buffer search state (Cmd+F).
-	searchState     renderer.SearchState
-	lastSearchQuery string // detects query change to avoid recomputing every frame
+	searchState      renderer.SearchState
+	lastSearchQuery  string                 // detects query change to avoid recomputing every frame
+	searchResultCh   chan searchResult       // receives async SearchAll results
+	searchGen        uint64                 // incremented each query; stale results discarded
 
 	// Status bar state.
 	statusBarState renderer.StatusBarState
@@ -460,6 +462,7 @@ func main() {
 		screenshotDone:   make(chan string, 1),
 		tabHoverState:    renderer.TabHoverState{TabIdx: -1},
 		gitInfoCh:        make(chan gitInfoResult, 1),
+		searchResultCh:   make(chan searchResult, 1),
 	}
 
 	game.renderer.BlocksEnabled = game.blocksEnabled
@@ -1709,6 +1712,12 @@ type gitInfoResult struct {
 	info gitInfo
 }
 
+// searchResult delivers async SearchAll results to the game loop.
+type searchResult struct {
+	gen     uint64
+	matches []terminal.SearchMatch
+}
+
 // llmsFetchResult is the result of an async llms.txt HTTP fetch.
 // Both files are fetched in parallel; either may be empty if unavailable.
 type llmsFetchResult struct {
@@ -2074,23 +2083,57 @@ func (g *Game) closeSearch() {
 	}
 }
 
-// recomputeSearch re-runs SearchAll whenever the query changes.
-// Called every Update so the match list stays fresh as the user types.
+// recomputeSearch triggers an async SearchAll when the query changes and
+// drains completed results each frame. Called every Update.
 func (g *Game) recomputeSearch() {
+	// Drain completed search result (arrives from background goroutine).
+	select {
+	case res := <-g.searchResultCh:
+		if res.gen == g.searchGen {
+			g.searchState.Matches = res.matches
+			g.searchState.Current = 0
+			if len(res.matches) > 0 {
+				g.jumpToMatch(0)
+			}
+			g.focused.Term.Buf.BumpRenderGen()
+			g.screenDirty = true
+		}
+	default:
+	}
+
 	if !g.searchState.Open || g.searchState.Query == g.lastSearchQuery {
 		return
 	}
 	g.lastSearchQuery = g.searchState.Query
-	g.focused.Term.Buf.RLock()
-	matches := g.focused.Term.Buf.SearchAll(g.searchState.Query)
-	g.focused.Term.Buf.RUnlock()
-	g.searchState.Matches = matches
-	g.searchState.Current = 0
-	if len(matches) > 0 {
-		g.jumpToMatch(0)
+
+	// Empty query — clear immediately, no goroutine needed.
+	if g.searchState.Query == "" {
+		g.searchState.Matches = nil
+		g.searchState.Current = 0
+		g.focused.Term.Buf.BumpRenderGen()
+		g.screenDirty = true
+		return
 	}
-	g.focused.Term.Buf.BumpRenderGen()
-	g.screenDirty = true
+
+	// Drain stale result before spawning to keep the channel available.
+	select {
+	case <-g.searchResultCh:
+	default:
+	}
+	g.searchGen++
+	gen := g.searchGen
+	query := g.searchState.Query
+	buf := g.focused.Term.Buf
+	ch := g.searchResultCh
+	go func() {
+		buf.RLock()
+		matches := buf.SearchAll(query)
+		buf.RUnlock()
+		select {
+		case ch <- searchResult{gen: gen, matches: matches}:
+		default:
+		}
+	}()
 }
 
 // jumpToMatch scrolls the focused pane so match i is centered on screen.
