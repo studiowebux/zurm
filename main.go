@@ -1446,6 +1446,13 @@ func altPrintableSeq(key ebiten.Key) []byte {
 // TPS=5 (not 1) ensures clicks and keystrokes that complete within the frame interval
 // are not silently dropped — at 5fps the worst-case input latency is 200ms.
 func (g *Game) handleFocus() {
+	// NSWorkspaceDidWakeNotification: macOS fires this exactly once on system wake.
+	// Trigger unsuspend and full repaint immediately, before any focus-state
+	// transition, which is unreliable after sleep/wake on some macOS configurations.
+	if consumeWake() {
+		g.unsuspendAndRedraw()
+	}
+
 	focused := ebiten.IsFocused()
 
 	// Idle suspension: reduce TPS after 5 seconds unfocused (when auto_idle is enabled).
@@ -1462,17 +1469,8 @@ func (g *Game) handleFocus() {
 
 	if focused != g.prevFocused {
 		if focused {
-			// Wake from suspension.
-			if g.suspended {
-				ebiten.SetTPS(g.cfg.Performance.TPS)
-				g.suspended = false
-				for _, t := range g.tabs {
-					for _, leaf := range t.Layout.Leaves() {
-						leaf.Pane.Term.SetPaused(false)
-					}
-				}
-			}
-			g.unfocusedAt = time.Time{}
+			// Unsuspend, zero unfocusedAt, and force full repaint.
+			g.unsuspendAndRedraw()
 
 			// Reset edge-detection state: only snapshot modifier keys so that
 			// Cmd held from Cmd+Tab doesn't appear as a stale press. Non-modifier
@@ -1501,19 +1499,6 @@ func (g *Game) handleFocus() {
 
 			// Clear dock badge when window regains focus.
 			clearDockBadge()
-
-			// Force full redraw on focus regain. After macOS sleep/wake the
-			// process resumes but needsRender() returns false because no PTY
-			// output arrived yet — the screen appears frozen without this.
-			g.screenDirty = true
-			g.renderer.SetLayoutDirty()
-			for _, t := range g.tabs {
-				for _, leaf := range t.Layout.Leaves() {
-					leaf.Pane.Term.Buf.Lock()
-					leaf.Pane.Term.Buf.MarkAllDirty()
-					leaf.Pane.Term.Buf.Unlock()
-				}
-			}
 		} else {
 			// Record when focus was lost.
 			g.unfocusedAt = time.Now()
@@ -1524,28 +1509,35 @@ func (g *Game) handleFocus() {
 
 	// Emergency recovery for systems where IsFocused() doesn't reliably update
 	// after sleep/wake (e.g. work machines with screen lock or MDM policies).
-	// If still suspended but the user is clicking, unsuspend immediately without
-	// waiting for a focus-state transition. The click was already dispatched to
-	// the PTY by handleMouse(); this just lifts the paused flag so the PTY
-	// reader can deliver the shell response.
+	// If still suspended but the user interacts (click or keystroke), unsuspend
+	// immediately without waiting for a focus-state transition.
 	if g.suspended && (ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) ||
-		ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight)) {
+		ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) ||
+		len(ebiten.AppendInputChars(nil)) > 0) {
+		g.unsuspendAndRedraw()
+	}
+}
+
+// unsuspendAndRedraw lifts idle suspension (if active) and forces a full repaint.
+// Called from handleFocus (focus-gain, wake notification, and emergency recovery).
+func (g *Game) unsuspendAndRedraw() {
+	if g.suspended {
 		ebiten.SetTPS(g.cfg.Performance.TPS)
 		g.suspended = false
-		g.unfocusedAt = time.Time{}
 		for _, t := range g.tabs {
 			for _, leaf := range t.Layout.Leaves() {
 				leaf.Pane.Term.SetPaused(false)
 			}
 		}
-		g.screenDirty = true
-		g.renderer.SetLayoutDirty()
-		for _, t := range g.tabs {
-			for _, leaf := range t.Layout.Leaves() {
-				leaf.Pane.Term.Buf.Lock()
-				leaf.Pane.Term.Buf.MarkAllDirty()
-				leaf.Pane.Term.Buf.Unlock()
-			}
+	}
+	g.unfocusedAt = time.Time{}
+	g.screenDirty = true
+	g.renderer.SetLayoutDirty()
+	for _, t := range g.tabs {
+		for _, leaf := range t.Layout.Leaves() {
+			leaf.Pane.Term.Buf.Lock()
+			leaf.Pane.Term.Buf.MarkAllDirty()
+			leaf.Pane.Term.Buf.Unlock()
 		}
 	}
 }
