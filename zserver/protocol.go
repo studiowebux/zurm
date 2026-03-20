@@ -7,17 +7,18 @@ import (
 )
 
 const (
-	MsgCreateSession uint8 = 0x01
-	MsgAttachSession uint8 = 0x02
-	MsgDetachSession uint8 = 0x03
-	MsgInput         uint8 = 0x04
-	MsgOutput        uint8 = 0x05
-	MsgResize        uint8 = 0x06
-	MsgListSessions  uint8 = 0x07
-	MsgSessionDead   uint8 = 0x08
-	MsgSessionInfo   uint8 = 0x09
-	MsgError         uint8 = 0x0A
-	MsgSessionList   uint8 = 0x0B
+	MsgCreateSession  uint8 = 0x01
+	MsgAttachSession  uint8 = 0x02
+	MsgDetachSession  uint8 = 0x03
+	MsgInput          uint8 = 0x04
+	MsgOutput         uint8 = 0x05
+	MsgResize         uint8 = 0x06
+	MsgListSessions   uint8 = 0x07
+	MsgSessionDead    uint8 = 0x08
+	MsgSessionInfo    uint8 = 0x09
+	MsgError          uint8 = 0x0A
+	MsgSessionList    uint8 = 0x0B
+	MsgRenameSession  uint8 = 0x0C
 )
 
 // Message is a framed protocol message.
@@ -41,13 +42,20 @@ type AttachSessionRequest struct {
 	ID string `json:"id"`
 }
 
-// SessionInfo is returned by the server after CreateSession or AttachSession.
+// SessionInfo is returned by the server after CreateSession or AttachSession,
+// and in the session list. Name is empty when the user has not set one.
 type SessionInfo struct {
 	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
 	PID  int    `json:"pid"`
 	Cols int    `json:"cols"`
 	Rows int    `json:"rows"`
 	Dir  string `json:"dir"`
+}
+
+// RenameSessionRequest is the JSON payload for MsgRenameSession.
+type RenameSessionRequest struct {
+	Name string `json:"name"`
 }
 
 // WriteMessage writes a length-prefixed message: [4-byte LE length][1-byte type][payload].

@@ -311,6 +311,19 @@ func (t *Terminal) Pid() int {
 // Called by the game loop when the window becomes idle or regains focus.
 func (t *Terminal) SetPaused(p bool) { t.paused.Store(p) }
 
+// sessionRenamer is implemented by backends that support session naming (ServerBackend).
+type sessionRenamer interface {
+	RenameSession(name string) error
+}
+
+// RenameSession sends a human-readable name to the backing server session.
+// No-op for local PTY sessions. Called when the user renames a server-backed pane.
+func (t *Terminal) RenameSession(name string) {
+	if r, ok := t.pty.(sessionRenamer); ok {
+		r.RenameSession(name) //nolint:errcheck — best-effort; pane CustomName is already applied
+	}
+}
+
 // QueryCWD performs a one-shot CWD query via lsof and sends the result
 // to CwdCh. Safe to call from a goroutine. This is the fallback for shells
 // that do not send OSC 7.

@@ -126,6 +126,13 @@ func (b *ServerBackend) Resize(cols, rows int) error {
 // Dead returns a channel closed when the session ends.
 func (b *ServerBackend) Dead() <-chan struct{} { return b.dead }
 
+// RenameSession sends a human-readable name to the server for this session.
+// Called when the user renames a server-backed pane.
+func (b *ServerBackend) RenameSession(name string) error {
+	data, _ := json.Marshal(zserver.RenameSessionRequest{Name: name})
+	return zserver.WriteMessage(b.conn, zserver.MsgRenameSession, data)
+}
+
 // Close detaches from the session. The session remains alive on the server.
 func (b *ServerBackend) Close() {
 	zserver.WriteMessage(b.conn, zserver.MsgDetachSession, nil) // #nosec G104 — best-effort detach notification; connection is being torn down

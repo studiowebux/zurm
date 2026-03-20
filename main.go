@@ -4675,9 +4675,13 @@ func (g *Game) startRenamePane() {
 // commitPaneRename applies the pane rename text.
 func (g *Game) commitPaneRename() {
 	if g.focused != nil && g.focused.Renaming {
-		g.focused.CustomName = sanitizeTitle(g.focused.RenameText)
+		name := sanitizeTitle(g.focused.RenameText)
+		g.focused.CustomName = name
 		g.focused.Renaming = false
 		g.focused.RenameText = ""
+		if g.focused.ServerSessionID != "" {
+			g.focused.Term.RenameSession(name)
+		}
 		g.screenDirty = true
 	}
 }
@@ -7298,9 +7302,9 @@ func runListSessions() error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tPID\tSIZE\tDIR")
+	fmt.Fprintln(w, "ID\tNAME\tPID\tSIZE\tDIR")
 	for _, s := range sessions {
-		fmt.Fprintf(w, "%s\t%d\t%dx%d\t%s\n", s.ID, s.PID, s.Cols, s.Rows, s.Dir)
+		fmt.Fprintf(w, "%s\t%s\t%d\t%dx%d\t%s\n", s.ID, s.Name, s.PID, s.Cols, s.Rows, s.Dir)
 	}
 	w.Flush()
 	return nil
@@ -7327,7 +7331,13 @@ func (g *Game) attachServerSession() {
 	// next buildPalette call (theme switch, config reload, etc.).
 	for _, s := range sessions {
 		si := s // capture for closure
-		label := fmt.Sprintf("Attach: %s (pid %d, %dx%d, %s)", si.ID, si.PID, si.Cols, si.Rows, si.Dir)
+		displayName := si.ID
+		if si.Name != "" {
+			displayName = si.Name
+		} else if len(si.ID) > 8 {
+			displayName = si.ID[:8]
+		}
+		label := fmt.Sprintf("Attach: %s (pid %d, %dx%d, %s)", displayName, si.PID, si.Cols, si.Rows, si.Dir)
 		g.paletteEntries = append(g.paletteEntries, renderer.PaletteEntry{Name: label})
 		g.paletteActions = append(g.paletteActions, func() {
 			g.openServerTabForSession(si.ID)

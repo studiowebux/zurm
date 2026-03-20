@@ -10,6 +10,7 @@ import (
 // It persists independently of any connected client.
 type Session struct {
 	ID   string
+	Name string // human-readable label set via MsgRenameSession; empty until named
 	Dir  string
 	Cols int
 	Rows int
@@ -64,6 +65,13 @@ func (s *Session) unsubscribe(ch chan []byte) {
 	}
 	s.mu.Unlock()
 	close(ch)
+}
+
+// Rename sets the human-readable session name. Thread-safe.
+func (s *Session) Rename(name string) {
+	s.mu.Lock()
+	s.Name = name
+	s.mu.Unlock()
 }
 
 func (s *Session) write(p []byte) { s.spty.write(p) } // #nosec G104 — best-effort PTY write; process may already be dead

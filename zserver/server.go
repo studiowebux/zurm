@@ -144,6 +144,12 @@ func (srv *Server) serveSession(conn net.Conn, s *Session) {
 				rows := int(binary.LittleEndian.Uint16(msg.Payload[2:4]))
 				s.resize(cols, rows)
 			}
+		case MsgRenameSession:
+			var req RenameSessionRequest
+			if err := json.Unmarshal(msg.Payload, &req); err == nil {
+				s.Rename(req.Name)
+				log.Printf("zserver: session %s renamed to %q", s.ID, req.Name)
+			}
 		case MsgDetachSession:
 			conn.Close() // #nosec G104 — intentional teardown; error is unactionable
 			return
