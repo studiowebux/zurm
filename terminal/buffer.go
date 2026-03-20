@@ -965,10 +965,10 @@ func (sb *ScreenBuffer) scrollbackPush(row []Cell, wrapped bool) {
 		sb.scrollback[sb.scrollHead] = row
 		sb.scrollbackWrapped[sb.scrollHead] = wrapped
 		sb.scrollHead = (sb.scrollHead + 1) % sb.maxScrollback
-		// Adjust ViewOffset for the dropped line.
-		if sb.ViewOffset > 0 {
-			sb.ViewOffset--
-		}
+		// Do NOT decrement ViewOffset here. A net evict+push leaves the scrollback
+		// depth unchanged, so the user's distance from the bottom is unchanged.
+		// The old decrement caused the pinned view to slide toward the bottom during
+		// sustained output (e.g. Claude running), forcing an unwanted snap-to-bottom.
 	}
 }
 
