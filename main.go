@@ -1759,9 +1759,40 @@ func (g *Game) drainCwd() {
 					defer cancel()
 					info := gitInfo{}
 
-					// Branch name.
-					if out, err := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil { // #nosec G204
-						info.Branch = strings.TrimSpace(string(out))
+					// Single call: branch + dirty/staged + ahead/behind.
+					// Replaces three separate git commands (rev-parse, status, rev-list).
+					if out, err := exec.CommandContext(ctx, "git", "-C", cwd, "status", "--porcelain", "-b").Output(); err == nil { // #nosec G204
+						lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+						if len(lines) > 0 && strings.HasPrefix(lines[0], "## ") {
+							header := lines[0][3:]
+							if dotIdx := strings.Index(header, "..."); dotIdx >= 0 {
+								info.Branch = header[:dotIdx]
+								rest := header[dotIdx+3:]
+								if brk := strings.Index(rest, " ["); brk >= 0 && strings.HasSuffix(rest, "]") {
+									for _, part := range strings.Split(rest[brk+2:len(rest)-1], ", ") {
+										fmt.Sscanf(part, "ahead %d", &info.Ahead)  //nolint:errcheck
+										fmt.Sscanf(part, "behind %d", &info.Behind) //nolint:errcheck
+									}
+								}
+							} else if header == "HEAD (no branch)" {
+								info.Branch = "HEAD"
+							} else {
+								info.Branch = header
+							}
+							for _, line := range lines[1:] {
+								if len(line) < 2 {
+									continue
+								}
+								idx := line[0]
+								wt := line[1]
+								if idx != ' ' && idx != '?' {
+									info.Staged++
+								}
+								if wt != ' ' && wt != '?' {
+									info.Dirty++
+								}
+							}
+						}
 					} else {
 						select {
 						case ch <- gitInfoResult{gen: gen, info: info}:
@@ -1770,35 +1801,9 @@ func (g *Game) drainCwd() {
 						return
 					}
 
-					// Short commit hash.
+					// Short commit hash — no equivalent in porcelain output.
 					if out, err := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse", "--short", "HEAD").Output(); err == nil { // #nosec G204
 						info.Commit = strings.TrimSpace(string(out))
-					}
-
-					// Dirty and staged counts from porcelain status.
-					if out, err := exec.CommandContext(ctx, "git", "-C", cwd, "status", "--porcelain").Output(); err == nil { // #nosec G204
-						for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
-							if len(line) < 2 {
-								continue
-							}
-							idx := line[0]
-							wt := line[1]
-							if idx != ' ' && idx != '?' {
-								info.Staged++
-							}
-							if wt != ' ' && wt != '?' {
-								info.Dirty++
-							}
-						}
-					}
-
-					// Ahead/behind upstream.
-					if out, err := exec.CommandContext(ctx, "git", "-C", cwd, "rev-list", "--left-right", "--count", "HEAD...@{upstream}").Output(); err == nil { // #nosec G204
-						parts := strings.Fields(strings.TrimSpace(string(out)))
-						if len(parts) == 2 {
-							fmt.Sscanf(parts[0], "%d", &info.Ahead)
-							fmt.Sscanf(parts[1], "%d", &info.Behind)
-						}
 					}
 
 					select {
