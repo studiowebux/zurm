@@ -751,7 +751,15 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.statusBarState.Zoomed = g.zoomed
 	g.statusBarState.PinMode = g.pinMode
 	g.statusBarState.BlocksEnabled = g.blocksEnabled
-	g.statusBarState.ServerSession = g.focused != nil && g.focused.ServerSessionID != ""
+	var srvCount int
+	for _, t := range g.tabs {
+		for _, leaf := range t.Layout.Leaves() {
+			if leaf.Pane.ServerSessionID != "" {
+				srvCount++
+			}
+		}
+	}
+	g.statusBarState.ServerSessionCount = srvCount
 	if g.focused != nil {
 		g.focused.Term.Buf.RLock()
 		g.statusBarState.ScrollOffset = g.focused.Term.Buf.ViewOffset
