@@ -682,6 +682,7 @@ func (g *Game) Update() error {
 	g.drainGitBranch()
 	g.drainLLMSFetch()
 	g.drainForeground()
+	g.drainShellIntegration()
 	g.pollStatusOnOutput()
 	g.recomputeSearch()
 
@@ -2035,6 +2036,43 @@ func (g *Game) drainForeground() {
 	}
 }
 
+// drainShellIntegration reads OSC 133 shell integration events from all visible
+// panes and updates the foreground process name event-driven (no polling).
+// A/D = shell is at prompt → clear proc name. C = command starting → query once.
+func (g *Game) drainShellIntegration() {
+	if !g.cfg.StatusBar.ShowProcess {
+		return
+	}
+	if g.activeTab >= len(g.tabs) {
+		return
+	}
+	for _, leaf := range g.tabs[g.activeTab].Layout.Leaves() {
+		p := leaf.Pane
+		for {
+			select {
+			case kind := <-p.Term.ShellIntCh:
+				switch kind {
+				case 'A', 'D':
+					// Shell at prompt — clear foreground process.
+					if p.ProcName != "" {
+						p.ProcName = ""
+						g.screenDirty = true
+						if p == g.focused {
+							g.statusBarState.ForegroundProc = ""
+						}
+					}
+				case 'C':
+					// Command about to execute — one-shot query for foreground name.
+					go p.Term.QueryForeground()
+				}
+			default:
+				goto nextPane
+			}
+		}
+	nextPane:
+	}
+}
+
 // pollStatusOnOutput triggers CWD and foreground process queries when PTY
 // output arrives, replacing the old fixed-interval ticker goroutines.
 // CWD polls at most every 2s, foreground at most every 1s.
@@ -2056,7 +2094,11 @@ func (g *Game) pollStatusOnOutput() {
 	if g.cfg.StatusBar.ShowProcess && now.Sub(g.lastFgPoll) >= 1*time.Second {
 		g.lastFgPoll = now
 		for _, leaf := range g.tabs[g.activeTab].Layout.Leaves() {
-			go leaf.Pane.Term.QueryForeground()
+			// Skip ps polling for terminals with OSC 133 shell integration —
+			// drainShellIntegration handles foreground updates event-driven.
+			if !leaf.Pane.Term.HasOSC133() {
+				go leaf.Pane.Term.QueryForeground()
+			}
 		}
 	}
 }

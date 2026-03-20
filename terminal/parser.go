@@ -35,10 +35,12 @@ type Parser struct {
 	params     []int
 	paramStr   string
 	oscBuf  strings.Builder
-	titleCh    chan<- string       // optional: notified on OSC 0/2 title changes
-	cwdCh      chan<- string       // optional: notified on OSC 7 CWD changes
-	bellCh     chan<- struct{}     // optional: notified on BEL (0x07) in ground state
-	osc7Active *atomic.Bool        // optional: set true on first OSC 7 receipt; disables lsof fallback
+	titleCh      chan<- string       // optional: notified on OSC 0/2 title changes
+	cwdCh        chan<- string       // optional: notified on OSC 7 CWD changes
+	bellCh       chan<- struct{}     // optional: notified on BEL (0x07) in ground state
+	shellIntCh   chan<- byte         // optional: notified on OSC 133 shell integration (A/B/C/D)
+	osc7Active   *atomic.Bool       // optional: set true on first OSC 7 receipt; disables lsof fallback
+	osc133Active *atomic.Bool       // optional: set true on first OSC 133 receipt; disables ps polling
 
 	// Tab stops (every 8 columns by default).
 	tabStops []bool
@@ -62,14 +64,16 @@ type Parser struct {
 // NewParser creates a parser attached to the given buffer.
 // osc7Active is optional (may be nil); when non-nil it is set to true on the
 // first OSC 7 receipt, signalling that lsof-based CWD polling can be skipped.
-func NewParser(sb *ScreenBuffer, titleCh chan<- string, cwdCh chan<- string, bellCh chan<- struct{}, osc7Active *atomic.Bool) *Parser {
+func NewParser(sb *ScreenBuffer, titleCh chan<- string, cwdCh chan<- string, bellCh chan<- struct{}, shellIntCh chan<- byte, osc7Active, osc133Active *atomic.Bool) *Parser {
 	p := &Parser{
-		sb:         sb,
-		palette:    sb.Palette,
-		titleCh:    titleCh,
-		cwdCh:      cwdCh,
-		bellCh:     bellCh,
-		osc7Active: osc7Active,
+		sb:           sb,
+		palette:      sb.Palette,
+		titleCh:      titleCh,
+		cwdCh:        cwdCh,
+		bellCh:       bellCh,
+		shellIntCh:   shellIntCh,
+		osc7Active:   osc7Active,
+		osc133Active: osc133Active,
 	}
 	p.resetTabStops()
 	return p
@@ -442,6 +446,17 @@ func (p *Parser) dispatchOSC(s string) {
 			}
 		}
 		p.sb.applyBlockEvent(kind, exitCode)
+		// Signal shell integration event to the game loop so it can update
+		// the foreground process name without polling.
+		if p.osc133Active != nil {
+			p.osc133Active.Store(true)
+		}
+		if p.shellIntCh != nil && (kind == 'A' || kind == 'C' || kind == 'D') {
+			select {
+			case p.shellIntCh <- byte(kind):
+			default:
+			}
+		}
 	}
 }
 

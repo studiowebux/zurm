@@ -40,6 +40,14 @@ type Terminal struct {
 	// osc7Active is set true on the first OSC 7 CWD notification from the shell.
 	// Once set, QueryCWD skips the lsof fallback — the shell delivers CWD itself.
 	osc7Active atomic.Bool
+
+	// osc133Active is set true on the first OSC 133 shell integration event.
+	// Once set, periodic ps-based foreground polling is skipped.
+	osc133Active atomic.Bool
+
+	// ShellIntCh receives OSC 133 event codes (A/C/D) from the parser.
+	// Drained by the game loop to update the foreground process name.
+	ShellIntCh chan byte
 }
 
 // New creates a Terminal from the given config.
@@ -59,6 +67,7 @@ func New(cfg *config.Config) *Terminal {
 		cur.EnableBlink()
 	}
 
+	shellIntCh := make(chan byte, 4)
 	t := &Terminal{
 		Buf:              buf,
 		Cursor:           cur,
@@ -67,8 +76,9 @@ func New(cfg *config.Config) *Terminal {
 		CwdCh:            cwdCh,
 		BellCh:           bellCh,
 		ForegroundProcCh: make(chan string, 4),
+		ShellIntCh:       shellIntCh,
 	}
-	t.parser = NewParser(buf, titleCh, cwdCh, bellCh, &t.osc7Active)
+	t.parser = NewParser(buf, titleCh, cwdCh, bellCh, shellIntCh, &t.osc7Active, &t.osc133Active)
 	return t
 }
 
@@ -327,6 +337,10 @@ func (t *Terminal) RenameSession(name string) {
 		r.RenameSession(name) //nolint:errcheck — best-effort; pane CustomName is already applied
 	}
 }
+
+// HasOSC133 reports whether the shell has emitted at least one OSC 133 event.
+// When true, the game loop skips periodic ps-based foreground polling for this terminal.
+func (t *Terminal) HasOSC133() bool { return t.osc133Active.Load() }
 
 // QueryCWD performs a one-shot CWD query via lsof and sends the result
 // to CwdCh. No-op when the shell already delivers CWD via OSC 7 (osc7Active)
