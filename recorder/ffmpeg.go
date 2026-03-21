@@ -202,11 +202,9 @@ func (r *Recorder) AddFrame(raw []byte) {
 		r.mu.Unlock()
 		return
 	}
-	ch := r.frames
 	now := time.Now()
 	elapsed := now.Sub(r.lastFrameTime)
 	r.lastFrameTime = now
-	r.mu.Unlock()
 
 	// Calculate how many frames this interval represents.
 	// If >1 frame duration has passed, insert duplicates to fill the gap.
@@ -218,14 +216,18 @@ func (r *Recorder) AddFrame(raw []byte) {
 		copies = 10 // cap to avoid flooding after long pauses
 	}
 
+	// Send under the lock so Stop() cannot close r.frames while we're sending.
+	// The non-blocking select ensures we never block while holding the lock.
 	for i := 0; i < copies; i++ {
 		select {
-		case ch <- raw:
+		case r.frames <- raw:
 		default:
 			// Channel full — drop frame rather than blocking Draw().
+			r.mu.Unlock()
 			return
 		}
 	}
+	r.mu.Unlock()
 }
 
 // recordingDir returns the directory where recordings are saved.
