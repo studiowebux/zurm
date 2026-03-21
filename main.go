@@ -2495,72 +2495,44 @@ func (g *Game) handleFileExplorerInput() {
 			}
 
 		case key == ebiten.KeyEnter:
-			// Handle search results differently
-			if len(st.SearchResults) > 0 {
+			// Resolve the selected entry from search results or normal list.
+			var selected *fileexplorer.Entry
+			isSearch := len(st.SearchResults) > 0
+			if isSearch {
 				if st.Cursor >= 0 && st.Cursor < len(st.SearchResults) {
-					selected := st.SearchResults[st.Cursor]
-
-					// Special handling for . and ..
-					if selected.Name == "." {
-						// Insert current directory path
-						g.focused.Term.SendBytes([]byte(selected.Path))
-						g.closeFileExplorer()
-						return
-					} else if selected.Name == ".." {
-						// Navigate to parent directory
-						st.Root = selected.Path
-						entries, err := fileexplorer.BuildTree(selected.Path)
-						if err == nil {
-							st.Entries = entries
-							st.SearchResults = nil
-							st.SearchQuery = ""
-							st.Cursor = 0
-							st.ScrollOffset = 0
-						}
-					} else if selected.IsDir {
-						// Navigate into the directory
-						st.Root = selected.Path
-						entries, err := fileexplorer.BuildTree(selected.Path)
-						if err == nil {
-							st.Entries = entries
-							st.SearchResults = nil
-							st.SearchQuery = ""
-							st.Cursor = 0
-							st.ScrollOffset = 0
-						}
-					} else {
-						// File - insert path
-						g.focused.Term.SendBytes([]byte(selected.Path))
-						g.closeFileExplorer()
-						return
-					}
+					selected = &st.SearchResults[st.Cursor]
 				}
+			} else if st.Cursor < len(st.Entries) {
+				selected = &st.Entries[st.Cursor]
+			}
+			if selected == nil {
 				break
 			}
 
-			// Normal mode (not searching)
-			if st.Cursor >= len(st.Entries) {
-				break
-			}
-			e := st.Entries[st.Cursor]
-
-			// Handle special entries
-			if e.Name == "." {
-				// Insert current directory path
-				g.focused.Term.SendBytes([]byte(e.Path))
+			// "." — send path, close. File — send path, close.
+			if selected.Name == "." || !selected.IsDir {
+				g.focused.Term.SendBytes([]byte(selected.Path))
 				g.closeFileExplorer()
 				return
-			} else if e.Name == ".." {
-				// Navigate to parent directory
-				st.Root = e.Path
-				entries, err := fileexplorer.BuildTree(e.Path)
+			}
+
+			// ".." or directory in search results — navigate into it.
+			if selected.Name == ".." || isSearch {
+				st.Root = selected.Path
+				entries, err := fileexplorer.BuildTree(selected.Path)
 				if err == nil {
 					st.Entries = entries
+					st.SearchResults = nil
+					st.SearchQuery = ""
 					st.Cursor = 0
 					st.ScrollOffset = 0
 				}
-			} else if e.IsDir {
-				if e.Expanded {
+				if isSearch {
+					break
+				}
+			} else {
+				// Normal mode directory — expand/collapse toggle.
+				if selected.Expanded {
 					st.Entries = fileexplorer.CollapseAt(st.Entries, st.Cursor)
 				} else {
 					entries, err := fileexplorer.ExpandAt(st.Entries, st.Cursor)
@@ -2568,11 +2540,6 @@ func (g *Game) handleFileExplorerInput() {
 						st.Entries = entries
 					}
 				}
-			} else {
-				// Insert file path into focused PTY.
-				g.focused.Term.SendBytes([]byte(e.Path))
-				g.closeFileExplorer()
-				return
 			}
 
 		case key == ebiten.KeyC && !meta:

@@ -193,9 +193,9 @@ func (v *Vault) Add(cmd string) {
 	defer v.mu.Unlock()
 
 	if _, exists := v.index[cmd]; exists {
-		// Move to end (most recent).
-		for i, c := range v.commands {
-			if c == cmd {
+		// Remove existing entry — search from end since duplicates are typically recent.
+		for i := len(v.commands) - 1; i >= 0; i-- {
+			if v.commands[i] == cmd {
 				v.commands = append(v.commands[:i], v.commands[i+1:]...)
 				break
 			}
