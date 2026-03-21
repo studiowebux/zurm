@@ -1,7 +1,6 @@
 package renderer
 
 import (
-	"fmt"
 	"image"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -20,17 +19,9 @@ func (r *Renderer) drawTabSwitcher(tabs []*tab.Tab, activeTab int, state *TabSwi
 		return
 	}
 
-	physW := r.modalLayer.Bounds().Dx()
-	physH := r.modalLayer.Bounds().Dy()
+	physW, physH := r.modalSize()
 
-	// Semi-transparent backdrop.
-	if r.overlayBg == nil {
-		r.overlayBg = ebiten.NewImage(1, 1)
-		r.overlayBg.Fill(r.ui.Backdrop)
-	}
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Scale(float64(physW), float64(physH))
-	r.modalLayer.DrawImage(r.overlayBg, op)
+	r.drawBackdrop(physW, physH)
 
 	cw := r.font.CellW
 	ch := r.font.CellH
@@ -60,7 +51,7 @@ func (r *Renderer) drawTabSwitcher(tabs []*tab.Tab, activeTab int, state *TabSwi
 	panelRect := image.Rect(panelX, panelY, panelX+panelW, panelY+panelH)
 
 	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(r.ui.PanelBg)
-	r.drawOverlayBorder(panelRect)
+	drawBorder(r.modalLayer, panelRect, r.ui.Border)
 
 	// Title row.
 	titleY := panelY + 4
@@ -87,12 +78,7 @@ func (r *Renderer) drawTabSwitcher(tabs []*tab.Tab, activeTab int, state *TabSwi
 		}
 
 		// Slot badge.
-		var badge string
-		if t.PinnedSlot != 0 {
-			badge = fmt.Sprintf("[%c]", t.PinnedSlot)
-		} else {
-			badge = "[ ]"
-		}
+		badge := pinnedBadge(t.PinnedSlot, "[ ]")
 
 		badgeColor := r.ui.KeyName
 		titleColor := r.ui.Fg

@@ -57,8 +57,7 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 	}
 
 	h := StatusBarHeight(r.font, r.cfg)
-	physH := r.offscreen.Bounds().Dy()
-	physW := r.offscreen.Bounds().Dx()
+	physW, physH := r.screenSize()
 	barRect := image.Rect(0, physH-h, physW, physH)
 
 	barBg := darken(config.ParseHexColor(r.cfg.Colors.Background))

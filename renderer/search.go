@@ -26,8 +26,7 @@ func (r *Renderer) drawSearchBar(state *SearchState) {
 	}
 
 	h := r.font.CellH + 8
-	physH := r.offscreen.Bounds().Dy()
-	physW := r.offscreen.Bounds().Dx()
+	physW, physH := r.screenSize()
 	statusH := StatusBarHeight(r.font, r.cfg)
 	barTop := physH - statusH - h
 	barRect := image.Rect(0, barTop, physW, barTop+h)
@@ -60,7 +59,7 @@ func (r *Renderer) drawSearchBar(state *SearchState) {
 		var countStr string
 		var countColor color.RGBA
 		if len(state.Matches) == 0 {
-			countStr = "no matches"
+			countStr = noMatchesLabel
 			countColor = redFg
 		} else {
 			countStr = fmt.Sprintf("%d / %d", state.Current+1, len(state.Matches))

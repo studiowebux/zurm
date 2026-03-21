@@ -197,5 +197,5 @@ func (r *Renderer) drawMenuPanel(items []help.MenuItem, rect image.Rectangle, ho
 
 // drawMenuBorder draws a 1px border around rect onto r.modalLayer.
 func (r *Renderer) drawMenuBorder(rect image.Rectangle) {
-	drawRect(r.modalLayer, rect, r.ui.Border)
+	drawBorder(r.modalLayer, rect, r.ui.Border)
 }

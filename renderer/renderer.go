@@ -109,6 +109,62 @@ const (
 	CopyAll                // command + output
 )
 
+const noMatchesLabel = "no matches"
+
+// modalSize returns the physical width and height of the modal layer.
+func (r *Renderer) modalSize() (int, int) {
+	b := r.modalLayer.Bounds()
+	return b.Dx(), b.Dy()
+}
+
+// screenSize returns the physical width and height of the offscreen buffer.
+func (r *Renderer) screenSize() (int, int) {
+	b := r.offscreen.Bounds()
+	return b.Dx(), b.Dy()
+}
+
+// drawBackdrop draws a semi-transparent backdrop over the full modal layer.
+func (r *Renderer) drawBackdrop(physW, physH int) {
+	if r.overlayBg == nil {
+		r.overlayBg = ebiten.NewImage(1, 1)
+		r.overlayBg.Fill(r.ui.Backdrop)
+	}
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Scale(float64(physW), float64(physH))
+	r.modalLayer.DrawImage(r.overlayBg, op)
+}
+
+// drawBorder draws a 1px border around rect on img.
+func drawBorder(img *ebiten.Image, rect image.Rectangle, c color.RGBA) {
+	img.SubImage(image.Rect(rect.Min.X, rect.Min.Y, rect.Max.X, rect.Min.Y+1)).(*ebiten.Image).Fill(c)
+	img.SubImage(image.Rect(rect.Min.X, rect.Max.Y-1, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(c)
+	img.SubImage(image.Rect(rect.Min.X, rect.Min.Y, rect.Min.X+1, rect.Max.Y)).(*ebiten.Image).Fill(c)
+	img.SubImage(image.Rect(rect.Max.X-1, rect.Min.Y, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(c)
+}
+
+// clampScroll clamps scrollOffset into [0, maxScroll] and ensures maxScroll >= 0.
+func clampScroll(scrollOffset, maxScroll int) (int, int) {
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if scrollOffset < 0 {
+		scrollOffset = 0
+	}
+	if scrollOffset > maxScroll {
+		scrollOffset = maxScroll
+	}
+	return scrollOffset, maxScroll
+}
+
+// pinnedBadge returns a "[X]" badge for the given pinned slot rune,
+// or the placeholder string when slot is 0 (unpinned).
+func pinnedBadge(slot rune, placeholder string) string {
+	if slot != 0 {
+		return fmt.Sprintf("[%c]", slot)
+	}
+	return placeholder
+}
+
 // BlockHoverState describes the block currently under the cursor.
 type BlockHoverState struct {
 	Active    bool
@@ -461,7 +517,7 @@ func (r *Renderer) DrawAll(ds DrawState) {
 // When hintMode is true, tab number badges (1-9) are overlaid for discoverability.
 func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int, hintMode bool) {
 	tabBarH := r.TabBarHeight()
-	physW := r.offscreen.Bounds().Dx()
+	physW, _ := r.screenSize()
 	numTabs := len(tabs)
 	if numTabs == 0 {
 		return

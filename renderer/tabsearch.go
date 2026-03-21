@@ -1,7 +1,6 @@
 package renderer
 
 import (
-	"fmt"
 	"image"
 	"strings"
 
@@ -80,8 +79,7 @@ func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearc
 		return
 	}
 
-	physW := r.modalLayer.Bounds().Dx()
-	physH := r.modalLayer.Bounds().Dy()
+	physW, physH := r.modalSize()
 
 	filtered := FilterTabSearch(tabs, state.Query)
 	visible := len(filtered)
@@ -97,7 +95,7 @@ func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearc
 	rowH := ch + 6
 	panelH := inputH + 2 + visible*rowH + 6
 	if len(filtered) == 0 {
-		panelH = inputH + 2 + rowH + 6 // room for "no matches"
+		panelH = inputH + 2 + rowH + 6 // room for noMatchesLabel
 	}
 	panelW := physW * tsPanelWidthP / 100
 	if panelW < 40*cw {
@@ -116,7 +114,7 @@ func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearc
 	// Panel background.
 	panelRect := image.Rect(panelX, panelY, panelX+panelW, panelY+panelH)
 	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(ui.PanelBg)
-	drawRect(r.modalLayer, panelRect, ui.Border)
+	drawBorder(r.modalLayer, panelRect, ui.Border)
 
 	// Input area.
 	inputRect := image.Rect(panelX+1, panelY+1, panelX+panelW-1, panelY+inputH)
@@ -142,7 +140,7 @@ func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearc
 
 	if len(filtered) == 0 {
 		noMatchY := divY + 2 + (rowH-ch)/2
-		r.font.DrawString(r.modalLayer, "no matches", panelX+tsPad*cw/2, noMatchY, ui.Dim)
+		r.font.DrawString(r.modalLayer, noMatchesLabel, panelX+tsPad*cw/2, noMatchY, ui.Dim)
 		return
 	}
 
@@ -173,12 +171,7 @@ func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearc
 		nameX := panelX + tsPad*cw/2
 
 		// Pin badge.
-		var badge string
-		if entry.PinnedSlot != 0 {
-			badge = fmt.Sprintf("[%c] ", entry.PinnedSlot)
-		} else {
-			badge = "    "
-		}
+		badge := pinnedBadge(entry.PinnedSlot, "   ") + " "
 		badgeColor := ui.KeyName
 		if idx == state.Cursor {
 			badgeColor = ui.Accent

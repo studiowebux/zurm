@@ -61,7 +61,7 @@ func (r *Renderer) drawStats(state *StatsState) {
 
 	panelW := maxLen*cw + pad*2
 	panelH := len(lines)*ch + pad*2
-	physW := r.offscreen.Bounds().Dx()
+	physW, _ := r.screenSize()
 	tabBarH := r.TabBarHeight()
 
 	panelX := physW - panelW - pad

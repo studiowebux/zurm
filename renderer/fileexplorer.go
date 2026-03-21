@@ -59,8 +59,8 @@ func (r *Renderer) FileExplorerPanelWidth() int {
 	if r.offscreen == nil {
 		return 0
 	}
-	physW := r.offscreen.Bounds().Dx()
-	return explorerPanelWidth(physW, r.font.CellW)
+	sw, _ := r.screenSize()
+	return explorerPanelWidth(sw, r.font.CellW)
 }
 
 // explorerPanelWidth computes the panel width in physical pixels.
@@ -85,8 +85,7 @@ func (r *Renderer) drawFileExplorer(state *FileExplorerState) {
 		return
 	}
 
-	physW := r.modalLayer.Bounds().Dx()
-	physH := r.modalLayer.Bounds().Dy()
+	physW, physH := r.modalSize()
 	tabBarH := r.TabBarHeight()
 	statusBarH := r.StatusBarHeight()
 
@@ -108,7 +107,7 @@ func (r *Renderer) drawFileExplorer(state *FileExplorerState) {
 
 	// Panel background.
 	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(r.ui.PanelBg)
-	r.drawOverlayBorder(panelRect)
+	drawBorder(r.modalLayer, panelRect, r.ui.Border)
 	rowH := ch + 2
 	state.RowH = rowH
 
@@ -169,15 +168,7 @@ func (r *Renderer) drawFileExplorer(state *FileExplorerState) {
 
 	// Clamp scroll.
 	state.MaxScroll = totalH - visibleH
-	if state.MaxScroll < 0 {
-		state.MaxScroll = 0
-	}
-	if state.ScrollOffset < 0 {
-		state.ScrollOffset = 0
-	}
-	if state.ScrollOffset > state.MaxScroll {
-		state.ScrollOffset = state.MaxScroll
-	}
+	state.ScrollOffset, state.MaxScroll = clampScroll(state.ScrollOffset, state.MaxScroll)
 
 	// Apply search filter if active
 	visibleEntries := state.Entries
@@ -425,7 +416,7 @@ func (r *Renderer) drawExplorerConfirm(state *FileExplorerState, panelRect image
 	dr := image.Rect(dx, dy, dx+dw, dy+dh)
 
 	r.modalLayer.SubImage(dr).(*ebiten.Image).Fill(r.ui.PanelBg)
-	r.drawOverlayBorder(dr)
+	drawBorder(r.modalLayer, dr, r.ui.Border)
 
 	msgX := dx + (dw-msgLen*cw)/2
 	r.font.DrawString(r.modalLayer, state.ConfirmMsg, msgX, dy+pad, r.ui.Accent)

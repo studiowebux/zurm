@@ -121,17 +121,9 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 		return
 	}
 
-	physW := r.modalLayer.Bounds().Dx()
-	physH := r.modalLayer.Bounds().Dy()
+	physW, physH := r.modalSize()
 
-	// Semi-transparent backdrop: scale a 1×1 image to full screen.
-	if r.overlayBg == nil {
-		r.overlayBg = ebiten.NewImage(1, 1)
-		r.overlayBg.Fill(r.ui.Backdrop)
-	}
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Scale(float64(physW), float64(physH))
-	r.modalLayer.DrawImage(r.overlayBg, op)
+	r.drawBackdrop(physW, physH)
 
 	cw := r.font.CellW
 	ch := r.font.CellH
@@ -194,15 +186,7 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 	// Update scroll metrics so input handler can clamp and step.
 	state.RowH = rowH
 	state.MaxScroll = totalContentH - visibleContentH
-	if state.MaxScroll < 0 {
-		state.MaxScroll = 0
-	}
-	if state.ScrollOffset < 0 {
-		state.ScrollOffset = 0
-	}
-	if state.ScrollOffset > state.MaxScroll {
-		state.ScrollOffset = state.MaxScroll
-	}
+	state.ScrollOffset, state.MaxScroll = clampScroll(state.ScrollOffset, state.MaxScroll)
 
 	// Clamp panel width to screen.
 	if panelW > physW {
@@ -215,7 +199,7 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 
 	// Panel background and border.
 	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(r.ui.PanelBg)
-	r.drawOverlayBorder(panelRect)
+	drawBorder(r.modalLayer, panelRect, r.ui.Border)
 
 	// Title row.
 	titleY := panelY + topPad + 3
@@ -234,7 +218,7 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 	searchY := panelY + topPad + titleH
 	searchBoxRect := image.Rect(panelX+panelPad, searchY, panelX+panelW-panelPad, searchY+searchH-2)
 	r.modalLayer.SubImage(searchBoxRect).(*ebiten.Image).Fill(r.ui.HoverBg)
-	r.drawOverlayBorder(searchBoxRect)
+	drawBorder(r.modalLayer, searchBoxRect, r.ui.Border)
 	searchText := "Search: " + inputWithCursor(state.SearchQuery, state.SearchCursorPos)
 	r.font.DrawString(r.modalLayer, searchText, panelX+panelPad+cw/2, searchY+3, r.ui.Fg)
 
@@ -340,17 +324,9 @@ func (r *Renderer) drawConfirm(state *ConfirmState) {
 		return
 	}
 
-	physW := r.modalLayer.Bounds().Dx()
-	physH := r.modalLayer.Bounds().Dy()
+	physW, physH := r.modalSize()
 
-	// Semi-transparent backdrop.
-	if r.overlayBg == nil {
-		r.overlayBg = ebiten.NewImage(1, 1)
-		r.overlayBg.Fill(r.ui.Backdrop)
-	}
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Scale(float64(physW), float64(physH))
-	r.modalLayer.DrawImage(r.overlayBg, op)
+	r.drawBackdrop(physW, physH)
 
 	cw := r.font.CellW
 	ch := r.font.CellH
@@ -371,7 +347,7 @@ func (r *Renderer) drawConfirm(state *ConfirmState) {
 	panelRect := image.Rect(panelX, panelY, panelX+panelW, panelY+panelH)
 
 	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(r.ui.PanelBg)
-	r.drawOverlayBorder(panelRect)
+	drawBorder(r.modalLayer, panelRect, r.ui.Border)
 
 	msgX := panelX + (panelW-msgLen*cw)/2
 	r.font.DrawString(r.modalLayer, state.Message, msgX, panelY+panelPad, r.ui.Accent)
@@ -386,17 +362,9 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 		return
 	}
 
-	physW := r.modalLayer.Bounds().Dx()
-	physH := r.modalLayer.Bounds().Dy()
+	physW, physH := r.modalSize()
 
-	// Semi-transparent backdrop.
-	if r.overlayBg == nil {
-		r.overlayBg = ebiten.NewImage(1, 1)
-		r.overlayBg.Fill(r.ui.Backdrop)
-	}
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Scale(float64(physW), float64(physH))
-	r.modalLayer.DrawImage(r.overlayBg, op)
+	r.drawBackdrop(physW, physH)
 
 	cw := r.font.CellW
 	ch := r.font.CellH
@@ -435,15 +403,7 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	// Update scroll metrics for input handler.
 	state.RowH = rowH
 	state.MaxScroll = totalContentH - visibleContentH
-	if state.MaxScroll < 0 {
-		state.MaxScroll = 0
-	}
-	if state.ScrollOffset < 0 {
-		state.ScrollOffset = 0
-	}
-	if state.ScrollOffset > state.MaxScroll {
-		state.ScrollOffset = state.MaxScroll
-	}
+	state.ScrollOffset, state.MaxScroll = clampScroll(state.ScrollOffset, state.MaxScroll)
 
 	panelX := (physW - panelW) / 2
 	panelY := (physH - panelH) / 2
@@ -451,7 +411,7 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 
 	// Panel background and border.
 	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(r.ui.PanelBg)
-	r.drawOverlayBorder(panelRect)
+	drawBorder(r.modalLayer, panelRect, r.ui.Border)
 
 	// Title row.
 	titleY := panelY + topPad + 3
@@ -704,9 +664,8 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 			countX := panelRect.Max.X - panelPad - len([]rune(countStr))*cw
 			r.font.DrawString(r.modalLayer, countStr, countX, barY+4, r.ui.Dim)
 		} else if state.SearchQuery != "" {
-			noMatch := "no matches"
-			nmX := panelRect.Max.X - panelPad - len([]rune(noMatch))*cw
-			r.font.DrawString(r.modalLayer, noMatch, nmX, barY+4, r.ui.Dim)
+			nmX := panelRect.Max.X - panelPad - len([]rune(noMatchesLabel))*cw
+			r.font.DrawString(r.modalLayer, noMatchesLabel, nmX, barY+4, r.ui.Dim)
 		}
 	}
 }
@@ -717,17 +676,9 @@ func (r *Renderer) drawURLInput(state *URLInputState) {
 		return
 	}
 
-	physW := r.modalLayer.Bounds().Dx()
-	physH := r.modalLayer.Bounds().Dy()
+	physW, physH := r.modalSize()
 
-	// Semi-transparent backdrop.
-	if r.overlayBg == nil {
-		r.overlayBg = ebiten.NewImage(1, 1)
-		r.overlayBg.Fill(r.ui.Backdrop)
-	}
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Scale(float64(physW), float64(physH))
-	r.modalLayer.DrawImage(r.overlayBg, op)
+	r.drawBackdrop(physW, physH)
 
 	cw := r.font.CellW
 	ch := r.font.CellH
@@ -760,7 +711,7 @@ func (r *Renderer) drawURLInput(state *URLInputState) {
 	panelRect := image.Rect(panelX, panelY, panelX+panelW, panelY+panelH)
 
 	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(r.ui.PanelBg)
-	r.drawOverlayBorder(panelRect)
+	drawBorder(r.modalLayer, panelRect, r.ui.Border)
 
 	// Title (centered, accent color).
 	titleX := panelX + (panelW-len([]rune(title))*cw)/2
@@ -770,7 +721,7 @@ func (r *Renderer) drawURLInput(state *URLInputState) {
 	inputY := panelY + panelPad + ch*2
 	inputRect := image.Rect(panelX+panelPad, inputY, panelX+panelW-panelPad, inputY+ch+6)
 	r.modalLayer.SubImage(inputRect).(*ebiten.Image).Fill(r.ui.HoverBg)
-	r.drawOverlayBorder(inputRect)
+	drawBorder(r.modalLayer, inputRect, r.ui.Border)
 	r.font.DrawString(r.modalLayer, inputText, panelX+panelPad+cw/2, inputY+3, r.ui.Fg)
 
 	// Hint line (dim).
@@ -781,10 +732,3 @@ func (r *Renderer) drawURLInput(state *URLInputState) {
 }
 
 // drawOverlayBorder draws a 1px border around rect.
-func (r *Renderer) drawOverlayBorder(rect image.Rectangle) {
-	img := r.modalLayer
-	img.SubImage(image.Rect(rect.Min.X, rect.Min.Y, rect.Max.X, rect.Min.Y+1)).(*ebiten.Image).Fill(r.ui.Border)
-	img.SubImage(image.Rect(rect.Min.X, rect.Max.Y-1, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(r.ui.Border)
-	img.SubImage(image.Rect(rect.Min.X, rect.Min.Y, rect.Min.X+1, rect.Max.Y)).(*ebiten.Image).Fill(r.ui.Border)
-	img.SubImage(image.Rect(rect.Max.X-1, rect.Min.Y, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(r.ui.Border)
-}

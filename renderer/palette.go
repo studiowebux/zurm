@@ -2,7 +2,6 @@ package renderer
 
 import (
 	"image"
-	"image/color"
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -77,8 +76,7 @@ func (r *Renderer) drawPalette(allEntries []PaletteEntry, state *PaletteState) {
 		return
 	}
 
-	physW := r.modalLayer.Bounds().Dx()
-	physH := r.modalLayer.Bounds().Dy()
+	physW, physH := r.modalSize()
 
 	filtered, _ := FilterPalette(allEntries, state.Query)
 	visible := len(filtered)
@@ -110,7 +108,7 @@ func (r *Renderer) drawPalette(allEntries []PaletteEntry, state *PaletteState) {
 	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(ui.PanelBg)
 
 	// Panel border.
-	drawRect(r.modalLayer, panelRect, ui.Border)
+	drawBorder(r.modalLayer, panelRect, ui.Border)
 
 	// Input area background.
 	inputRect := image.Rect(panelX+1, panelY+1, panelX+panelW-1, panelY+inputH)
@@ -137,7 +135,7 @@ func (r *Renderer) drawPalette(allEntries []PaletteEntry, state *PaletteState) {
 
 	if len(filtered) == 0 {
 		noMatchY := divY + 2 + (rowH-r.font.CellH)/2
-		r.font.DrawString(r.modalLayer, "no matches", panelX+palPad*r.font.CellW/2, noMatchY, ui.Dim)
+		r.font.DrawString(r.modalLayer, noMatchesLabel, panelX+palPad*r.font.CellW/2, noMatchY, ui.Dim)
 		return
 	}
 
@@ -186,13 +184,6 @@ func (r *Renderer) drawPalette(allEntries []PaletteEntry, state *PaletteState) {
 }
 
 // drawRect draws a 1px border around rect.
-func drawRect(img *ebiten.Image, r image.Rectangle, c color.RGBA) {
-	img.SubImage(image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+1)).(*ebiten.Image).Fill(c)
-	img.SubImage(image.Rect(r.Min.X, r.Max.Y-1, r.Max.X, r.Max.Y)).(*ebiten.Image).Fill(c)
-	img.SubImage(image.Rect(r.Min.X, r.Min.Y, r.Min.X+1, r.Max.Y)).(*ebiten.Image).Fill(c)
-	img.SubImage(image.Rect(r.Max.X-1, r.Min.Y, r.Max.X, r.Max.Y)).(*ebiten.Image).Fill(c)
-}
-
 // truncateRunes truncates s to maxCols runes, appending "…" if truncated.
 func truncateRunes(s string, maxCols int) string {
 	r := []rune(s)
