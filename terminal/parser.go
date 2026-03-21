@@ -382,10 +382,12 @@ func (p *Parser) dispatchOSC(s string) {
 			}
 		}
 	case "7": // working directory — OSC 7 ; file://hostname/path
+		// Mark shell as OSC 7-capable even if this particular URI fails to parse —
+		// the shell supports the protocol, so lsof polling is unnecessary.
+		if p.osc7Active != nil {
+			p.osc7Active.Store(true)
+		}
 		if path := parseOSC7Path(value); path != "" {
-			if p.osc7Active != nil {
-				p.osc7Active.Store(true) // shell supports OSC 7 — lsof fallback no longer needed
-			}
 			if p.cwdCh != nil {
 				select {
 				case p.cwdCh <- path:

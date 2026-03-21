@@ -2091,7 +2091,7 @@ func (g *Game) pollStatusOnOutput() {
 		}
 	}
 
-	if g.cfg.StatusBar.ShowProcess && now.Sub(g.lastFgPoll) >= 1*time.Second {
+	if g.cfg.StatusBar.ShowProcess && now.Sub(g.lastFgPoll) >= 1*time.Second && g.activeTab < len(g.tabs) {
 		g.lastFgPoll = now
 		for _, leaf := range g.tabs[g.activeTab].Layout.Leaves() {
 			// Skip ps polling for terminals with OSC 133 shell integration —
@@ -2128,6 +2128,10 @@ func (g *Game) closeSearch() {
 // recomputeSearch triggers an async SearchAll when the query changes and
 // drains completed results each frame. Called every Update.
 func (g *Game) recomputeSearch() {
+	if g.focused == nil {
+		return
+	}
+
 	// Drain completed search result (arrives from background goroutine).
 	select {
 	case res := <-g.searchResultCh:
