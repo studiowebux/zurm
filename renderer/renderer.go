@@ -199,8 +199,52 @@ func (r *Renderer) StatusBarHeight() int {
 	return StatusBarHeight(r.font, r.cfg)
 }
 
+// DrawState bundles all parameters for a single DrawAll invocation.
+type DrawState struct {
+	Screen         *ebiten.Image
+	Tabs           []*tab.Tab
+	ActiveTab      int
+	Focused        *pane.Pane
+	Zoomed         bool
+	Menu           *MenuState
+	Overlay        *OverlayState
+	Confirm        *ConfirmState
+	Search         *SearchState
+	StatusBar      *StatusBarState
+	TabSwitcher    *TabSwitcherState
+	Palette        *PaletteState
+	PaletteEntries []PaletteEntry
+	FileExplorer   *FileExplorerState
+	TabSearch      *TabSearchState
+	Stats          *StatsState
+	TabHover       *TabHoverState
+	MdViewer       *MarkdownViewerState
+	URLInput       *URLInputState
+	HintMode       bool
+}
+
 // DrawAll renders the tab bar, all panes, status bar, and any active UI overlays onto screen.
-func (r *Renderer) DrawAll(screen *ebiten.Image, tabs []*tab.Tab, activeTab int, focused *pane.Pane, zoomed bool, menu *MenuState, overlay *OverlayState, confirm *ConfirmState, search *SearchState, statusBar *StatusBarState, tabSwitcher *TabSwitcherState, palette *PaletteState, paletteEntries []PaletteEntry, fileExplorer *FileExplorerState, tabSearch *TabSearchState, stats *StatsState, tabHover *TabHoverState, mdViewer *MarkdownViewerState, urlInput *URLInputState, hintMode bool) {
+func (r *Renderer) DrawAll(ds DrawState) {
+	screen := ds.Screen
+	tabs := ds.Tabs
+	activeTab := ds.ActiveTab
+	focused := ds.Focused
+	zoomed := ds.Zoomed
+	menu := ds.Menu
+	overlay := ds.Overlay
+	confirm := ds.Confirm
+	search := ds.Search
+	statusBar := ds.StatusBar
+	tabSwitcher := ds.TabSwitcher
+	palette := ds.Palette
+	paletteEntries := ds.PaletteEntries
+	fileExplorer := ds.FileExplorer
+	tabSearch := ds.TabSearch
+	stats := ds.Stats
+	tabHover := ds.TabHover
+	mdViewer := ds.MdViewer
+	urlInput := ds.URLInput
+	hintMode := ds.HintMode
 	if r.offscreen == nil {
 		return
 	}

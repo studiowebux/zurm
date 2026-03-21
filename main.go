@@ -790,10 +790,28 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		!g.mdViewerState.Open && !g.urlInputState.Open && !g.tabSwitcherState.Open &&
 		!g.tabSearchState.Open && !g.searchState.Open &&
 		!g.menuState.Open && !g.fileExplorerState.Open
-	g.renderer.DrawAll(screen, g.tabs, g.activeTab, g.focused, g.zoomed,
-		&g.menuState, &g.overlayState, &g.confirmState, &g.searchState, &g.statusBarState, &g.tabSwitcherState,
-		&g.paletteState, g.paletteEntries, &g.fileExplorerState, &g.tabSearchState, &g.statsState, &g.tabHoverState,
-		&g.mdViewerState, &g.urlInputState, hintMode)
+	g.renderer.DrawAll(renderer.DrawState{
+		Screen:         screen,
+		Tabs:           g.tabs,
+		ActiveTab:      g.activeTab,
+		Focused:        g.focused,
+		Zoomed:         g.zoomed,
+		Menu:           &g.menuState,
+		Overlay:        &g.overlayState,
+		Confirm:        &g.confirmState,
+		Search:         &g.searchState,
+		StatusBar:      &g.statusBarState,
+		TabSwitcher:    &g.tabSwitcherState,
+		Palette:        &g.paletteState,
+		PaletteEntries: g.paletteEntries,
+		FileExplorer:   &g.fileExplorerState,
+		TabSearch:      &g.tabSearchState,
+		Stats:          &g.statsState,
+		TabHover:       &g.tabHoverState,
+		MdViewer:       &g.mdViewerState,
+		URLInput:       &g.urlInputState,
+		HintMode:       hintMode,
+	})
 	g.screenDirty = false
 	g.lastClockSec = time.Now().Unix()
 
@@ -5378,70 +5396,81 @@ func (g *Game) reloadConfig() {
 	oldFont := g.cfg.Font
 	g.cfg = newCfg
 
-	// Propagate colors to renderer and all terminal panes.
-	g.renderer.ReloadColors(newCfg)
+	g.reloadColors(newCfg)
+	g.reloadFont(oldFont, newCfg)
+	g.reloadRuntimeSettings(newCfg)
+	g.recomputeAllTabs()
+	g.buildPalette()
+	g.reloadVault()
+
+	g.screenDirty = true
+	g.flashStatus("Config reloaded")
+}
+
+// reloadColors propagates the new color config to the renderer and all terminal panes.
+func (g *Game) reloadColors(cfg *config.Config) {
+	g.renderer.ReloadColors(cfg)
 	for _, t := range g.tabs {
 		for _, leaf := range t.Layout.Leaves() {
-			leaf.Pane.Term.UpdateColors(newCfg)
+			leaf.Pane.Term.UpdateColors(cfg)
 		}
 	}
+}
 
-	// Font reload — skip if recording is active (dimensions would become stale).
+// reloadFont attempts to reload the font when the font config changed.
+// Skipped during active recording. Rolls back font config on failure.
+func (g *Game) reloadFont(oldFont config.FontConfig, newCfg *config.Config) {
 	fontChanged := newCfg.Font.Size != oldFont.Size ||
 		newCfg.Font.File != oldFont.File ||
 		newCfg.Font.Fallback != oldFont.Fallback ||
 		!slices.Equal(newCfg.Font.Fallbacks, oldFont.Fallbacks)
-	if fontChanged && (g.recorder == nil || !g.recorder.Active()) {
-		fontBytes := jetbrainsMono
-		if newCfg.Font.File != "" {
-			if data, loadErr := os.ReadFile(newCfg.Font.File); loadErr == nil {
-				fontBytes = data
-			}
-		}
-		fbSlice := loadFontFallbacks(newCfg.Font)
-		fontR, fontErr := renderer.NewFontRenderer(fontBytes, newCfg.Font.Size*g.dpi, fbSlice...)
-		if fontErr == nil {
-			g.font = fontR
-			g.renderer.SetFont(fontR)
-			g.renderer.SetSize(int(float64(g.winW)*g.dpi), int(float64(g.winH)*g.dpi))
-			// Recompute all tab layouts with new cell dimensions.
-			for _, t := range g.tabs {
-				g.recomputeLayoutNode(t.Layout)
-			}
-			// Restore active tab layout pointer.
-			if g.activeTab < len(g.tabs) {
-				g.layout = g.tabs[g.activeTab].Layout
-			}
-		} else {
-			// Rollback font config to match the actual font renderer.
-			g.cfg.Font = oldFont
+	if !fontChanged || (g.recorder != nil && g.recorder.Active()) {
+		return
+	}
+	fontBytes := jetbrainsMono
+	if newCfg.Font.File != "" {
+		if data, loadErr := os.ReadFile(newCfg.Font.File); loadErr == nil {
+			fontBytes = data
 		}
 	}
+	fbSlice := loadFontFallbacks(newCfg.Font)
+	fontR, fontErr := renderer.NewFontRenderer(fontBytes, newCfg.Font.Size*g.dpi, fbSlice...)
+	if fontErr != nil {
+		g.cfg.Font = oldFont // rollback
+		return
+	}
+	g.font = fontR
+	g.renderer.SetFont(fontR)
+	physW, physH := g.physSize()
+	g.renderer.SetSize(physW, physH)
+	g.recomputeAllTabs()
+}
 
-	// Update runtime settings.
-	if newCfg.Keyboard.RepeatDelayMs > 0 {
-		keyRepeatDelay = time.Duration(newCfg.Keyboard.RepeatDelayMs) * time.Millisecond
+// reloadRuntimeSettings applies keyboard, performance, and blocks config.
+func (g *Game) reloadRuntimeSettings(cfg *config.Config) {
+	if cfg.Keyboard.RepeatDelayMs > 0 {
+		keyRepeatDelay = time.Duration(cfg.Keyboard.RepeatDelayMs) * time.Millisecond
 	}
-	if newCfg.Keyboard.RepeatIntervalMs > 0 {
-		keyRepeatInterval = time.Duration(newCfg.Keyboard.RepeatIntervalMs) * time.Millisecond
+	if cfg.Keyboard.RepeatIntervalMs > 0 {
+		keyRepeatInterval = time.Duration(cfg.Keyboard.RepeatIntervalMs) * time.Millisecond
 	}
-	ebiten.SetTPS(newCfg.Performance.TPS)
-	g.blocksEnabled = newCfg.Blocks.Enabled
+	ebiten.SetTPS(cfg.Performance.TPS)
+	g.blocksEnabled = cfg.Blocks.Enabled
 	g.renderer.BlocksEnabled = g.blocksEnabled
+}
 
-	// Always recompute layout — status bar height, padding, or divider width
-	// may have changed, which shifts pane rects.
+// recomputeAllTabs recomputes layout rects for every tab and restores the active layout pointer.
+func (g *Game) recomputeAllTabs() {
 	for _, t := range g.tabs {
 		g.recomputeLayoutNode(t.Layout)
 	}
 	if g.activeTab < len(g.tabs) {
 		g.layout = g.tabs[g.activeTab].Layout
 	}
+}
 
-	// Rebuild palette to pick up new theme files.
-	g.buildPalette()
-
-	// Vault enable/disable: nil out vault and clear ghost when disabled.
+// reloadVault disables the vault and clears ghost text when vault is no longer enabled.
+func (g *Game) reloadVault() {
 	if !g.cfg.Vault.Enabled && g.vault != nil {
 		g.vault.Close()
 		g.vault = nil
@@ -5449,9 +5478,6 @@ func (g *Game) reloadConfig() {
 		g.vaultLineCache = ""
 		g.vaultSkip = 0
 	}
-
-	g.screenDirty = true
-	g.flashStatus("Config reloaded")
 }
 
 // switchTheme applies a theme by name at runtime.
