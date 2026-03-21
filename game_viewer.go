@@ -874,8 +874,8 @@ func (g *Game) sendViewerToPane() {
 		Focused: p,
 		Title:   p.CustomName,
 	}
-	g.tabs = append(g.tabs, t)
-	g.switchTab(len(g.tabs) - 1)
+	g.tabMgr.Tabs = append(g.tabMgr.Tabs, t)
+	g.switchTab(len(g.tabMgr.Tabs) - 1)
 	g.screenDirty = true
 }
 
@@ -1043,8 +1043,8 @@ func (g *Game) openServerTabForSession(sessionID string) {
 	t := &tab.Tab{
 		Layout:  layout,
 		Focused: p,
-		Title:   fmt.Sprintf("tab %d", len(g.tabs)+1),
+		Title:   fmt.Sprintf("tab %d", len(g.tabMgr.Tabs)+1),
 	}
-	g.tabs = append(g.tabs, t)
-	g.switchTab(len(g.tabs) - 1)
+	g.tabMgr.Tabs = append(g.tabMgr.Tabs, t)
+	g.switchTab(len(g.tabMgr.Tabs) - 1)
 }

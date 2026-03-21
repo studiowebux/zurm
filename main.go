@@ -108,10 +108,9 @@ var jetbrainsMono []byte
 // Game implements ebiten.Game.
 // Pattern: game loop — Update handles logic, Draw handles rendering.
 type Game struct {
-	tabs      []*tab.Tab
-	activeTab int
+	tabMgr *TabManager
 
-	// Convenience pointers into tabs[activeTab] — kept in sync via
+	// Convenience pointers into tabMgr.Tabs[tabMgr.ActiveIdx] — kept in sync via
 	// updateLayout / setFocus / syncActive.
 	layout  *pane.LayoutNode
 	focused *pane.Pane
@@ -156,10 +155,6 @@ type Game struct {
 	dividerDragging bool
 	dragSplit       *pane.LayoutNode // split node being resized
 
-	// Tab drag state (mouse reorder).
-	tabDragging    bool
-	dragFromTabIdx int
-	dragTabStartX  int
 
 	// URL hover state — detected URLs in the focused pane's visible buffer.
 	hoveredURL *terminal.URLMatch // URL under the cursor, nil if none
@@ -217,12 +212,6 @@ type Game struct {
 	// Command palette controller (Cmd+P).
 	palette *PaletteController
 
-	// pinMode is true after Cmd+Space, waiting for a home-row slot keypress.
-	pinMode bool
-
-	// focusHistory is a stack of (tab index, pane pointer) pairs for Cmd+` navigation.
-	// The most recent entry is at the end. Max 50 entries.
-	focusHistory []focusEntry
 
 	// File explorer sidebar state (Cmd+E).
 	fileExplorerState renderer.FileExplorerState
@@ -464,8 +453,6 @@ func main() {
 	}
 
 	game := &Game{
-		tabs:             initialTabs,
-		activeTab:        initialActive,
 		layout:           initialTabs[initialActive].Layout,
 		focused:          initialTabs[initialActive].Focused,
 		renderer:         rend,
@@ -482,12 +469,15 @@ func main() {
 		recDone:          make(chan string, 1),
 		screenshotDone:   make(chan string, 1),
 		tabHoverState:    renderer.TabHoverState{TabIdx: -1},
+		tabMgr:           NewTabManager(),
 		poller:           NewStatusPoller(),
 		search:           NewSearchController(),
 		palette:          NewPaletteController(),
 		clipboardCh:      make(chan string, 1),
 	}
 
+	game.tabMgr.Tabs = initialTabs
+	game.tabMgr.ActiveIdx = initialActive
 	game.renderer.BlocksEnabled = game.blocksEnabled
 	game.statusBarState.Version = version
 	game.buildPalette()
@@ -503,7 +493,7 @@ func main() {
 	}
 
 	// Seed focus history with the initial tab so Cmd+; can return to it.
-	game.focusHistory = []focusEntry{{tabIdx: initialActive, pane: initialTabs[initialActive].Focused}}
+	game.tabMgr.FocusHistory = []focusEntry{{tabIdx: initialActive, pane: initialTabs[initialActive].Focused}}
 	initialTabs[initialActive].SnapshotGen()
 
 	// Start pprof server for runtime memory profiling when enabled.
@@ -544,7 +534,7 @@ func main() {
 
 // Update is called at 60 TPS by Ebitengine.
 func (g *Game) Update() error {
-	if len(g.tabs) == 0 {
+	if len(g.tabMgr.Tabs) == 0 {
 		g.saveSession()
 		return ebiten.Termination
 	}
@@ -556,7 +546,7 @@ func (g *Game) Update() error {
 	if (wantQuit || ebiten.IsWindowBeingClosed()) && !g.confirmState.Open {
 		g.showConfirm("Quit zurm? All sessions will be closed.", func() {
 			g.saveSession()
-			for _, t := range g.tabs {
+			for _, t := range g.tabMgr.Tabs {
 				for _, leaf := range t.Layout.Leaves() {
 					leaf.Pane.Term.Close()
 				}
@@ -623,8 +613,8 @@ func (g *Game) Update() error {
 	}
 
 	// Check background tabs for PTY activity (sets HasActivity indicator).
-	for i, t := range g.tabs {
-		if i != g.activeTab {
+	for i, t := range g.tabMgr.Tabs {
+		if i != g.tabMgr.ActiveIdx {
 			had := t.HasActivity
 			t.CheckActivity()
 			if t.HasActivity != had {
@@ -651,13 +641,13 @@ func (g *Game) Update() error {
 		default:
 		}
 	}
-	if len(g.tabs) == 0 {
+	if len(g.tabMgr.Tabs) == 0 {
 		return ebiten.Termination
 	}
 
 	g.handleMouse()
 	g.handleInput()
-	if len(g.tabs) == 0 {
+	if len(g.tabMgr.Tabs) == 0 {
 		return ebiten.Termination
 	}
 	g.handleDroppedFiles()
@@ -749,11 +739,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	// Sync transient status bar fields from live game state before rendering.
 	g.statusBarState.Zoomed = g.zoomed
-	g.statusBarState.PinMode = g.pinMode
+	g.statusBarState.PinMode = g.tabMgr.PinMode
 	g.statusBarState.BlocksEnabled = g.blocksEnabled
 	g.statusBarState.ServerSession = g.focused != nil && g.focused.ServerSessionID != ""
 	var srvCount int
-	for _, t := range g.tabs {
+	for _, t := range g.tabMgr.Tabs {
 		for _, leaf := range t.Layout.Leaves() {
 			if leaf.Pane.ServerSessionID != "" {
 				srvCount++
@@ -776,8 +766,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	g.renderer.HoveredURL = g.hoveredURL
 	g.renderer.VaultSuggestion = g.vaultSuggest
-	if g.activeTab >= 0 && g.activeTab < len(g.tabs) {
-		g.statusBarState.TabNote = g.tabs[g.activeTab].Note
+	if g.tabMgr.ActiveIdx >= 0 && g.tabMgr.ActiveIdx < len(g.tabMgr.Tabs) {
+		g.statusBarState.TabNote = g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Note
 	}
 	// Hint mode: show tab number badges when Cmd is held and no modal is active.
 	hintMode := ebiten.IsKeyPressed(ebiten.KeyMeta) &&
@@ -787,8 +777,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		!g.menuState.Open && !g.fileExplorerState.Open
 	g.renderer.DrawAll(renderer.DrawState{
 		Screen:         screen,
-		Tabs:           g.tabs,
-		ActiveTab:      g.activeTab,
+		Tabs:           g.tabMgr.Tabs,
+		ActiveTab:      g.tabMgr.ActiveIdx,
 		Focused:        g.focused,
 		Zoomed:         g.zoomed,
 		Menu:           &g.menuState,
@@ -840,10 +830,10 @@ func (g *Game) Layout(outsideW, outsideH int) (int, int) {
 
 // syncActive loads g.layout and g.focused from the active tab.
 func (g *Game) syncActive() {
-	if g.activeTab >= len(g.tabs) {
+	if g.tabMgr.ActiveIdx >= len(g.tabMgr.Tabs) {
 		return
 	}
-	t := g.tabs[g.activeTab]
+	t := g.tabMgr.Tabs[g.tabMgr.ActiveIdx]
 	g.layout = t.Layout
 	g.focused = t.Focused
 }
@@ -851,8 +841,8 @@ func (g *Game) syncActive() {
 // updateLayout writes a new layout to both g.layout and the active tab.
 func (g *Game) updateLayout(n *pane.LayoutNode) {
 	g.layout = n
-	if g.activeTab >= 0 && g.activeTab < len(g.tabs) {
-		g.tabs[g.activeTab].Layout = n
+	if g.tabMgr.ActiveIdx >= 0 && g.tabMgr.ActiveIdx < len(g.tabMgr.Tabs) {
+		g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Layout = n
 	}
 }
 
@@ -915,7 +905,7 @@ func (g *Game) handleInput() {
 	}
 
 	// pin mode: waiting for a home-row slot keypress after Cmd+Space.
-	if g.pinMode {
+	if g.tabMgr.PinMode {
 		g.screenDirty = true
 		g.handlePinInput()
 		return
@@ -1163,7 +1153,7 @@ func (g *Game) handleInput() {
 			case meta && shift && key == ebiten.KeyT:
 				g.openTabSwitcher()
 			case meta && key == ebiten.KeyG:
-				g.pinMode = true
+				g.tabMgr.PinMode = true
 				g.screenDirty = true
 			case meta && key == ebiten.KeyT:
 				g.newTab()
@@ -1171,9 +1161,9 @@ func (g *Game) handleInput() {
 				// Cmd+Shift+B — new server-backed tab (Mode B); falls back to local PTY.
 				g.newServerTab()
 			case meta && shift && key == ebiten.KeyR:
-				g.startRenameTab(g.activeTab)
+				g.startRenameTab(g.tabMgr.ActiveIdx)
 			case meta && shift && key == ebiten.KeyN:
-				g.startNoteEdit(g.activeTab)
+				g.startNoteEdit(g.tabMgr.ActiveIdx)
 			case meta && key == ebiten.KeySemicolon:
 				g.goBack()
 			case meta && shift && key == ebiten.KeyBracketLeft:
@@ -1455,7 +1445,7 @@ func (g *Game) handleFocus() {
 		time.Since(g.unfocusedAt) > unfocusSuspendDelay {
 		ebiten.SetTPS(5)
 		g.suspended = true
-		for _, t := range g.tabs {
+		for _, t := range g.tabMgr.Tabs {
 			for _, leaf := range t.Layout.Leaves() {
 				leaf.Pane.Term.SetPaused(true)
 			}
@@ -1519,7 +1509,7 @@ func (g *Game) unsuspendAndRedraw() {
 	if g.suspended {
 		ebiten.SetTPS(g.cfg.Performance.TPS)
 		g.suspended = false
-		for _, t := range g.tabs {
+		for _, t := range g.tabMgr.Tabs {
 			for _, leaf := range t.Layout.Leaves() {
 				leaf.Pane.Term.SetPaused(false)
 			}
@@ -1528,7 +1518,7 @@ func (g *Game) unsuspendAndRedraw() {
 	g.unfocusedAt = time.Time{}
 	g.screenDirty = true
 	g.renderer.SetLayoutDirty()
-	for _, t := range g.tabs {
+	for _, t := range g.tabMgr.Tabs {
 		for _, leaf := range t.Layout.Leaves() {
 			leaf.Pane.Term.Buf.Lock()
 			leaf.Pane.Term.Buf.MarkAllDirty()
@@ -1624,14 +1614,14 @@ func (g *Game) handleResize() {
 	// Pause all PTY readers before resizing to avoid lock starvation.
 	// Without this, heavy PTY output (e.g. Claude Code streaming) continuously
 	// holds the buffer write lock, preventing Resize from acquiring it.
-	for _, t := range g.tabs {
+	for _, t := range g.tabMgr.Tabs {
 		for _, leaf := range t.Layout.Leaves() {
 			leaf.Pane.Term.SetPaused(true)
 		}
 	}
 
 	// Recompute rects for every tab's layout.
-	for _, t := range g.tabs {
+	for _, t := range g.tabMgr.Tabs {
 		setPaneHeaders(t.Layout, g.font.CellH)
 		t.Layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
 		for _, leaf := range t.Layout.Leaves() {
@@ -1642,7 +1632,7 @@ func (g *Game) handleResize() {
 	// Resume PTY readers after all resizes are complete.
 	// Skip if window is idle-suspended — readers should stay paused.
 	if !g.suspended {
-		for _, t := range g.tabs {
+		for _, t := range g.tabMgr.Tabs {
 			for _, leaf := range t.Layout.Leaves() {
 				leaf.Pane.Term.SetPaused(false)
 			}
@@ -1673,15 +1663,15 @@ func (g *Game) handleResize() {
 }
 
 func (g *Game) drainTitle() {
-	if g.focused == nil || g.activeTab >= len(g.tabs) {
+	if g.focused == nil || g.tabMgr.ActiveIdx >= len(g.tabMgr.Tabs) {
 		return
 	}
 	select {
 	case title := <-g.focused.Term.TitleCh:
 		clean := sanitizeTitle(title) // SEC-003
 		// Do not overwrite a user-set tab name with OSC 0/2 from the shell.
-		if !g.tabs[g.activeTab].UserRenamed {
-			g.tabs[g.activeTab].Title = clean
+		if !g.tabMgr.Tabs[g.tabMgr.ActiveIdx].UserRenamed {
+			g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Title = clean
 		}
 		ebiten.SetWindowTitle(clean)
 		g.screenDirty = true
@@ -1737,8 +1727,8 @@ func (g *Game) drainBell() {
 	}
 
 	// Background tabs — mark tab activity on bell.
-	for i, t := range g.tabs {
-		if i == g.activeTab {
+	for i, t := range g.tabMgr.Tabs {
+		if i == g.tabMgr.ActiveIdx {
 			continue
 		}
 		for _, leaf := range t.Layout.Leaves() {
@@ -1801,8 +1791,8 @@ func (g *Game) drainBlockDone() {
 	}
 
 	// Drain background tabs silently.
-	for i, t := range g.tabs {
-		if i == g.activeTab {
+	for i, t := range g.tabMgr.Tabs {
+		if i == g.tabMgr.ActiveIdx {
 			continue
 		}
 		for _, leaf := range t.Layout.Leaves() {
@@ -1884,10 +1874,10 @@ func (g *Game) drainForeground() {
 	if !g.cfg.StatusBar.ShowProcess {
 		return
 	}
-	if g.activeTab >= len(g.tabs) {
+	if g.tabMgr.ActiveIdx >= len(g.tabMgr.Tabs) {
 		return
 	}
-	for _, leaf := range g.tabs[g.activeTab].Layout.Leaves() {
+	for _, leaf := range g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Layout.Leaves() {
 		p := leaf.Pane
 		select {
 		case name := <-p.Term.ForegroundProcCh:
@@ -1910,10 +1900,10 @@ func (g *Game) drainShellIntegration() {
 	if !g.cfg.StatusBar.ShowProcess {
 		return
 	}
-	if g.activeTab >= len(g.tabs) {
+	if g.tabMgr.ActiveIdx >= len(g.tabMgr.Tabs) {
 		return
 	}
-	for _, leaf := range g.tabs[g.activeTab].Layout.Leaves() {
+	for _, leaf := range g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Layout.Leaves() {
 		p := leaf.Pane
 		select {
 		case kind := <-p.Term.ShellIntCh:
@@ -1947,8 +1937,8 @@ func (g *Game) pollStatusOnOutput() {
 		}
 	}
 
-	if g.cfg.StatusBar.ShowProcess && g.poller.ShouldPollFg(seq) && g.activeTab < len(g.tabs) {
-		for _, leaf := range g.tabs[g.activeTab].Layout.Leaves() {
+	if g.cfg.StatusBar.ShowProcess && g.poller.ShouldPollFg(seq) && g.tabMgr.ActiveIdx < len(g.tabMgr.Tabs) {
+		for _, leaf := range g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Layout.Leaves() {
 			if !leaf.Pane.Term.HasOSC133() {
 				go leaf.Pane.Term.QueryForeground()
 			}
@@ -2247,7 +2237,7 @@ func (g *Game) handleMouse() {
 	}
 	if my < tabBarH && !g.selDragging {
 		physW := int(float64(g.winW) * g.dpi)
-		numTabs := len(g.tabs)
+		numTabs := len(g.tabMgr.Tabs)
 		maxTabW := g.cfg.Tabs.MaxWidthChars * g.font.CellW
 		tabW := 0
 		if numTabs > 0 {
@@ -2258,7 +2248,7 @@ func (g *Game) handleMouse() {
 		}
 
 		// Continue tab drag.
-		if g.tabDragging && leftPressed {
+		if g.tabMgr.Dragging && leftPressed {
 			if tabW > 0 {
 				overIdx := mx / tabW
 				if overIdx < 0 {
@@ -2266,9 +2256,9 @@ func (g *Game) handleMouse() {
 				} else if overIdx >= numTabs {
 					overIdx = numTabs - 1
 				}
-				if overIdx != g.activeTab {
-					g.reorderTab(g.activeTab, overIdx)
-					g.dragFromTabIdx = overIdx
+				if overIdx != g.tabMgr.ActiveIdx {
+					g.reorderTab(g.tabMgr.ActiveIdx, overIdx)
+					g.tabMgr.DragFromIdx = overIdx
 				}
 			}
 			g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
@@ -2278,8 +2268,8 @@ func (g *Game) handleMouse() {
 		}
 
 		// End tab drag on release.
-		if g.tabDragging && !leftPressed {
-			g.tabDragging = false
+		if g.tabMgr.Dragging && !leftPressed {
+			g.tabMgr.Dragging = false
 			g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
 			g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 			return
@@ -2290,26 +2280,26 @@ func (g *Game) handleMouse() {
 				clicked := mx / tabW
 				if clicked >= 0 && clicked < numTabs {
 					now := time.Now()
-					if clicked == g.activeTab && now.Sub(g.lastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
+					if clicked == g.tabMgr.ActiveIdx && now.Sub(g.lastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
 						// Double-click on the active tab → rename.
 						g.startRenameTab(clicked)
 					} else {
 						g.switchTab(clicked)
 						// Record drag start position.
-						g.dragFromTabIdx = clicked
-						g.dragTabStartX = mx
+						g.tabMgr.DragFromIdx = clicked
+						g.tabMgr.DragStartX = mx
 					}
 					g.lastClickTime = now
 				}
 			}
-		} else if leftPressed && leftWas && !g.tabDragging {
+		} else if leftPressed && leftWas && !g.tabMgr.Dragging {
 			// Initiate drag after 8px threshold.
-			dx := mx - g.dragTabStartX
+			dx := mx - g.tabMgr.DragStartX
 			if dx < 0 {
 				dx = -dx
 			}
 			if dx >= 8 {
-				g.tabDragging = true
+				g.tabMgr.Dragging = true
 			}
 		} else if rightPressed && !rightWas {
 			// Right-click in tab bar → show tab context menu.

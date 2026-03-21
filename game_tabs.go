@@ -42,9 +42,9 @@ func (g *Game) newTab() {
 	if err != nil {
 		return
 	}
-	t.Title = fmt.Sprintf("tab %d", len(g.tabs)+1)
-	g.tabs = append(g.tabs, t)
-	g.switchTab(len(g.tabs) - 1)
+	t.Title = fmt.Sprintf("tab %d", g.tabMgr.Count()+1)
+	g.tabMgr.Add(t)
+	g.switchTab(g.tabMgr.Count() - 1)
 }
 
 // newServerTab creates a new tab whose root pane is backed by zurm-server (Mode B).
@@ -76,28 +76,22 @@ func (g *Game) newServerTab() {
 	t := &tab.Tab{
 		Layout:  layout,
 		Focused: p,
-		Title:   fmt.Sprintf("tab %d", len(g.tabs)+1),
+		Title:   fmt.Sprintf("tab %d", g.tabMgr.Count()+1),
 	}
-	g.tabs = append(g.tabs, t)
-	g.switchTab(len(g.tabs) - 1)
+	g.tabMgr.Add(t)
+	g.switchTab(g.tabMgr.Count() - 1)
 }
 
 // closeActiveTab closes all panes in the active tab and removes it.
 func (g *Game) closeActiveTab() {
 	g.dismissTabHover()
-	for _, leaf := range g.tabs[g.activeTab].Layout.Leaves() {
+	for _, leaf := range g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Layout.Leaves() {
 		leaf.Pane.Term.Close()
 	}
-	old := g.tabs
-	g.tabs = append(g.tabs[:g.activeTab], g.tabs[g.activeTab+1:]...)
-	old[len(old)-1] = nil // zero trailing slot to release Tab for GC
-	if len(g.tabs) == 0 {
+	if !g.tabMgr.Remove(g.tabMgr.ActiveIdx) {
 		g.layout = nil
 		g.focused = nil
 		return
-	}
-	if g.activeTab >= len(g.tabs) {
-		g.activeTab = len(g.tabs) - 1
 	}
 	g.renderer.ClearPaneCache()
 	g.renderer.SetLayoutDirty()
@@ -120,10 +114,10 @@ func (g *Game) updateTabHover(mx, my int) {
 	}
 
 	tabBarH := g.renderer.TabBarHeight()
-	numTabs := len(g.tabs)
+	numTabs := len(g.tabMgr.Tabs)
 
 	// Dismiss conditions: single tab, overlays open, dragging, cursor outside tab bar.
-	if numTabs <= 1 || g.tabDragging || g.menuState.Open || g.overlayState.Open ||
+	if numTabs <= 1 || g.tabMgr.Dragging || g.menuState.Open || g.overlayState.Open ||
 		g.confirmState.Open || g.search.State.Open || g.palette.State.Open ||
 		g.fileExplorerState.Open || g.tabSwitcherState.Open || g.tabSearchState.Open {
 		g.dismissTabHover()
@@ -154,7 +148,7 @@ func (g *Game) updateTabHover(mx, my int) {
 	}
 
 	// Skip the active tab — user already sees it.
-	if hoverIdx == g.activeTab {
+	if hoverIdx == g.tabMgr.ActiveIdx {
 		g.dismissTabHover()
 		return
 	}
@@ -192,7 +186,7 @@ func (g *Game) updateTabHover(mx, my int) {
 	}
 
 	// Check cache validity and regenerate thumbnail if stale.
-	hoveredTab := g.tabs[hoverIdx]
+	hoveredTab := g.tabMgr.Tabs[hoverIdx]
 	cacheKey := renderer.TabHoverCacheKey(hoveredTab)
 	if cacheKey != g.tabHoverState.CacheKey || g.tabHoverState.Thumbnail == nil {
 		if g.tabHoverState.Thumbnail != nil {
@@ -207,32 +201,23 @@ func (g *Game) updateTabHover(mx, my int) {
 
 // pushFocus records the current focus state before changing it.
 func (g *Game) pushFocus() {
-	if len(g.tabs) == 0 || g.focused == nil {
-		return
-	}
-	e := focusEntry{tabIdx: g.activeTab, pane: g.focused}
-	// Deduplicate: skip if top of stack is the same location.
-	if n := len(g.focusHistory); n > 0 && g.focusHistory[n-1] == e {
-		return
-	}
-	g.focusHistory = append(g.focusHistory, e)
-	if len(g.focusHistory) > 50 {
-		g.focusHistory = g.focusHistory[1:]
-	}
+	g.tabMgr.PushFocus(g.focused)
 }
 
 // goBack pops the focus history stack and navigates to the previous location.
 func (g *Game) goBack() {
-	for len(g.focusHistory) > 0 {
-		e := g.focusHistory[len(g.focusHistory)-1]
-		g.focusHistory = g.focusHistory[:len(g.focusHistory)-1]
+	for {
+		e, ok := g.tabMgr.PopFocus()
+		if !ok {
+			return
+		}
 		// Skip stale entries (tab removed or pane closed).
-		if e.tabIdx < 0 || e.tabIdx >= len(g.tabs) {
+		if e.tabIdx < 0 || e.tabIdx >= len(g.tabMgr.Tabs) {
 			continue
 		}
 		// Verify the pane still exists in that tab.
 		found := false
-		for _, leaf := range g.tabs[e.tabIdx].Layout.Leaves() {
+		for _, leaf := range g.tabMgr.Tabs[e.tabIdx].Layout.Leaves() {
 			if leaf.Pane == e.pane {
 				found = true
 				break
@@ -242,10 +227,10 @@ func (g *Game) goBack() {
 			continue
 		}
 		// Skip if it's the current location.
-		if e.tabIdx == g.activeTab && e.pane == g.focused {
+		if e.tabIdx == g.tabMgr.ActiveIdx && e.pane == g.focused {
 			continue
 		}
-		if e.tabIdx != g.activeTab {
+		if e.tabIdx != g.tabMgr.ActiveIdx {
 			g.switchTabNoHistory(e.tabIdx)
 		}
 		g.setFocusNoHistory(e.pane)
@@ -262,20 +247,20 @@ func (g *Game) switchTab(i int) {
 // switchTabNoHistory activates the tab at index i without recording history.
 // Used by goBack to avoid polluting the stack.
 func (g *Game) switchTabNoHistory(i int) {
-	if i < 0 || i >= len(g.tabs) {
+	if i < 0 || i >= len(g.tabMgr.Tabs) {
 		return
 	}
 	// Snapshot the outgoing tab's render generation so that UI-only bumps
 	// (selection, search, cursor blink) do not trigger a false activity dot.
-	g.tabs[g.activeTab].SnapshotGen()
+	g.tabMgr.Tabs[g.tabMgr.ActiveIdx].SnapshotGen()
 
 	// Restore pane rects before leaving a zoomed tab so the layout is
 	// correct when switching back later.
 	if g.zoomed {
 		g.unzoom()
 	}
-	g.activeTab = i
-	g.tabs[i].SnapshotGen()
+	g.tabMgr.ActiveIdx = i
+	g.tabMgr.Tabs[i].SnapshotGen()
 	g.renderer.SetLayoutDirty()
 	g.renderer.ClearPaneCache()
 	g.syncActive()
@@ -293,47 +278,25 @@ func (g *Game) switchTabNoHistory(i int) {
 
 // nextTab cycles to the next tab.
 func (g *Game) nextTab() {
-	g.switchTab((g.activeTab + 1) % len(g.tabs))
+	g.switchTab(g.tabMgr.NextIdx())
 }
 
 // prevTab cycles to the previous tab.
 func (g *Game) prevTab() {
-	g.switchTab((g.activeTab - 1 + len(g.tabs)) % len(g.tabs))
-}
-
-// pinnedTab returns the index of the tab pinned to the given slot rune, or -1.
-func (g *Game) pinnedTab(slot rune) int {
-	for i, t := range g.tabs {
-		if t.PinnedSlot == slot {
-			return i
-		}
-	}
-	return -1
+	g.switchTab(g.tabMgr.PrevIdx())
 }
 
 // pinTab pins the active tab to the given home-row slot, evicting any previous
 // occupant. Calling again with the same slot while already pinned there unpins.
 func (g *Game) pinTab(slot rune) {
-	active := g.tabs[g.activeTab]
-	if active.PinnedSlot == slot {
-		active.PinnedSlot = 0 // toggle off
-		g.screenDirty = true
-		return
-	}
-	// Evict any tab currently holding this slot.
-	for _, t := range g.tabs {
-		if t.PinnedSlot == slot {
-			t.PinnedSlot = 0
-		}
-	}
-	active.PinnedSlot = slot
+	g.tabMgr.PinActive(slot)
 	g.screenDirty = true
 }
 
 // switchToSlot activates the tab pinned to the given home-row slot.
 // Does nothing if no tab is pinned there.
 func (g *Game) switchToSlot(slot rune) {
-	if idx := g.pinnedTab(slot); idx >= 0 {
+	if idx := g.tabMgr.PinnedTab(slot); idx >= 0 {
 		g.switchTab(idx)
 	}
 }
@@ -344,7 +307,7 @@ func (g *Game) openTabSwitcher() {
 		g.tabSwitcherState.Open = false
 	} else {
 		g.tabSwitcherState.Open = true
-		g.tabSwitcherState.Cursor = g.activeTab
+		g.tabSwitcherState.Cursor = g.tabMgr.ActiveIdx
 	}
 	g.screenDirty = true
 }
@@ -375,7 +338,7 @@ func (g *Game) handlePinInput() {
 			} else {
 				g.switchToSlot(hr.slot)
 			}
-			g.pinMode = false
+			g.tabMgr.PinMode = false
 			g.screenDirty = true
 			return
 		}
@@ -383,7 +346,7 @@ func (g *Game) handlePinInput() {
 
 	// ESC cancels immediately. inpututil catches sub-frame taps that polling misses.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		g.pinMode = false
+		g.tabMgr.PinMode = false
 		g.screenDirty = true
 		g.prevKeys[ebiten.KeyEscape] = true
 		return
@@ -398,14 +361,14 @@ func (g *Game) handlePinInput() {
 		wasPressed := g.prevKeys[key]
 		g.prevKeys[key] = pressed
 		if pressed && !wasPressed {
-			g.pinMode = false
+			g.tabMgr.PinMode = false
 			g.screenDirty = true
 			return
 		}
 	}
 	// Cancel on any printable char not in home row.
 	if len(ebiten.AppendInputChars(nil)) > 0 {
-		g.pinMode = false
+		g.tabMgr.PinMode = false
 		g.screenDirty = true
 	}
 }
@@ -413,33 +376,7 @@ func (g *Game) handlePinInput() {
 // reorderTab moves the tab at index from to index to, keeping activeTab correct.
 func (g *Game) reorderTab(from, to int) {
 	g.dismissTabHover()
-	n := len(g.tabs)
-	if from == to || from < 0 || to < 0 || from >= n || to >= n {
-		return
-	}
-
-	t := g.tabs[from]
-
-	// Build new slice without the tab at from, then insert at to.
-	without := make([]*tab.Tab, 0, n-1)
-	without = append(without, g.tabs[:from]...)
-	without = append(without, g.tabs[from+1:]...)
-
-	result := make([]*tab.Tab, 0, n)
-	result = append(result, without[:to]...)
-	result = append(result, t)
-	result = append(result, without[to:]...)
-	g.tabs = result
-
-	// Keep activeTab pointing at the same tab after the move.
-	if g.activeTab == from {
-		g.activeTab = to
-	} else if from < to && g.activeTab > from && g.activeTab <= to {
-		g.activeTab--
-	} else if from > to && g.activeTab < from && g.activeTab >= to {
-		g.activeTab++
-	}
-
+	g.tabMgr.Reorder(from, to)
 	g.tabSwitcherState.Cursor = to
 	g.syncActive()
 	g.screenDirty = true
@@ -447,15 +384,15 @@ func (g *Game) reorderTab(from, to int) {
 
 // moveTabLeft moves the active tab one position to the left.
 func (g *Game) moveTabLeft() {
-	if g.activeTab > 0 {
-		g.reorderTab(g.activeTab, g.activeTab-1)
+	if g.tabMgr.ActiveIdx > 0 {
+		g.reorderTab(g.tabMgr.ActiveIdx, g.tabMgr.ActiveIdx-1)
 	}
 }
 
 // moveTabRight moves the active tab one position to the right.
 func (g *Game) moveTabRight() {
-	if g.activeTab < len(g.tabs)-1 {
-		g.reorderTab(g.activeTab, g.activeTab+1)
+	if g.tabMgr.ActiveIdx < len(g.tabMgr.Tabs)-1 {
+		g.reorderTab(g.tabMgr.ActiveIdx, g.tabMgr.ActiveIdx+1)
 	}
 }
 
@@ -489,7 +426,7 @@ func (g *Game) handleTabSwitcherInput() {
 					g.tabSwitcherState.Cursor--
 				}
 			case key == ebiten.KeyArrowDown && !shift:
-				if g.tabSwitcherState.Cursor < len(g.tabs)-1 {
+				if g.tabSwitcherState.Cursor < len(g.tabMgr.Tabs)-1 {
 					g.tabSwitcherState.Cursor++
 				}
 			case key == ebiten.KeyArrowUp && shift:
@@ -499,7 +436,7 @@ func (g *Game) handleTabSwitcherInput() {
 				}
 			case key == ebiten.KeyArrowDown && shift:
 				c := g.tabSwitcherState.Cursor
-				if c < len(g.tabs)-1 {
+				if c < len(g.tabMgr.Tabs)-1 {
 					g.reorderTab(c, c+1)
 				}
 			case key == ebiten.KeyEnter || key == ebiten.KeyNumpadEnter:
@@ -570,7 +507,7 @@ func (g *Game) handleTabSearchInput() {
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
 	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 
-	filtered := renderer.FilterTabSearch(g.tabs, g.tabSearchState.Query)
+	filtered := renderer.FilterTabSearch(g.tabMgr.Tabs, g.tabSearchState.Query)
 
 	if g.updateTabSearchRepeat(ebiten.KeyArrowUp, now) && g.tabSearchState.Cursor > 0 {
 		g.tabSearchState.Cursor--

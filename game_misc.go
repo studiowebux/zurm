@@ -26,21 +26,21 @@ import (
 
 // startRenameTab enters inline rename mode for tab at index idx.
 func (g *Game) startRenameTab(idx int) {
-	if idx < 0 || idx >= len(g.tabs) {
+	if idx < 0 || idx >= len(g.tabMgr.Tabs) {
 		return
 	}
 	// Cancel any existing rename first.
 	g.cancelRename()
-	g.tabs[idx].Renaming = true
-	g.tabs[idx].RenameText = g.tabs[idx].Title
-	g.tabs[idx].RenameCursorPos = len([]rune(g.tabs[idx].Title))
+	g.tabMgr.Tabs[idx].Renaming = true
+	g.tabMgr.Tabs[idx].RenameText = g.tabMgr.Tabs[idx].Title
+	g.tabMgr.Tabs[idx].RenameCursorPos = len([]rune(g.tabMgr.Tabs[idx].Title))
 }
 
 // commitRename applies the rename text and exits rename mode.
 // If the tab's focused pane is server-backed, propagate the name to the server
 // so it appears in the session list / attach palette.
 func (g *Game) commitRename() {
-	for _, t := range g.tabs {
+	for _, t := range g.tabMgr.Tabs {
 		if t.Renaming {
 			name := sanitizeTitle(t.RenameText)
 			t.Title = name
@@ -57,7 +57,7 @@ func (g *Game) commitRename() {
 
 // cancelRename exits rename mode without applying changes.
 func (g *Game) cancelRename() {
-	for _, t := range g.tabs {
+	for _, t := range g.tabMgr.Tabs {
 		if t.Renaming {
 			t.Renaming = false
 			t.RenameText = ""
@@ -68,7 +68,7 @@ func (g *Game) cancelRename() {
 
 // renamingTabIdx returns the index of the tab currently being renamed, or -1.
 func (g *Game) renamingTabIdx() int {
-	for i, t := range g.tabs {
+	for i, t := range g.tabMgr.Tabs {
 		if t.Renaming {
 			return i
 		}
@@ -80,19 +80,19 @@ func (g *Game) renamingTabIdx() int {
 
 // startNoteEdit enters inline note editing mode for tab at index idx.
 func (g *Game) startNoteEdit(idx int) {
-	if idx < 0 || idx >= len(g.tabs) {
+	if idx < 0 || idx >= len(g.tabMgr.Tabs) {
 		return
 	}
 	g.cancelNote()
 	g.cancelRename()
-	g.tabs[idx].Noting = true
-	g.tabs[idx].NoteText = g.tabs[idx].Note
-	g.tabs[idx].NoteCursorPos = len([]rune(g.tabs[idx].Note))
+	g.tabMgr.Tabs[idx].Noting = true
+	g.tabMgr.Tabs[idx].NoteText = g.tabMgr.Tabs[idx].Note
+	g.tabMgr.Tabs[idx].NoteCursorPos = len([]rune(g.tabMgr.Tabs[idx].Note))
 }
 
 // commitNote applies the note text and exits note editing mode.
 func (g *Game) commitNote() {
-	for _, t := range g.tabs {
+	for _, t := range g.tabMgr.Tabs {
 		if t.Noting {
 			t.Note = strings.TrimSpace(t.NoteText)
 			t.Noting = false
@@ -104,7 +104,7 @@ func (g *Game) commitNote() {
 
 // cancelNote exits note editing mode without applying changes.
 func (g *Game) cancelNote() {
-	for _, t := range g.tabs {
+	for _, t := range g.tabMgr.Tabs {
 		if t.Noting {
 			t.Noting = false
 			t.NoteText = ""
@@ -115,7 +115,7 @@ func (g *Game) cancelNote() {
 
 // notingTabIdx returns the index of the tab currently in note editing mode, or -1.
 func (g *Game) notingTabIdx() int {
-	for i, t := range g.tabs {
+	for i, t := range g.tabMgr.Tabs {
 		if t.Noting {
 			return i
 		}
@@ -182,13 +182,13 @@ func (g *Game) handleNoteInput() {
 	g.handleTextEdit(
 		g.cancelNote,
 		func(text string, cursor int) bool {
-			g.tabs[idx].NoteText = text
-			g.tabs[idx].NoteCursorPos = cursor
+			g.tabMgr.Tabs[idx].NoteText = text
+			g.tabMgr.Tabs[idx].NoteCursorPos = cursor
 			g.commitNote()
 			return false
 		},
-		func() (string, int) { return g.tabs[idx].NoteText, g.tabs[idx].NoteCursorPos },
-		func(t string, c int) { g.tabs[idx].NoteText = t; g.tabs[idx].NoteCursorPos = c },
+		func() (string, int) { return g.tabMgr.Tabs[idx].NoteText, g.tabMgr.Tabs[idx].NoteCursorPos },
+		func(t string, c int) { g.tabMgr.Tabs[idx].NoteText = t; g.tabMgr.Tabs[idx].NoteCursorPos = c },
 		&g.noteRepeat,
 	)
 }
@@ -201,13 +201,13 @@ func (g *Game) handleRenameInput() {
 	g.handleTextEdit(
 		g.cancelRename,
 		func(text string, cursor int) bool {
-			g.tabs[idx].RenameText = text
-			g.tabs[idx].RenameCursorPos = cursor
+			g.tabMgr.Tabs[idx].RenameText = text
+			g.tabMgr.Tabs[idx].RenameCursorPos = cursor
 			g.commitRename()
 			return false
 		},
-		func() (string, int) { return g.tabs[idx].RenameText, g.tabs[idx].RenameCursorPos },
-		func(t string, c int) { g.tabs[idx].RenameText = t; g.tabs[idx].RenameCursorPos = c },
+		func() (string, int) { return g.tabMgr.Tabs[idx].RenameText, g.tabMgr.Tabs[idx].RenameCursorPos },
+		func(t string, c int) { g.tabMgr.Tabs[idx].RenameText = t; g.tabMgr.Tabs[idx].RenameCursorPos = c },
 		&g.renameRepeat,
 	)
 }
@@ -254,9 +254,9 @@ func (g *Game) manualSaveSession() {
 func (g *Game) doSaveSession() {
 	data := &session.SessionData{
 		Version:   1,
-		ActiveTab: g.activeTab,
+		ActiveTab: g.tabMgr.ActiveIdx,
 	}
-	for _, t := range g.tabs {
+	for _, t := range g.tabMgr.Tabs {
 		leaves := t.Layout.Leaves()
 		if len(leaves) == 0 {
 			continue
@@ -398,9 +398,9 @@ func (g *Game) collectStats() {
 	if len(gcStats.Pause) > 0 {
 		g.statsState.GCPauseNs = uint64(gcStats.Pause[0]) //nolint:gosec // pause duration fits uint64
 	}
-	g.statsState.TabCount = len(g.tabs)
+	g.statsState.TabCount = len(g.tabMgr.Tabs)
 	paneCount := 0
-	for _, t := range g.tabs {
+	for _, t := range g.tabMgr.Tabs {
 		paneCount += len(t.Layout.Leaves())
 	}
 	g.statsState.PaneCount = paneCount
@@ -634,7 +634,7 @@ func (g *Game) reloadConfig() {
 // reloadColors propagates the new color config to the renderer and all terminal panes.
 func (g *Game) reloadColors(cfg *config.Config) {
 	g.renderer.ReloadColors(cfg)
-	for _, t := range g.tabs {
+	for _, t := range g.tabMgr.Tabs {
 		for _, leaf := range t.Layout.Leaves() {
 			leaf.Pane.Term.UpdateColors(config.ParseHexColor(cfg.Colors.Foreground), config.ParseHexColor(cfg.Colors.Background), cfg.Palette())
 		}
@@ -683,7 +683,7 @@ func (g *Game) reloadRuntimeSettings(cfg *config.Config) {
 	g.renderer.BlocksEnabled = g.blocksEnabled
 
 	// Propagate cursor blink and ShowProcess to all terminals.
-	for _, t := range g.tabs {
+	for _, t := range g.tabMgr.Tabs {
 		for _, leaf := range t.Layout.Leaves() {
 			leaf.Pane.Term.Cursor.SetBlink(cfg.Input.CursorBlink)
 			leaf.Pane.Term.SetShowProcess(cfg.StatusBar.ShowProcess)
@@ -693,11 +693,11 @@ func (g *Game) reloadRuntimeSettings(cfg *config.Config) {
 
 // recomputeAllTabs recomputes layout rects for every tab and restores the active layout pointer.
 func (g *Game) recomputeAllTabs() {
-	for _, t := range g.tabs {
+	for _, t := range g.tabMgr.Tabs {
 		g.recomputeLayoutNode(t.Layout)
 	}
-	if g.activeTab < len(g.tabs) {
-		g.layout = g.tabs[g.activeTab].Layout
+	if g.tabMgr.ActiveIdx < len(g.tabMgr.Tabs) {
+		g.layout = g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Layout
 	}
 }
 
@@ -728,7 +728,7 @@ func (g *Game) switchTheme(name string) {
 
 	// Propagate.
 	g.renderer.ReloadColors(g.cfg)
-	for _, t := range g.tabs {
+	for _, t := range g.tabMgr.Tabs {
 		for _, leaf := range t.Layout.Leaves() {
 			leaf.Pane.Term.UpdateColors(config.ParseHexColor(g.cfg.Colors.Foreground), config.ParseHexColor(g.cfg.Colors.Background), g.cfg.Palette())
 		}
@@ -773,11 +773,11 @@ func (g *Game) adjustFontSize(delta float64) {
 	g.font = fontR
 	g.renderer.SetFont(fontR)
 	g.renderer.SetSize(int(float64(g.winW)*g.dpi), int(float64(g.winH)*g.dpi))
-	for _, t := range g.tabs {
+	for _, t := range g.tabMgr.Tabs {
 		g.recomputeLayoutNode(t.Layout)
 	}
-	if g.activeTab < len(g.tabs) {
-		g.layout = g.tabs[g.activeTab].Layout
+	if g.tabMgr.ActiveIdx < len(g.tabMgr.Tabs) {
+		g.layout = g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Layout
 	}
 	g.screenDirty = true
 	g.flashStatus(fmt.Sprintf("Font size: %.0fpt", newSize))

@@ -116,10 +116,10 @@ func (g *Game) detachPaneToTab() {
 		Title:   p.CustomName,
 	}
 	// Insert the new tab right after the active tab.
-	insertIdx := g.activeTab + 1
-	g.tabs = append(g.tabs, nil)
-	copy(g.tabs[insertIdx+1:], g.tabs[insertIdx:])
-	g.tabs[insertIdx] = newTab
+	insertIdx := g.tabMgr.ActiveIdx + 1
+	g.tabMgr.Tabs = append(g.tabMgr.Tabs, nil)
+	copy(g.tabMgr.Tabs[insertIdx+1:], g.tabMgr.Tabs[insertIdx:])
+	g.tabMgr.Tabs[insertIdx] = newTab
 	g.switchTab(insertIdx)
 	setPaneHeaders(g.layout, g.font.CellH)
 	g.recomputeLayout()
@@ -129,24 +129,24 @@ func (g *Game) detachPaneToTab() {
 // If the current tab becomes empty, it is removed.
 func (g *Game) mergePaneToTab(targetIdx int) {
 	g.dismissTabHover()
-	if targetIdx < 0 || targetIdx >= len(g.tabs) || targetIdx == g.activeTab {
+	if targetIdx < 0 || targetIdx >= len(g.tabMgr.Tabs) || targetIdx == g.tabMgr.ActiveIdx {
 		return
 	}
 	g.zoomed = false
 
 	p := g.focused
-	srcIdx := g.activeTab
+	srcIdx := g.tabMgr.ActiveIdx
 	singlePane := len(g.layout.Leaves()) <= 1
 
 	if singlePane {
 		// Single-pane tab: move the whole tab's pane into the target.
 		// Detach the pane from its layout.
-		targetTab := g.tabs[targetIdx]
+		targetTab := g.tabMgr.Tabs[targetIdx]
 		targetTab.Layout = targetTab.Layout.AttachH(targetTab.Focused, p)
 
 		// Remove the source tab (don't close the terminal).
-		g.tabs = append(g.tabs[:srcIdx], g.tabs[srcIdx+1:]...)
-		if len(g.tabs) == 0 {
+		g.tabMgr.Tabs = append(g.tabMgr.Tabs[:srcIdx], g.tabMgr.Tabs[srcIdx+1:]...)
+		if len(g.tabMgr.Tabs) == 0 {
 			return
 		}
 		// Adjust target index if source was before it.
@@ -154,8 +154,8 @@ func (g *Game) mergePaneToTab(targetIdx int) {
 			targetIdx--
 		}
 		// Clamp activeTab to prevent out-of-bounds access inside switchTabNoHistory.
-		if g.activeTab >= len(g.tabs) {
-			g.activeTab = len(g.tabs) - 1
+		if g.tabMgr.ActiveIdx >= len(g.tabMgr.Tabs) {
+			g.tabMgr.ActiveIdx = len(g.tabMgr.Tabs) - 1
 		}
 		g.switchTabNoHistory(targetIdx)
 		// Recompute the target tab's layout.
@@ -178,7 +178,7 @@ func (g *Game) mergePaneToTab(targetIdx int) {
 		g.recomputeLayout()
 
 		// Attach into target tab.
-		targetTab := g.tabs[targetIdx]
+		targetTab := g.tabMgr.Tabs[targetIdx]
 		targetTab.Layout = targetTab.Layout.AttachH(targetTab.Focused, p)
 		g.switchTab(targetIdx)
 		setPaneHeaders(g.layout, g.font.CellH)
@@ -190,8 +190,8 @@ func (g *Game) mergePaneToTab(targetIdx int) {
 
 // mergePaneToNextTab moves the focused pane into the next tab.
 func (g *Game) mergePaneToNextTab() {
-	target := (g.activeTab + 1) % len(g.tabs)
-	if target == g.activeTab {
+	target := (g.tabMgr.ActiveIdx + 1) % len(g.tabMgr.Tabs)
+	if target == g.tabMgr.ActiveIdx {
 		g.flashStatus("Only one tab")
 		return
 	}
@@ -200,8 +200,8 @@ func (g *Game) mergePaneToNextTab() {
 
 // mergePaneToPrevTab moves the focused pane into the previous tab.
 func (g *Game) mergePaneToPrevTab() {
-	target := (g.activeTab - 1 + len(g.tabs)) % len(g.tabs)
-	if target == g.activeTab {
+	target := (g.tabMgr.ActiveIdx - 1 + len(g.tabMgr.Tabs)) % len(g.tabMgr.Tabs)
+	if target == g.tabMgr.ActiveIdx {
 		g.flashStatus("Only one tab")
 		return
 	}
@@ -218,7 +218,7 @@ func (g *Game) setFocus(p *pane.Pane) {
 // Used by goBack to avoid polluting the stack.
 func (g *Game) setFocusNoHistory(p *pane.Pane) {
 	g.focused = p
-	g.tabs[g.activeTab].Focused = p
+	g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Focused = p
 	g.selDragging = false
 	g.hoveredURL = nil
 	g.urlMatches = nil

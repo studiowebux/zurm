@@ -22,8 +22,8 @@ func (g *Game) openTabContextMenu(px, py int) {
 	physH := int(float64(g.winH) * g.dpi)
 
 	// Determine which tab was right-clicked.
-	clickedTab := g.activeTab
-	numTabs := len(g.tabs)
+	clickedTab := g.tabMgr.ActiveIdx
+	numTabs := len(g.tabMgr.Tabs)
 	if numTabs > 0 {
 		maxTabW := g.cfg.Tabs.MaxWidthChars * g.font.CellW
 		tabW := physW / numTabs
@@ -112,10 +112,10 @@ func (g *Game) buildContextMenu() []help.MenuItem {
 			}},
 		}},
 		{Separator: true},
-		{Label: "Rename Tab", Action: func() { g.startRenameTab(g.activeTab) }},
-		{Label: "Edit Tab Note", Shortcut: "Cmd+Shift+N", Action: func() { g.startNoteEdit(g.activeTab) }},
+		{Label: "Rename Tab", Action: func() { g.startRenameTab(g.tabMgr.ActiveIdx) }},
+		{Label: "Edit Tab Note", Shortcut: "Cmd+Shift+N", Action: func() { g.startNoteEdit(g.tabMgr.ActiveIdx) }},
 		{Separator: true},
-		{Label: "Pin Mode", Shortcut: "Cmd+G", Action: func() { g.pinMode = true; g.statusBarState.PinMode = true }},
+		{Label: "Pin Mode", Shortcut: "Cmd+G", Action: func() { g.tabMgr.PinMode = true; g.statusBarState.PinMode = true }},
 		{Label: "Show Keybindings", Shortcut: "Cmd+/", Action: g.toggleOverlay},
 		{Label: "Command Palette", Shortcut: "Cmd+P", Action: g.openPalette},
 	}
@@ -401,7 +401,7 @@ func (g *Game) buildPalette() {
 		func() { g.switchTab(0) },
 		func() { g.switchTab(1) },
 		func() { g.switchTab(2) },
-		func() { g.startNoteEdit(g.activeTab) },
+		func() { g.startNoteEdit(g.tabMgr.ActiveIdx) },
 		g.detachPaneToTab,
 		g.mergePaneToNextTab,
 		g.mergePaneToPrevTab,
@@ -452,7 +452,7 @@ func (g *Game) buildPalette() {
 		// File Explorer
 		g.openFileExplorer,
 		// Pins
-		func() { g.pinMode = true; g.statusBarState.PinMode = true },
+		func() { g.tabMgr.PinMode = true; g.statusBarState.PinMode = true },
 		// Tab Switcher
 		g.openTabSwitcher,
 		// Tab Search
