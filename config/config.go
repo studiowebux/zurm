@@ -60,8 +60,10 @@ lines = 10000
 wheel_lines_per_tick = 3   # lines scrolled per mouse wheel tick
 
 [performance]
-tps       = 30     # Ebitengine tick rate (Update calls/sec); lower = less idle CPU
-auto_idle = true   # reduce TPS when unfocused to save CPU; false = keep rendering
+tps        = 30     # Ebitengine tick rate (Update calls/sec); lower = less idle CPU
+auto_idle  = true   # reduce TPS when unfocused to save CPU; false = keep rendering
+pprof      = false  # enable net/http/pprof endpoint on localhost for profiling
+pprof_port = 6060   # port for pprof HTTP server (localhost only)
 
 [input]
 double_click_ms = 300   # max ms between clicks to register as double-click
@@ -117,21 +119,34 @@ side      = "left"   # "left" or "right"
 width_pct = 35       # panel width as percent of screen width
 
 [blocks]
-enabled       = false   # render OSC 133 command blocks; toggle at runtime with Cmd+B (requires shell hooks)
-show_duration = true    # show elapsed execution time (time from Enter to prompt return)
-border_width  = 3       # width in pixels of the left accent stripe
+enabled       = false    # render OSC 133 command blocks; toggle at runtime with Cmd+B (requires shell hooks)
+show_duration = true     # show elapsed execution time (time from Enter to prompt return)
+show_border   = true     # draw 4-sided border + bg tint (false = badges + hover buttons only)
+border_width  = 3        # width in pixels of the left accent stripe
 border_color  = "#1C1C2E" # border color when exit status is unknown
 success_color = "#34D399" # border color for exit code 0
 fail_color    = "#F87171" # border color for non-zero exit codes
 bg_color      = ""        # optional hex background tint (empty = none)
-bg_alpha      = 0.0       # opacity of background tint (0.0–1.0)
+bg_alpha      = 0.0       # opacity of background tint (0.0-1.0)
+max_history   = 1000     # max completed blocks retained per pane (0 = unlimited)
+
+[bell]
+style       = "visual"  # "visual" = orange cell flash; "none" = no visual
+sound       = true       # play NSBeep on bell
+duration_ms = 150        # flash duration in milliseconds
+color       = "#F59E0B"  # flash color (orange by default)
 
 [vault]
 enabled          = false  # enable command vault (encrypted local command history + ghost suggestions)
-history_path     = ""     # path to zsh history file; empty = ~/.zsh_history
+ghost_text       = true   # show inline ghost suggestions from vault history
+history_path     = ""     # path to shell history file; empty = auto-detect (~/.zsh_history, etc.)
 vault_path       = ""     # path to encrypted vault file; empty = ~/.config/zurm/vault.enc
 ignore_prefix    = " "    # commands starting with this prefix are never stored (matches zsh HIST_IGNORE_SPACE)
 suggestion_color = "#555570"  # ghost text color for inline suggestions
+
+[server]
+# address = "http://localhost:7777"  # zurm-server address for persistent PTY sessions
+# binary  = "./zurm-server"          # path to zurm-server binary (auto-launch)
 
 [theme]
 name = ""   # theme file name without .toml (e.g. "dark", "light"); empty = no theme
@@ -160,6 +175,17 @@ bright_blue    = "#A855F7"
 bright_magenta = "#C084FC"
 bright_cyan    = "#67E8F9"
 bright_white   = "#E8E8F0"
+
+# Markdown viewer colors (Cmd+M reader mode)
+md_bold             = "#FFFFFF"   # bold text
+md_heading          = "#FFFFFF"   # heading text (# ## ###)
+md_code             = "#A0D080"   # inline code and code block text
+md_code_border      = "#606060"   # border around code blocks
+md_table_border     = "#505050"   # table grid lines
+md_match_bg         = "#808000"   # search match highlight background
+md_match_current_bg = "#FFCC00"   # current search match highlight
+md_badge_bg         = "#FFCC00"   # badge/label background (e.g. line count)
+md_badge_fg         = "#000000"   # badge/label text color
 `
 
 type FontConfig struct {
