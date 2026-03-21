@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-
-	"github.com/studiowebux/zurm/config"
 )
 
 // PaneLayout represents a single pane or split in the layout tree.
@@ -45,12 +43,9 @@ func Path() (string, error) {
 	return filepath.Join(home, ".config", "zurm", "session.json"), nil
 }
 
-// Save writes the session file. tabs is a slice of TabData already populated
-// by the caller. If cfg.Session is disabled this is a no-op.
-func Save(data *SessionData, cfg *config.Config) error {
-	if !cfg.Session.Enabled {
-		return nil
-	}
+// Save writes the session file. The caller is responsible for checking
+// whether session saving is enabled before calling.
+func Save(data *SessionData) error {
 	p, err := Path()
 	if err != nil {
 		return err
@@ -77,11 +72,8 @@ func Save(data *SessionData, cfg *config.Config) error {
 }
 
 // Load reads and parses the session file. Returns nil, nil when the file does
-// not exist or when cfg.Session.RestoreOnLaunch is false.
-func Load(cfg *config.Config) (*SessionData, error) {
-	if !cfg.Session.Enabled || !cfg.Session.RestoreOnLaunch {
-		return nil, nil
-	}
+// not exist. The caller is responsible for checking session config flags.
+func Load() (*SessionData, error) {
 	p, err := Path()
 	if err != nil {
 		return nil, err

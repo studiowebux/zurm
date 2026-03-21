@@ -413,7 +413,8 @@ func main() {
 	// Attempt session restore; fall back to a single fresh tab.
 	var initialTabs []*tab.Tab
 	var initialActive int
-	if sess, loadErr := session.Load(cfg); loadErr == nil && sess != nil && !*noRestore && len(sess.Tabs) > 0 {
+	sess, loadErr := session.Load()
+	if loadErr == nil && sess != nil && cfg.Session.Enabled && cfg.Session.RestoreOnLaunch && !*noRestore && len(sess.Tabs) > 0 {
 		for _, td := range sess.Tabs {
 			var t *tab.Tab
 			var tErr error
@@ -5826,7 +5827,7 @@ func (g *Game) doSaveSession() {
 		}
 		data.Tabs = append(data.Tabs, td)
 	}
-	if err := session.Save(data, g.cfg); err != nil {
+	if err := session.Save(data); err != nil {
 		log.Printf("zurm: session save: %v", err)
 	}
 }
