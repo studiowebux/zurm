@@ -48,29 +48,17 @@ func FilterTabSearch(tabs []*tab.Tab, query string) []TabSearchEntry {
 			OrigIdx:      i,
 		})
 	}
-	if query == "" {
-		return entries
-	}
 
-	q := strings.ToLower(query)
-	var rank0, rank1 []TabSearchEntry
-	for _, e := range entries {
-		pos := strings.Index(strings.ToLower(e.DisplayTitle), q)
-		if pos < 0 {
-			// Also search CWD.
-			pos = strings.Index(strings.ToLower(e.Cwd), q)
-		}
-		if pos < 0 {
-			continue
-		}
-		e.matchPos = pos
-		if pos == 0 {
-			rank0 = append(rank0, e)
-		} else {
-			rank1 = append(rank1, e)
-		}
+	results := filterBySubstring(len(entries), query, func(i int) []string {
+		return []string{entries[i].DisplayTitle, entries[i].Cwd}
+	})
+	filtered := make([]TabSearchEntry, len(results))
+	for i, r := range results {
+		e := entries[r.index]
+		e.matchPos = r.matchPos
+		filtered[i] = e
 	}
-	return append(rank0, rank1...)
+	return filtered
 }
 
 // drawTabSearch renders the tab search overlay onto r.modalLayer.

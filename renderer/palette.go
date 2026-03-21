@@ -2,7 +2,6 @@ package renderer
 
 import (
 	"image"
-	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
@@ -33,40 +32,16 @@ const (
 // substring match) sorted by match position (earlier = higher rank).
 // Returns the filtered entries and a mapping from filtered index → original index.
 func FilterPalette(entries []PaletteEntry, query string) ([]PaletteEntry, []int) {
-	if query == "" {
-		idx := make([]int, len(entries))
-		for i := range idx {
-			idx[i] = i
-		}
-		return entries, idx
+	results := filterBySubstring(len(entries), query, func(i int) []string {
+		return []string{entries[i].Name}
+	})
+	out := make([]PaletteEntry, len(results))
+	idx := make([]int, len(results))
+	for i, r := range results {
+		out[i] = entries[r.index]
+		idx[i] = r.index
 	}
-	q := strings.ToLower(query)
-	type ranked struct {
-		entry    PaletteEntry
-		orig     int
-		matchPos int
-	}
-	var ranked1, ranked2 []ranked // rank 0: match at start; rank 1: match elsewhere
-	for i, e := range entries {
-		pos := strings.Index(strings.ToLower(e.Name), q)
-		if pos < 0 {
-			continue
-		}
-		r := ranked{entry: e, orig: i, matchPos: pos}
-		if pos == 0 {
-			ranked1 = append(ranked1, r)
-		} else {
-			ranked2 = append(ranked2, r)
-		}
-	}
-	all := append(ranked1, ranked2...)
-	out := make([]PaletteEntry, len(all))
-	origIdx := make([]int, len(all))
-	for i, r := range all {
-		out[i] = r.entry
-		origIdx[i] = r.orig
-	}
-	return out, origIdx
+	return out, idx
 }
 
 // drawPalette renders the command palette overlay.

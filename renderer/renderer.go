@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"strings"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -111,6 +112,46 @@ const (
 )
 
 const noMatchesLabel = "no matches"
+
+// filterResult holds the original index and match position from filterBySubstring.
+type filterResult struct {
+	index    int
+	matchPos int
+}
+
+// filterBySubstring returns indices into an item list sorted by case-insensitive
+// substring match position (pos==0 ranked first). textFn returns the search
+// texts for item i; the first matching text wins.
+func filterBySubstring(count int, query string, textFn func(i int) []string) []filterResult {
+	if query == "" {
+		results := make([]filterResult, count)
+		for i := range results {
+			results[i] = filterResult{index: i}
+		}
+		return results
+	}
+	q := strings.ToLower(query)
+	var rank0, rank1 []filterResult
+	for i := 0; i < count; i++ {
+		pos := -1
+		for _, text := range textFn(i) {
+			if p := strings.Index(strings.ToLower(text), q); p >= 0 {
+				pos = p
+				break
+			}
+		}
+		if pos < 0 {
+			continue
+		}
+		r := filterResult{index: i, matchPos: pos}
+		if pos == 0 {
+			rank0 = append(rank0, r)
+		} else {
+			rank1 = append(rank1, r)
+		}
+	}
+	return append(rank0, rank1...)
+}
 
 // modalSize returns the physical width and height of the modal layer.
 func (r *Renderer) modalSize() (int, int) {
