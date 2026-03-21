@@ -5079,136 +5079,106 @@ func (g *Game) notingTabIdx() int {
 	return -1
 }
 
-// handleNoteInput processes keyboard input while a tab note edit is in progress.
-func (g *Game) handleNoteInput() {
+// handleTextEdit is the shared text-editing loop for Note, Rename, and PaneRename inputs.
+// cancel is called on Escape; commit on Enter (return true to stop processing);
+// getText/setText load and store the TextInput state; repeat tracks key-repeat timing.
+func (g *Game) handleTextEdit(
+	cancel func(),
+	commit func(text string, cursor int) bool,
+	getText func() (string, int),
+	setText func(string, int),
+	repeat *TextInputRepeat,
+) {
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
 	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		g.cancelNote()
+		cancel()
 		g.prevKeys[ebiten.KeyEscape] = true
 		return
 	}
 
+	text, cursor := getText()
+	ti := &TextInput{Text: text, CursorPos: cursor}
+
+	// Edge-triggered: Enter commits.
+	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyNumpadEnter} {
+		pressed := ebiten.IsKeyPressed(key)
+		if pressed && !g.prevKeys[key] {
+			if commit(ti.Text, ti.CursorPos) {
+				return
+			}
+		}
+		g.prevKeys[key] = pressed
+	}
+	g.prevKeys[ebiten.KeyMeta] = meta
+	g.prevKeys[ebiten.KeyAlt] = alt
+
+	// Cmd+V — async clipboard paste.
+	if meta && inpututil.IsKeyJustPressed(ebiten.KeyV) {
+		g.requestClipboard()
+	}
+	select {
+	case clip := <-g.clipboardCh:
+		ti.AddString(clip)
+	default:
+	}
+
+	ti.Update(repeat, meta, alt)
+	setText(ti.Text, ti.CursorPos)
+}
+
+func (g *Game) handleNoteInput() {
 	idx := g.notingTabIdx()
 	if idx < 0 {
 		return
 	}
-
-	ti := &TextInput{Text: g.tabs[idx].NoteText, CursorPos: g.tabs[idx].NoteCursorPos}
-
-	// Edge-triggered: Enter commits.
-	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyNumpadEnter} {
-		pressed := ebiten.IsKeyPressed(key)
-		if pressed && !g.prevKeys[key] {
-			g.tabs[idx].NoteText = ti.Text
-			g.tabs[idx].NoteCursorPos = ti.CursorPos
+	g.handleTextEdit(
+		g.cancelNote,
+		func(text string, cursor int) bool {
+			g.tabs[idx].NoteText = text
+			g.tabs[idx].NoteCursorPos = cursor
 			g.commitNote()
-		}
-		g.prevKeys[key] = pressed
-	}
-	g.prevKeys[ebiten.KeyMeta] = meta
-	g.prevKeys[ebiten.KeyAlt] = alt
-
-	// Cmd+V — async clipboard paste.
-	if meta && inpututil.IsKeyJustPressed(ebiten.KeyV) {
-		g.requestClipboard()
-	}
-	select {
-	case clip := <-g.clipboardCh:
-		ti.AddString(clip)
-	default:
-	}
-
-	ti.Update(&g.noteRepeat, meta, alt)
-
-	g.tabs[idx].NoteText = ti.Text
-	g.tabs[idx].NoteCursorPos = ti.CursorPos
+			return false
+		},
+		func() (string, int) { return g.tabs[idx].NoteText, g.tabs[idx].NoteCursorPos },
+		func(t string, c int) { g.tabs[idx].NoteText = t; g.tabs[idx].NoteCursorPos = c },
+		&g.noteRepeat,
+	)
 }
 
-// handleRenameInput processes keyboard input while a tab rename is in progress.
 func (g *Game) handleRenameInput() {
-	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
-	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
-
-	// inpututil.IsKeyJustPressed catches sub-frame taps that polling misses.
-	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		g.cancelRename()
-		g.prevKeys[ebiten.KeyEscape] = true
-		return
-	}
-
 	idx := g.renamingTabIdx()
 	if idx < 0 {
 		return
 	}
-
-	ti := &TextInput{Text: g.tabs[idx].RenameText, CursorPos: g.tabs[idx].RenameCursorPos}
-
-	// Edge-triggered: Enter commits.
-	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyNumpadEnter} {
-		pressed := ebiten.IsKeyPressed(key)
-		if pressed && !g.prevKeys[key] {
-			g.tabs[idx].RenameText = ti.Text
-			g.tabs[idx].RenameCursorPos = ti.CursorPos
+	g.handleTextEdit(
+		g.cancelRename,
+		func(text string, cursor int) bool {
+			g.tabs[idx].RenameText = text
+			g.tabs[idx].RenameCursorPos = cursor
 			g.commitRename()
-		}
-		g.prevKeys[key] = pressed
-	}
-	g.prevKeys[ebiten.KeyMeta] = meta
-	g.prevKeys[ebiten.KeyAlt] = alt
-
-	// Cmd+V — async clipboard paste.
-	if meta && inpututil.IsKeyJustPressed(ebiten.KeyV) {
-		g.requestClipboard()
-	}
-	select {
-	case clip := <-g.clipboardCh:
-		ti.AddString(clip)
-	default:
-	}
-
-	ti.Update(&g.renameRepeat, meta, alt)
-
-	g.tabs[idx].RenameText = ti.Text
-	g.tabs[idx].RenameCursorPos = ti.CursorPos
+			return false
+		},
+		func() (string, int) { return g.tabs[idx].RenameText, g.tabs[idx].RenameCursorPos },
+		func(t string, c int) { g.tabs[idx].RenameText = t; g.tabs[idx].RenameCursorPos = c },
+		&g.renameRepeat,
+	)
 }
 
-// handlePaneRenameInput processes keyboard input while a pane rename is in progress.
 func (g *Game) handlePaneRenameInput() {
-	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
-	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
-
-	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		g.cancelPaneRename()
-		g.prevKeys[ebiten.KeyEscape] = true
-		return
-	}
-
-	ti := &TextInput{Text: g.focused.RenameText, CursorPos: g.focused.RenameCursorPos}
-
-	// Enter — commit
-	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyNumpadEnter) {
-		g.focused.RenameText = ti.Text
-		g.focused.RenameCursorPos = ti.CursorPos
-		g.commitPaneRename()
-		return
-	}
-
-	// Cmd+V — async clipboard paste.
-	if meta && inpututil.IsKeyJustPressed(ebiten.KeyV) {
-		g.requestClipboard()
-	}
-	select {
-	case clip := <-g.clipboardCh:
-		ti.AddString(clip)
-	default:
-	}
-
-	ti.Update(&g.paneRenameRepeat, meta, alt)
-
-	g.focused.RenameText = ti.Text
-	g.focused.RenameCursorPos = ti.CursorPos
+	g.handleTextEdit(
+		g.cancelPaneRename,
+		func(text string, cursor int) bool {
+			g.focused.RenameText = text
+			g.focused.RenameCursorPos = cursor
+			g.commitPaneRename()
+			return true // stop processing after pane rename commit
+		},
+		func() (string, int) { return g.focused.RenameText, g.focused.RenameCursorPos },
+		func(t string, c int) { g.focused.RenameText = t; g.focused.RenameCursorPos = c },
+		&g.paneRenameRepeat,
+	)
 }
 
 // toggleZoom fullscreens the focused pane (Cmd+Z). Calling again restores the layout.
