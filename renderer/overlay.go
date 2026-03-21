@@ -3,24 +3,10 @@ package renderer
 import (
 	"fmt"
 	"image"
-	"image/color"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/studiowebux/zurm/help"
 	"github.com/studiowebux/zurm/markdown"
-)
-
-// Markdown viewer colors — not theme-derived; the viewer has its own palette.
-var (
-	mdBold        = color.RGBA{0xFF, 0xFF, 0xFF, 0xFF}
-	mdH1          = color.RGBA{0xFF, 0xFF, 0xFF, 0xFF}
-	mdCodeFg      = color.RGBA{0xA0, 0xD0, 0x80, 0xFF}
-	mdCodeBorder  = color.RGBA{0x60, 0x60, 0x60, 0xFF}
-	mdTableBorder = color.RGBA{0x50, 0x50, 0x50, 0xFF}
-	mdMatchBg     = color.RGBA{0x80, 0x80, 0x00, 0x60}
-	mdMatchCurBg  = color.RGBA{0xFF, 0xCC, 0x00, 0x80}
-	mdBadgeBg     = color.RGBA{0xFF, 0xCC, 0x00, 0xFF}
-	mdBadgeFg     = color.RGBA{0x00, 0x00, 0x00, 0xFF}
 )
 
 // OverlayState holds the rendering state for the keybinding overlay.
@@ -524,17 +510,17 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	contentRight := panelX + panelW - panelPad
 
 	// Heading and emphasis colors.
-	boldColor := mdBold
-	h1Color := mdH1
+	boldColor := r.ui.MdBold
+	h1Color := r.ui.MdHeading
 	h2Color := r.ui.Accent // theme accent
 	h3Color := r.ui.Dim    // subdued
-	codeFg := mdCodeFg
-	codeBorder := mdCodeBorder
-	tableBorder := mdTableBorder
+	codeFg := r.ui.MdCode
+	codeBorder := r.ui.MdCodeBorder
+	tableBorder := r.ui.MdTableBorder
 
 	// Index search matches by line for the per-line drawing loop.
-	matchBg := mdMatchBg
-	currentBg := mdMatchCurBg
+	matchBg := r.ui.MdMatchBg
+	currentBg := r.ui.MdMatchCurBg
 	matchesByLine := map[int][]int{} // lineIdx -> match indices
 	for i, m := range state.SearchMatches {
 		matchesByLine[m.LineIdx] = append(matchesByLine[m.LineIdx], i)
@@ -655,8 +641,8 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 
 	// Follow-mode link badges: draw letter labels over link spans.
 	if state.FollowMode && len(state.LinkHints) > 0 {
-		badgeBg := mdBadgeBg
-		badgeFg := mdBadgeFg
+		badgeBg := r.ui.MdBadgeBg
+		badgeFg := r.ui.MdBadgeFg
 		for _, hint := range state.LinkHints {
 			if hint.LineIdx >= len(state.Lines) {
 				continue

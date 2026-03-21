@@ -34,6 +34,16 @@ var Defaults = Config{
 		BrightMagenta: "#C084FC",
 		BrightCyan:    "#67E8F9",
 		BrightWhite:   "#E8E8F0",
+		// Markdown viewer
+		MdBold:        "#FFFFFF",
+		MdHeading:     "#FFFFFF",
+		MdCode:        "#A0D080",
+		MdCodeBorder:  "#606060",
+		MdTableBorder: "#505050",
+		MdMatchBg:     "#808000",
+		MdMatchCurBg:  "#FFCC00",
+		MdBadgeBg:     "#FFCC00",
+		MdBadgeFg:     "#000000",
 	},
 	Shell: ShellConfig{
 		Program: "",

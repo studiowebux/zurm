@@ -198,6 +198,17 @@ type ColorConfig struct {
 	BrightMagenta string `toml:"bright_magenta"`
 	BrightCyan    string `toml:"bright_cyan"`
 	BrightWhite   string `toml:"bright_white"`
+
+	// Markdown viewer colors (used by the llms.txt / markdown reader overlay).
+	MdBold        string `toml:"md_bold"`
+	MdHeading     string `toml:"md_heading"`
+	MdCode        string `toml:"md_code"`
+	MdCodeBorder  string `toml:"md_code_border"`
+	MdTableBorder string `toml:"md_table_border"`
+	MdMatchBg     string `toml:"md_match_bg"`
+	MdMatchCurBg  string `toml:"md_match_current_bg"`
+	MdBadgeBg     string `toml:"md_badge_bg"`
+	MdBadgeFg     string `toml:"md_badge_fg"`
 }
 
 type ShellConfig struct {

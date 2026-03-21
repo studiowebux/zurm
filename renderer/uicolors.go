@@ -57,6 +57,17 @@ type UIColors struct {
 
 	// SearchMatch is the highlight color for matching search results.
 	SearchMatch color.RGBA
+
+	// Markdown viewer colors.
+	MdBold        color.RGBA
+	MdHeading     color.RGBA
+	MdCode        color.RGBA
+	MdCodeBorder  color.RGBA
+	MdTableBorder color.RGBA
+	MdMatchBg     color.RGBA
+	MdMatchCurBg  color.RGBA
+	MdBadgeBg     color.RGBA
+	MdBadgeFg     color.RGBA
 }
 
 // deriveUIColors computes UIColors from a Config.
@@ -82,8 +93,22 @@ func deriveUIColors(cfg *config.Config) UIColors {
 		KeyName:     config.ParseHexColor(cfg.Colors.Yellow),
 		Fg:          config.ParseHexColor(cfg.Colors.Foreground),
 		Dim:         config.ParseHexColor(cfg.Colors.BrightBlack),
-		SearchMatch: config.ParseHexColor(cfg.Colors.Yellow),
+		SearchMatch:   config.ParseHexColor(cfg.Colors.Yellow),
+		MdBold:        config.ParseHexColor(cfg.Colors.MdBold),
+		MdHeading:     config.ParseHexColor(cfg.Colors.MdHeading),
+		MdCode:        config.ParseHexColor(cfg.Colors.MdCode),
+		MdCodeBorder:  config.ParseHexColor(cfg.Colors.MdCodeBorder),
+		MdTableBorder: config.ParseHexColor(cfg.Colors.MdTableBorder),
+		MdMatchBg:     withAlpha(config.ParseHexColor(cfg.Colors.MdMatchBg), 0x60),
+		MdMatchCurBg:  withAlpha(config.ParseHexColor(cfg.Colors.MdMatchCurBg), 0x80),
+		MdBadgeBg:     config.ParseHexColor(cfg.Colors.MdBadgeBg),
+		MdBadgeFg:     config.ParseHexColor(cfg.Colors.MdBadgeFg),
 	}
+}
+
+func withAlpha(c color.RGBA, a uint8) color.RGBA {
+	c.A = a
+	return c
 }
 
 // separatorColor returns the configured separator color, falling back to BrightBlack.
