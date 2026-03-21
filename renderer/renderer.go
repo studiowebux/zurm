@@ -312,233 +312,210 @@ type DrawState struct {
 
 // DrawAll renders the tab bar, all panes, status bar, and any active UI overlays onto screen.
 func (r *Renderer) DrawAll(ds DrawState) {
-	screen := ds.Screen
-	tabs := ds.Tabs
-	activeTab := ds.ActiveTab
-	focused := ds.Focused
-	zoomed := ds.Zoomed
-	menu := ds.Menu
-	overlay := ds.Overlay
-	confirm := ds.Confirm
-	search := ds.Search
-	statusBar := ds.StatusBar
-	tabSwitcher := ds.TabSwitcher
-	palette := ds.Palette
-	paletteEntries := ds.PaletteEntries
-	fileExplorer := ds.FileExplorer
-	tabSearch := ds.TabSearch
-	stats := ds.Stats
-	tabHover := ds.TabHover
-	mdViewer := ds.MdViewer
-	urlInput := ds.URLInput
-	hintMode := ds.HintMode
 	if r.offscreen == nil {
 		return
 	}
 
-	// Clear the modal layer every frame so overlay draws never accumulate across frames.
+	// Phase 1 — prepare frame: clear layers, handle layout dirty.
+	layout := r.prepareFrame(ds.Tabs, ds.ActiveTab, ds.Zoomed)
+
+	// Phase 2 — draw tab bar.
+	r.drawTabBar(ds.Tabs, ds.ActiveTab, ds.HintMode)
+
+	// Phase 3 — draw panes and snapshot block data.
+	blockSnaps := r.drawPanes(layout, ds.Focused, ds.Zoomed, ds.Search)
+
+	// Phase 4 — render block decorations.
+	r.renderBlocks(blockSnaps)
+
+	// Phase 5 — non-modal overlays (drawn onto offscreen).
+	r.drawSearchBar(ds.Search)
+	r.drawStats(ds.Stats)
+	r.drawStatusBar(ds.StatusBar)
+
+	// Phase 6 — modal overlays (drawn onto modalLayer).
+	r.drawModalOverlays(ds)
+
+	// Phase 7 — final composite: offscreen → blocksLayer → modalLayer → screen.
+	r.composeFinal(ds.Screen)
+}
+
+// prepareFrame clears layers, handles layout-dirty state, and draws pane dividers.
+// Returns the active tab's layout node for pane rendering.
+func (r *Renderer) prepareFrame(tabs []*tab.Tab, activeTab int, zoomed bool) *pane.LayoutNode {
 	r.modalLayer.Clear()
 
-	// On layout changes (tab switch, split, resize, zoom) clear the entire
-	// offscreen so stale pixels from the previous layout are gone.
-	// Otherwise only paint the divider strips between panes; pane content
-	// is handled per-pane below with skip logic.
 	var layout *pane.LayoutNode
 	if activeTab < len(tabs) {
 		layout = tabs[activeTab].Layout
 	}
 	if r.layoutDirty {
 		r.offscreen.Fill(r.borderColor)
-		// Clearing the offscreen invalidates all pane pixels — force full redraw.
-		// Without this, panes with unchanged gen skip DrawPane and show grey.
 		r.paneCache = make(map[*pane.Pane]*paneCacheEntry)
 		r.layoutDirty = false
 	} else if layout != nil && !zoomed {
 		r.drawDividers(layout)
 	}
+	return layout
+}
 
-	r.drawTabBar(tabs, activeTab, hintMode)
-
-	// Reset block hover each frame so stale state doesn't linger when the
-	// cursor moves off a block or blocks are disabled.
+// drawPanes iterates visible panes, renders content, and collects block snapshots.
+func (r *Renderer) drawPanes(layout *pane.LayoutNode, focused *pane.Pane, zoomed bool, search *SearchState) []*blockSnap {
 	r.BlockHover = BlockHoverState{}
 
+	if layout == nil {
+		return nil
+	}
+
+	leaves := layout.Leaves()
+	multiPane := len(leaves) > 1
 	var blockSnaps []*blockSnap
 
-	if layout != nil {
-		leaves := layout.Leaves()
-		multiPane := len(leaves) > 1
+	for i, leaf := range leaves {
+		p := leaf.Pane
+		isFocused := p == focused
+		if zoomed && !isFocused {
+			continue
+		}
 
-		for i, leaf := range leaves {
-			p := leaf.Pane
-			isFocused := p == focused
-			if zoomed && !isFocused {
-				continue
+		p.Term.Buf.RLock()
+		gen := p.Term.Buf.RenderGen()
+		viewOff := p.Term.Buf.ViewOffset
+		curRow := p.Term.Buf.CursorRow
+		curCol := p.Term.Buf.CursorCol
+		sbLen := p.Term.Buf.ScrollbackLen()
+
+		// Snapshot block data while the lock is held.
+		var snap *blockSnap
+		if r.BlocksEnabled && !p.Term.Buf.IsAltActive() {
+			snap = &blockSnap{
+				blocks:    make([]terminal.BlockBoundary, len(p.Term.Buf.Blocks)),
+				rows:      p.Term.Buf.Rows,
+				sbLen:     sbLen,
+				viewOff:   p.Term.Buf.ViewOffset,
+				cursorRow: p.Term.Buf.CursorRow,
+				buf:       p.Term.Buf,
+				paneRect:  p.Rect,
+				headerH:   p.HeaderH,
 			}
-
-			p.Term.Buf.RLock()
-			gen := p.Term.Buf.RenderGen()
-			viewOff := p.Term.Buf.ViewOffset
-			curRow := p.Term.Buf.CursorRow
-			curCol := p.Term.Buf.CursorCol
-			sbLen := p.Term.Buf.ScrollbackLen()
-
-			// Snapshot block data while the lock is held — cheap copy of small structs.
-			// drawBlocksSnap uses this after the lock is released, keeping the RLock
-			// window as short as possible (covers DrawPane only).
-			var snap *blockSnap
-			if r.BlocksEnabled && !p.Term.Buf.IsAltActive() {
-				snap = &blockSnap{
-					blocks:    make([]terminal.BlockBoundary, len(p.Term.Buf.Blocks)),
-					rows:      p.Term.Buf.Rows,
-					sbLen:     sbLen,
-					viewOff:   p.Term.Buf.ViewOffset,
-					cursorRow: p.Term.Buf.CursorRow,
-					buf:       p.Term.Buf,
-					paneRect:  p.Rect,
-					headerH:   p.HeaderH,
-				}
-				copy(snap.blocks, p.Term.Buf.Blocks)
-				if ab := p.Term.Buf.ActiveBlock(); ab != nil {
-					abCopy := *ab
-					snap.blocks = append(snap.blocks, abCopy)
-				}
-			}
-
-			cache := r.paneCache[p]
-			if cache == nil {
-				cache = &paneCacheEntry{}
-				r.paneCache[p] = cache
-			}
-
-			// Cache check: only actual content changes (gen, cursor, viewOffset,
-			// process name) trigger DrawPane + overlay redraw.
-			hasURLHover := isFocused && r.HoveredURL != nil
-			procName := p.ProcName
-			searchCurrent := -1
-			if isFocused && search != nil {
-				searchCurrent = search.Current
-			}
-			unchanged := gen == cache.lastRenderGen &&
-				viewOff == cache.lastViewOffset &&
-				curRow == cache.lastCursorRow &&
-				curCol == cache.lastCursorCol &&
-				hasURLHover == cache.hadURLHover &&
-				procName == cache.lastProcName &&
-				p.CustomName == cache.lastCustomName &&
-				p.Renaming == cache.lastRenaming &&
-				p.RenameText == cache.lastRenameText &&
-				searchCurrent == cache.lastSearchCurrent
-
-			if !unchanged {
-				var paneSearch *SearchState
-				if isFocused {
-					paneSearch = search
-				}
-				r.DrawPane(p.Term.Buf, p.Term.Cursor, p.Rect, isFocused, isFocused && multiPane && !zoomed, paneSearch, p.HeaderH)
-
-				// Pane overlays: name label (multi-pane only) and scroll indicator.
-				label := p.CustomName
-				if label == "" {
-					label = procName
-				}
-				if label == "" {
-					label = fmt.Sprintf("Pane %d", i+1)
-				}
-				if p.Renaming {
-					label = inputWithCursor(p.RenameText, p.RenameCursorPos)
-				}
-				r.drawPaneOverlay(p.Rect, label, multiPane, viewOff, sbLen)
-
-				cache.lastRenderGen = gen
-				cache.lastViewOffset = viewOff
-				cache.lastCursorRow = curRow
-				cache.lastCursorCol = curCol
-				cache.hadURLHover = hasURLHover
-				cache.lastProcName = procName
-				cache.lastCustomName = p.CustomName
-				cache.lastRenaming = p.Renaming
-				cache.lastRenameText = p.RenameText
-				cache.lastSearchCurrent = searchCurrent
-			}
-			p.Term.Buf.RUnlock()
-
-			// Visual bell: draw a 2px border flash when BEL was received.
-			if !p.BellUntil.IsZero() && time.Now().Before(p.BellUntil) {
-				r.drawThickBorder(p.Rect, r.bellColor, 2)
-			}
-
-			if snap != nil {
-				blockSnaps = append(blockSnaps, snap)
+			copy(snap.blocks, p.Term.Buf.Blocks)
+			if ab := p.Term.Buf.ActiveBlock(); ab != nil {
+				abCopy := *ab
+				snap.blocks = append(snap.blocks, abCopy)
 			}
 		}
-	}
 
-	// Render block decorations onto the dedicated blocks layer.
-	// The layer is cleared every frame so hover state is always current without
-	// requiring DrawPane to rerun when only the cursor position changes.
-	if r.BlocksEnabled && r.blocksLayer != nil {
-		r.blocksLayer.Clear()
-		for _, s := range blockSnaps {
-			r.drawBlocksSnap(s)
+		cache := r.paneCache[p]
+		if cache == nil {
+			cache = &paneCacheEntry{}
+			r.paneCache[p] = cache
+		}
+
+		// Cache check: only actual content changes trigger DrawPane + overlay redraw.
+		hasURLHover := isFocused && r.HoveredURL != nil
+		procName := p.ProcName
+		searchCurrent := -1
+		if isFocused && search != nil {
+			searchCurrent = search.Current
+		}
+		unchanged := gen == cache.lastRenderGen &&
+			viewOff == cache.lastViewOffset &&
+			curRow == cache.lastCursorRow &&
+			curCol == cache.lastCursorCol &&
+			hasURLHover == cache.hadURLHover &&
+			procName == cache.lastProcName &&
+			p.CustomName == cache.lastCustomName &&
+			p.Renaming == cache.lastRenaming &&
+			p.RenameText == cache.lastRenameText &&
+			searchCurrent == cache.lastSearchCurrent
+
+		if !unchanged {
+			var paneSearch *SearchState
+			if isFocused {
+				paneSearch = search
+			}
+			r.DrawPane(p.Term.Buf, p.Term.Cursor, p.Rect, isFocused, isFocused && multiPane && !zoomed, paneSearch, p.HeaderH)
+
+			label := p.CustomName
+			if label == "" {
+				label = procName
+			}
+			if label == "" {
+				label = fmt.Sprintf("Pane %d", i+1)
+			}
+			if p.Renaming {
+				label = inputWithCursor(p.RenameText, p.RenameCursorPos)
+			}
+			r.drawPaneOverlay(p.Rect, label, multiPane, viewOff, sbLen)
+
+			cache.lastRenderGen = gen
+			cache.lastViewOffset = viewOff
+			cache.lastCursorRow = curRow
+			cache.lastCursorCol = curCol
+			cache.hadURLHover = hasURLHover
+			cache.lastProcName = procName
+			cache.lastCustomName = p.CustomName
+			cache.lastRenaming = p.Renaming
+			cache.lastRenameText = p.RenameText
+			cache.lastSearchCurrent = searchCurrent
+		}
+		p.Term.Buf.RUnlock()
+
+		// Visual bell: draw a 2px border flash when BEL was received.
+		if !p.BellUntil.IsZero() && time.Now().Before(p.BellUntil) {
+			r.drawThickBorder(p.Rect, r.bellColor, 2)
+		}
+
+		if snap != nil {
+			blockSnaps = append(blockSnaps, snap)
 		}
 	}
+	return blockSnaps
+}
 
-	// Search bar drawn above pane content, below status bar (non-modal, stays in offscreen).
-	r.drawSearchBar(search)
+// renderBlocks renders block decorations onto the dedicated blocks layer.
+func (r *Renderer) renderBlocks(snaps []*blockSnap) {
+	if !r.BlocksEnabled || r.blocksLayer == nil {
+		return
+	}
+	r.blocksLayer.Clear()
+	for _, s := range snaps {
+		r.drawBlocksSnap(s)
+	}
+}
 
-	// Stats overlay drawn above pane content (non-modal, stays in offscreen).
-	r.drawStats(stats)
+// drawModalOverlays renders all modal/overlay content onto modalLayer.
+// Drawing order determines Z-order (last drawn = on top).
+func (r *Renderer) drawModalOverlays(ds DrawState) {
+	r.drawTabHoverPopover(ds.TabHover)
 
-	// Status bar drawn last into offscreen so it always sits on top of pane content.
-	r.drawStatusBar(statusBar)
-
-	// All modal/overlay content draws onto modalLayer (cleared above) so it always
-	// composites above blocksLayer in the final screen pass below.
-
-	// Tab hover popover — drawn first onto modalLayer so it sits below other modals.
-	// modalLayer is cleared every frame, preventing stale pixel accumulation.
-	r.drawTabHoverPopover(tabHover)
-
-	// Context menu drawn above terminal content.
-	if menu != nil {
-		r.drawContextMenu(menu)
+	if ds.Menu != nil {
+		r.drawContextMenu(ds.Menu)
+	}
+	if ds.Overlay != nil {
+		r.drawOverlay(ds.Overlay)
 	}
 
-	// Help overlay — covers everything when open.
-	if overlay != nil {
-		r.drawOverlay(overlay)
+	r.drawMarkdownViewer(ds.MdViewer)
+	r.drawURLInput(ds.URLInput)
+
+	if ds.Confirm != nil {
+		r.drawConfirm(ds.Confirm)
 	}
 
-	// Markdown viewer overlay — same layer as help overlay.
-	r.drawMarkdownViewer(mdViewer)
+	r.drawTabSwitcher(ds.Tabs, ds.ActiveTab, ds.TabSwitcher)
+	r.drawTabSearch(ds.Tabs, ds.ActiveTab, ds.TabSearch)
 
-	// URL input overlay — drawn above markdown viewer.
-	r.drawURLInput(urlInput)
-
-	// Confirm dialog drawn above overlay.
-	if confirm != nil {
-		r.drawConfirm(confirm)
+	if ds.Palette != nil && ds.Palette.Open {
+		r.drawPalette(ds.PaletteEntries, ds.Palette)
 	}
-
-	// Tab switcher overlay drawn above everything when open.
-	r.drawTabSwitcher(tabs, activeTab, tabSwitcher)
-
-	// Tab search overlay (Cmd+J) drawn above tab switcher.
-	r.drawTabSearch(tabs, activeTab, tabSearch)
-
-	// Command palette drawn above everything else when open.
-	if palette != nil && palette.Open {
-		r.drawPalette(paletteEntries, palette)
+	if ds.FileExplorer != nil && ds.FileExplorer.Open {
+		r.drawFileExplorer(ds.FileExplorer)
 	}
+}
 
-	// File explorer panel drawn on top of terminal content.
-	if fileExplorer != nil && fileExplorer.Open {
-		r.drawFileExplorer(fileExplorer)
-	}
-
-	// Final composite: offscreen → blocksLayer → modalLayer → screen.
-	// This guarantees modals are always on top of block decorations.
+// composeFinal composites offscreen → blocksLayer → modalLayer onto the final screen.
+func (r *Renderer) composeFinal(screen *ebiten.Image) {
 	screen.DrawImage(r.offscreen, nil)
 	if r.BlocksEnabled && r.blocksLayer != nil {
 		screen.DrawImage(r.blocksLayer, nil)
