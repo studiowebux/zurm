@@ -2048,28 +2048,24 @@ func (g *Game) drainShellIntegration() {
 	}
 	for _, leaf := range g.tabs[g.activeTab].Layout.Leaves() {
 		p := leaf.Pane
-		for {
-			select {
-			case kind := <-p.Term.ShellIntCh:
-				switch kind {
-				case 'A', 'D':
-					// Shell at prompt — clear foreground process.
-					if p.ProcName != "" {
-						p.ProcName = ""
-						g.screenDirty = true
-						if p == g.focused {
-							g.statusBarState.ForegroundProc = ""
-						}
+		select {
+		case kind := <-p.Term.ShellIntCh:
+			switch kind {
+			case 'A', 'D':
+				// Shell at prompt — clear foreground process.
+				if p.ProcName != "" {
+					p.ProcName = ""
+					g.screenDirty = true
+					if p == g.focused {
+						g.statusBarState.ForegroundProc = ""
 					}
-				case 'C':
-					// Command about to execute — one-shot query for foreground name.
-					go p.Term.QueryForeground()
 				}
-			default:
-				goto nextPane
+			case 'C':
+				// Command about to execute — one-shot query for foreground name.
+				go p.Term.QueryForeground()
 			}
+		default:
 		}
-	nextPane:
 	}
 }
 
