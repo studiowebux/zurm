@@ -37,8 +37,9 @@ type Recorder struct {
 }
 
 const (
-	frameDuration = 33 * time.Millisecond // ~30fps
-	frameBufferSz = 60                    // 2 seconds of buffered frames
+	// FrameDuration is the target interval between captured frames (~30fps).
+	FrameDuration = 33 * time.Millisecond
+	frameBufferSz = 60 // 2 seconds of buffered frames
 )
 
 // New creates a Recorder for the given frame dimensions.
@@ -208,7 +209,7 @@ func (r *Recorder) AddFrame(raw []byte) {
 
 	// Calculate how many frames this interval represents.
 	// If >1 frame duration has passed, insert duplicates to fill the gap.
-	copies := int(elapsed / frameDuration)
+	copies := int(elapsed / FrameDuration)
 	if copies < 1 {
 		copies = 1
 	}

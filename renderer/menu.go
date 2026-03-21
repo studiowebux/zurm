@@ -197,9 +197,5 @@ func (r *Renderer) drawMenuPanel(items []help.MenuItem, rect image.Rectangle, ho
 
 // drawMenuBorder draws a 1px border around rect onto r.modalLayer.
 func (r *Renderer) drawMenuBorder(rect image.Rectangle) {
-	img := r.modalLayer
-	img.SubImage(image.Rect(rect.Min.X, rect.Min.Y, rect.Max.X, rect.Min.Y+1)).(*ebiten.Image).Fill(r.ui.Border)
-	img.SubImage(image.Rect(rect.Min.X, rect.Max.Y-1, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(r.ui.Border)
-	img.SubImage(image.Rect(rect.Min.X, rect.Min.Y, rect.Min.X+1, rect.Max.Y)).(*ebiten.Image).Fill(r.ui.Border)
-	img.SubImage(image.Rect(rect.Max.X-1, rect.Min.Y, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(r.ui.Border)
+	drawRect(r.modalLayer, rect, r.ui.Border)
 }

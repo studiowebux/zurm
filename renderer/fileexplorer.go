@@ -231,7 +231,7 @@ func (r *Renderer) drawFileExplorer(state *FileExplorerState) {
 
 		// For search results, cursor is the visual index
 		cursorIdx := state.Cursor
-		if !isSearchResults && actualIdx == cursorIdx || isSearchResults && visIdx == cursorIdx {
+		if (!isSearchResults && actualIdx == cursorIdx) || (isSearchResults && visIdx == cursorIdx) {
 			highlightRect := image.Rect(panelX, rowTop, panelX+panelW, rowBot)
 			r.modalLayer.SubImage(highlightRect).(*ebiten.Image).Fill(r.ui.HoverBg)
 		}
@@ -263,7 +263,6 @@ func (r *Renderer) drawFileExplorer(state *FileExplorerState) {
 		// For search results, show the full path instead of just the name
 		displayName := e.Name
 		if isSearchResults {
-			displayName = e.Name // This should already be the relative path from SearchRecursive
 			indicator = "" // No indicator for search results
 		}
 

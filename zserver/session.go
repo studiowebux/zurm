@@ -95,6 +95,8 @@ func (s *Session) Dead() <-chan struct{} { return s.dead }
 
 func genID() string {
 	b := make([]byte, 8)
-	rand.Read(b) //nolint:errcheck
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
 	return hex.EncodeToString(b)
 }

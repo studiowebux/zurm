@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"image/color"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -444,7 +445,9 @@ func Load() (*Config, error) {
 		// First launch: write a fully documented default config so the user
 		// can discover all available options without reading the source.
 		if mkErr := os.MkdirAll(dir, 0o700); mkErr == nil {
-			_ = os.WriteFile(path, []byte(configTemplate), 0o600)
+			if wErr := os.WriteFile(path, []byte(configTemplate), 0o600); wErr != nil {
+				log.Printf("config: could not write default config to %s: %v", path, wErr)
+			}
 		}
 		return &cfg, nil
 	}
@@ -508,13 +511,19 @@ func resolveShell(cfg *Config) {
 
 // ParseHexColor converts a "#rrggbb" string to color.RGBA.
 func ParseHexColor(s string) color.RGBA {
+	raw := s
 	s = strings.TrimPrefix(s, "#")
 	if len(s) != 6 {
+		log.Printf("config: invalid hex color %q, falling back to white", raw)
 		return color.RGBA{R: 255, G: 255, B: 255, A: 255}
 	}
-	r, _ := strconv.ParseUint(s[0:2], 16, 8)
-	g, _ := strconv.ParseUint(s[2:4], 16, 8)
-	b, _ := strconv.ParseUint(s[4:6], 16, 8)
+	r, rErr := strconv.ParseUint(s[0:2], 16, 8)
+	g, gErr := strconv.ParseUint(s[2:4], 16, 8)
+	b, bErr := strconv.ParseUint(s[4:6], 16, 8)
+	if rErr != nil || gErr != nil || bErr != nil {
+		log.Printf("config: invalid hex color %q, falling back to white", raw)
+		return color.RGBA{R: 255, G: 255, B: 255, A: 255}
+	}
 	return color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: 255}
 }
 

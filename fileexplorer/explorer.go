@@ -39,7 +39,7 @@ func LoadChildren(root string, depth int) ([]Entry, error) {
 
 	var dirs, files []Entry
 	for _, info := range infos {
-		if info.Name()[0] == '.' {
+		if len(info.Name()) == 0 || info.Name()[0] == '.' {
 			continue // skip hidden entries
 		}
 		e := Entry{

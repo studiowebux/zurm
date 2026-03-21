@@ -346,9 +346,6 @@ func (w *walker) walkInline(n ast.Node) {
 		switch node := child.(type) {
 		case *ast.Text:
 			style := w.blockStyle
-			if style == StyleNormal {
-				style = StyleNormal
-			}
 			txt := string(node.Segment.Value(w.src))
 			w.spans = append(w.spans, Span{Text: txt, Style: style})
 			if node.SoftLineBreak() {

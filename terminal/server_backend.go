@@ -28,7 +28,11 @@ func NewServerBackend(address, shell string, args []string, cols, rows int, env 
 	}
 
 	req := zserver.CreateSessionRequest{Shell: shell, Args: args, Cols: cols, Rows: rows, Env: env, Dir: dir}
-	data, _ := json.Marshal(req)
+	data, err := json.Marshal(req)
+	if err != nil {
+		conn.Close() // #nosec G104 — error cleanup
+		return nil, fmt.Errorf("marshal create request: %w", err)
+	}
 	if err := zserver.WriteMessage(conn, zserver.MsgCreateSession, data); err != nil {
 		conn.Close() // #nosec G104 — error cleanup; already returning an error
 		return nil, fmt.Errorf("send create: %w", err)
@@ -70,7 +74,11 @@ func AttachServerBackend(address, sessionID string) (*ServerBackend, error) {
 	}
 
 	req := zserver.AttachSessionRequest{ID: sessionID}
-	data, _ := json.Marshal(req)
+	data, err := json.Marshal(req)
+	if err != nil {
+		conn.Close() // #nosec G104 — error cleanup
+		return nil, fmt.Errorf("marshal attach request: %w", err)
+	}
 	if err := zserver.WriteMessage(conn, zserver.MsgAttachSession, data); err != nil {
 		conn.Close() // #nosec G104 — error cleanup; already returning an error
 		return nil, fmt.Errorf("send attach: %w", err)
@@ -129,7 +137,10 @@ func (b *ServerBackend) Dead() <-chan struct{} { return b.dead }
 // RenameSession sends a human-readable name to the server for this session.
 // Called when the user renames a server-backed pane.
 func (b *ServerBackend) RenameSession(name string) error {
-	data, _ := json.Marshal(zserver.RenameSessionRequest{Name: name})
+	data, err := json.Marshal(zserver.RenameSessionRequest{Name: name})
+	if err != nil {
+		return fmt.Errorf("marshal rename request: %w", err)
+	}
 	return zserver.WriteMessage(b.conn, zserver.MsgRenameSession, data)
 }
 

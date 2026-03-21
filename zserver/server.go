@@ -54,7 +54,11 @@ func (srv *Server) handleConn(conn net.Conn) {
 	switch msg.Type {
 	case MsgListSessions:
 		list := srv.manager.List()
-		data, _ := json.Marshal(list)
+		data, err := json.Marshal(list)
+		if err != nil {
+			log.Printf("zserver: marshal session list: %v", err)
+			return
+		}
 		WriteMessage(conn, MsgSessionList, data) // #nosec G104 — fire-and-forget response; client may have disconnected
 		return
 
@@ -87,7 +91,11 @@ func (srv *Server) handleConn(conn net.Conn) {
 		}
 		log.Printf("zserver: created session %s (pid %d, %dx%d, dir=%s)", s.ID, s.pid(), req.Cols, req.Rows, req.Dir)
 		info := SessionInfo{ID: s.ID, PID: s.pid(), Cols: s.Cols, Rows: s.Rows, Dir: s.Dir}
-		data, _ := json.Marshal(info)
+		data, err := json.Marshal(info)
+		if err != nil {
+			log.Printf("zserver: marshal session info: %v", err)
+			return
+		}
 		WriteMessage(conn, MsgSessionInfo, data) // #nosec G104 — fire-and-forget; if write fails serveSession will detect the broken connection
 		srv.serveSession(conn, s)
 
@@ -105,7 +113,11 @@ func (srv *Server) handleConn(conn net.Conn) {
 		}
 		log.Printf("zserver: client attached to session %s (pid %d)", s.ID, s.pid())
 		info := SessionInfo{ID: s.ID, PID: s.pid(), Cols: s.Cols, Rows: s.Rows, Dir: s.Dir}
-		data, _ := json.Marshal(info)
+		data, err := json.Marshal(info)
+		if err != nil {
+			log.Printf("zserver: marshal session info: %v", err)
+			return
+		}
 		WriteMessage(conn, MsgSessionInfo, data) // #nosec G104 — fire-and-forget; if write fails serveSession will detect the broken connection
 		srv.serveSession(conn, s)
 

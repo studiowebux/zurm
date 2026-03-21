@@ -4,19 +4,12 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-// KeyToBytes maps an Ebitengine key event to the byte sequence sent to the PTY.
-// Returns nil if the key produces no output (e.g. modifier-only keys).
-func KeyToBytes(key ebiten.Key, mods ebiten.Key) []byte {
-	return nil // handled by KeyEventToBytes below
-}
-
 // KeyEventToBytes converts the current key state into PTY input bytes.
 // appCursor selects application cursor key sequences (DECCKM mode 1).
 // Called once per Ebitengine Update() frame when a key is newly pressed.
 func KeyEventToBytes(key ebiten.Key, appCursor bool) []byte {
 	ctrl := ebiten.IsKeyPressed(ebiten.KeyControl)
 	shift := ebiten.IsKeyPressed(ebiten.KeyShift)
-	// alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 
 	// Ctrl + letter
 	if ctrl && !shift {

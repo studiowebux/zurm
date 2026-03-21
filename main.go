@@ -702,7 +702,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// the last painted content even when nothing new was drawn.
 	if g.recorder.Active() {
 		now := time.Now()
-		if now.Sub(g.recLastFrame) >= 33*time.Millisecond {
+		if now.Sub(g.recLastFrame) >= recorder.FrameDuration {
 			g.recLastFrame = now
 			needed := screen.Bounds().Dx() * screen.Bounds().Dy() * 4
 			if len(g.recBuf) != needed {
@@ -7187,7 +7187,10 @@ func killSession(addr, id string) error {
 		return fmt.Errorf("cannot connect to zurm-server at %s: %w", addr, err)
 	}
 	defer conn.Close()
-	data, _ := json.Marshal(zserver.KillSessionRequest{ID: id})
+	data, err := json.Marshal(zserver.KillSessionRequest{ID: id})
+	if err != nil {
+		return fmt.Errorf("marshal kill request: %w", err)
+	}
 	return zserver.WriteMessage(conn, zserver.MsgKillSession, data)
 }
 
