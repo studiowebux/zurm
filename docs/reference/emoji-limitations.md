@@ -18,14 +18,23 @@ Full-color emoji rendering is not supported in zurm due to Ebitengine limitation
 
 ## What Doesn't Work
 
-- **Color emoji** (multi-colored glyphs) — Ebitengine cannot render color fonts
+- **Color emoji** (multi-colored glyphs like 😀🎉🔥) — Ebitengine cannot render color fonts
 - **Apple Color Emoji** — TrueType Collection format not supported by Go font libraries
+- **ZWJ sequences** (👨‍👩‍👧‍👦, 🏳️‍🌈) — require complex text shaping not available in Go
+- **Skin tone modifiers** (👋🏽) — modifier codepoints not combined
+- **Flag sequences** (🇨🇦, 🇺🇸) — regional indicator pairs not rendered as flags
 
 ## Technical Background
 
 1. **Ebiten Limitation**: The Ebiten game engine doesn't support color fonts ([Issue #2649](https://github.com/hajimehoshi/ebiten/issues/2649))
 2. **Go Font Library**: The `golang.org/x/image/font` package returns `ErrColoredGlyph` when encountering color glyphs
 3. **No Native Bridge**: Pure Go programs cannot easily access platform-native text rendering (CoreText on macOS, DirectWrite on Windows)
+
+## Workarounds
+
+- Use **Nerd Font** symbols for icons in your prompt — they render perfectly as single-codepoint glyphs
+- Use monochrome emoji (outlined/black-and-white) via NotoEmoji fallback font
+- For programs that display emoji (e.g., `npm`, `yarn`), the outlines are readable even without color
 
 ## Setup
 
