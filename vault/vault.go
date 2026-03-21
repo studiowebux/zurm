@@ -21,17 +21,29 @@ type Vault struct {
 	keyPath    string
 	ignorePfx  string
 	maxEntries int // 0 = unlimited
+
+	done chan struct{} // closed by Close() to stop the background sync goroutine
 }
 
 // New creates a Vault configured for the given config directory.
 // Call Load() then ImportZshHistory() to populate.
 func New(configDir, ignorePfx string, maxEntries int) *Vault {
 	return &Vault{
+		done:       make(chan struct{}),
 		vaultPath:  filepath.Join(configDir, "vault.enc"),
 		keyPath:    filepath.Join(configDir, "vault.key"),
 		ignorePfx:  ignorePfx,
 		maxEntries: maxEntries,
 		index:      make(map[string]struct{}),
+	}
+}
+
+// Close stops the background sync goroutine. Safe to call multiple times.
+func (v *Vault) Close() {
+	select {
+	case <-v.done:
+	default:
+		close(v.done)
 	}
 }
 
@@ -242,8 +254,13 @@ func Init(configDir, historyPath, ignorePfx string, maxEntries int, syncInterval
 		}
 		ticker := time.NewTicker(syncInterval)
 		defer ticker.Stop()
-		for range ticker.C {
-			syncHistory()
+		for {
+			select {
+			case <-ticker.C:
+				syncHistory()
+			case <-v.done:
+				return
+			}
 		}
 	}()
 

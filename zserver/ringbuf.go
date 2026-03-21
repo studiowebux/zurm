@@ -16,7 +16,10 @@ func (r *ringBuf) write(p []byte) {
 	defer r.mu.Unlock()
 	r.data = append(r.data, p...)
 	if len(r.data) > ringBufSize {
-		r.data = r.data[len(r.data)-ringBufSize:]
+		// Copy into a fresh slice so the old backing array can be GC'd after bursts.
+		retained := make([]byte, ringBufSize)
+		copy(retained, r.data[len(r.data)-ringBufSize:])
+		r.data = retained
 	}
 }
 

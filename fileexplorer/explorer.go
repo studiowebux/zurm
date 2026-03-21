@@ -230,10 +230,12 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
 
-	_, err = io.Copy(out, in)
-	return err
+	if _, err = io.Copy(out, in); err != nil {
+		out.Close() // #nosec G104 — cleanup; original error takes priority
+		return err
+	}
+	return out.Close() // surface flush/close errors (e.g. filesystem full)
 }
 
 // MovePath moves src into dstDir. Tries os.Rename first; falls back to copy + remove.

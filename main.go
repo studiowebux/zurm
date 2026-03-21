@@ -608,8 +608,13 @@ func (g *Game) Update() error {
 		}
 	}
 
-	// Check for dead panes (non-blocking).
+	// Check for dead panes (non-blocking). Close at most one per frame to avoid
+	// nil-dereffing g.layout or g.focused after a close mutates both.
+	closedDead := false
 	for _, leaf := range g.layout.Leaves() {
+		if closedDead {
+			break
+		}
 		select {
 		case <-leaf.Pane.Term.Dead():
 			if len(g.layout.Leaves()) <= 1 {
@@ -617,6 +622,7 @@ func (g *Game) Update() error {
 			} else {
 				g.closePane(leaf.Pane)
 			}
+			closedDead = true // layout changed — remaining leaves are stale
 		default:
 		}
 	}
@@ -2959,8 +2965,8 @@ func sanitizeTitle(s string) string {
 		}
 		return r
 	}, s)
-	if len(out) > 256 {
-		out = out[:256]
+	if r := []rune(out); len(r) > 256 {
+		out = string(r[:256])
 	}
 	return out
 }
@@ -5297,6 +5303,13 @@ func (g *Game) toggleZoom() {
 // recomputeLayout recalculates rects and resizes all pane terminals.
 // Call after any layout mutation (split ratio change, split/close, zoom toggle).
 func (g *Game) recomputeLayout() {
+	g.recomputeLayoutNode(g.layout)
+}
+
+// recomputeLayoutNode recomputes rects and resizes terminals for the given layout.
+// Use this instead of recomputeLayout when operating on a layout that isn't g.layout
+// (e.g. iterating over all tabs during font size change or config reload).
+func (g *Game) recomputeLayoutNode(n *pane.LayoutNode) {
 	g.dismissTabHover()
 	physW := int(float64(g.winW) * g.dpi)
 	physH := int(float64(g.winH) * g.dpi)
@@ -5304,9 +5317,9 @@ func (g *Game) recomputeLayout() {
 	statusBarH := g.renderer.StatusBarHeight()
 	fullRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
 
-	setPaneHeaders(g.layout, g.font.CellH)
-	g.layout.ComputeRects(fullRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
-	for _, leaf := range g.layout.Leaves() {
+	setPaneHeaders(n, g.font.CellH)
+	n.ComputeRects(fullRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
+	for _, leaf := range n.Leaves() {
 		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
 	}
 	g.renderer.SetLayoutDirty()
@@ -5451,8 +5464,7 @@ func (g *Game) adjustFontSize(delta float64) {
 	g.renderer.SetFont(fontR)
 	g.renderer.SetSize(int(float64(g.winW)*g.dpi), int(float64(g.winH)*g.dpi))
 	for _, t := range g.tabs {
-		g.layout = t.Layout
-		g.recomputeLayout()
+		g.recomputeLayoutNode(t.Layout)
 	}
 	if g.activeTab < len(g.tabs) {
 		g.layout = g.tabs[g.activeTab].Layout
@@ -5502,8 +5514,7 @@ func (g *Game) reloadConfig() {
 			g.renderer.SetSize(int(float64(g.winW)*g.dpi), int(float64(g.winH)*g.dpi))
 			// Recompute all tab layouts with new cell dimensions.
 			for _, t := range g.tabs {
-				g.layout = t.Layout
-				g.recomputeLayout()
+				g.recomputeLayoutNode(t.Layout)
 			}
 			// Restore active tab layout pointer.
 			if g.activeTab < len(g.tabs) {
@@ -5529,8 +5540,7 @@ func (g *Game) reloadConfig() {
 	// Always recompute layout — status bar height, padding, or divider width
 	// may have changed, which shifts pane rects.
 	for _, t := range g.tabs {
-		g.layout = t.Layout
-		g.recomputeLayout()
+		g.recomputeLayoutNode(t.Layout)
 	}
 	if g.activeTab < len(g.tabs) {
 		g.layout = g.tabs[g.activeTab].Layout
@@ -5541,6 +5551,7 @@ func (g *Game) reloadConfig() {
 
 	// Vault enable/disable: nil out vault and clear ghost when disabled.
 	if !g.cfg.Vault.Enabled && g.vault != nil {
+		g.vault.Close()
 		g.vault = nil
 		g.vaultSuggest = ""
 		g.vaultLineCache = ""
