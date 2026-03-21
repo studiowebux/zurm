@@ -32,7 +32,7 @@ func (r *ringBuf) snapshot() []byte {
 	if r.total == 0 {
 		return nil
 	}
-	if r.total <= ringBufSize {
+	if r.total < ringBufSize {
 		// Buffer hasn't wrapped — return [0, pos).
 		out := make([]byte, r.pos)
 		copy(out, r.buf[:r.pos])
