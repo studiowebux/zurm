@@ -6756,9 +6756,11 @@ func (g *Game) handleMarkdownSearchInput() {
 		return
 	}
 
-	// Enter/n — next match; Shift+Enter/N — previous match.
-	// Checked before Update so n/N navigation takes priority over text input.
-	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyN) {
+	// Enter — next match; Shift+Enter — previous match.
+	// n/N are NOT intercepted here — the search bar is a text field, so all
+	// printable characters go to the query. n/N navigation works in normal mode
+	// (handleMarkdownViewerInput) after the search bar is closed.
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
 		if shift {
 			g.mdViewerSearchPrev()
 		} else {
