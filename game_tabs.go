@@ -264,7 +264,7 @@ func (g *Game) switchTabNoHistory(i int) {
 	g.renderer.SetLayoutDirty()
 	g.renderer.ClearPaneCache()
 	g.syncActive()
-	g.selDragging = false
+	g.selDrag.Active = false
 	g.statusBarState.ForegroundProc = ""
 	g.focused.Term.RefreshForeground()
 	if g.search.State.Open {

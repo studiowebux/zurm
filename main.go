@@ -149,11 +149,10 @@ type Game struct {
 	repeatLast   time.Time
 
 	// Selection drag state.
-	selDragging bool
+	selDrag SelectionDragger
 
 	// Divider drag state (pane resize).
-	dividerDragging bool
-	dragSplit       *pane.LayoutNode // split node being resized
+	divDrag DividerDragHandler
 
 
 	// URL hover state — detected URLs in the focused pane's visible buffer.
@@ -2227,7 +2226,7 @@ func (g *Game) handleMouse() {
 	if (leftPressed && !leftWas) || (rightPressed && !rightWas) {
 		g.dismissTabHover()
 	}
-	if my < tabBarH && !g.selDragging {
+	if my < tabBarH && !g.selDrag.Active {
 		physW := int(float64(g.winW) * g.dpi)
 		numTabs := len(g.tabMgr.Tabs)
 		maxTabW := g.cfg.Tabs.MaxWidthChars * g.font.CellW
@@ -2318,33 +2317,14 @@ func (g *Game) handleMouse() {
 	}
 
 	// Divider drag — resize pane splits by dragging the divider.
-	if g.dividerDragging {
+	if g.divDrag.Active {
 		if leftPressed {
-			// Continue drag: update ratio based on cursor position.
-			switch g.dragSplit.Kind {
-			case pane.HSplit:
-				newRatio := float64(mx-g.dragSplit.Rect.Min.X) / float64(g.dragSplit.Rect.Dx())
-				if newRatio < 0.1 {
-					newRatio = 0.1
-				} else if newRatio > 0.9 {
-					newRatio = 0.9
-				}
-				g.dragSplit.Ratio = newRatio
-			case pane.VSplit:
-				newRatio := float64(my-g.dragSplit.Rect.Min.Y) / float64(g.dragSplit.Rect.Dy())
-				if newRatio < 0.1 {
-					newRatio = 0.1
-				} else if newRatio > 0.9 {
-					newRatio = 0.9
-				}
-				g.dragSplit.Ratio = newRatio
+			if g.divDrag.Update(mx, my) {
+				g.recomputeLayout()
+				g.screenDirty = true
 			}
-			g.recomputeLayout()
-			g.screenDirty = true
 		} else {
-			// Release: stop dragging.
-			g.dividerDragging = false
-			g.dragSplit = nil
+			g.divDrag.End()
 		}
 		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
 		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
@@ -2354,8 +2334,7 @@ func (g *Game) handleMouse() {
 	// Start divider drag on click — 4px hit margin around the 1px divider.
 	if leftPressed && !leftWas && !g.zoomed {
 		if split := g.layout.SplitAt(mx, my, 4); split != nil {
-			g.dividerDragging = true
-			g.dragSplit = split
+			g.divDrag.Start(split)
 			g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
 			g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 			return
@@ -2463,17 +2442,17 @@ func (g *Game) handleMouse() {
 			}
 			switch g.clickCount {
 			case 1:
-				g.selDragging = true
+				g.selDrag.Active = true
 				g.focused.Term.Buf.Selection = terminal.Selection{
 					Active:   true,
 					StartRow: absRow, StartCol: snapCol,
 					EndRow:   absRow, EndCol: snapCol,
 				}
 			case 2:
-				g.selDragging = false
+				g.selDrag.Active = false
 				g.focused.Term.Buf.Selection = g.wordSelection(row, col)
 			default:
-				g.selDragging = false
+				g.selDrag.Active = false
 				g.focused.Term.Buf.Selection = terminal.Selection{
 					Active:   true,
 					StartRow: absRow, StartCol: 0,
@@ -2483,7 +2462,7 @@ func (g *Game) handleMouse() {
 			}
 			g.focused.Term.Buf.BumpRenderGen()
 			g.focused.Term.Buf.Unlock()
-		} else if leftPressed && leftWas && g.selDragging {
+		} else if leftPressed && leftWas && g.selDrag.Active {
 			g.focused.Term.Buf.Lock()
 			// Auto-scroll when dragging past the pane edges.
 			// Selection uses absolute rows, so StartRow stays stable across
@@ -2513,8 +2492,8 @@ func (g *Game) handleMouse() {
 			g.focused.Term.Buf.Unlock()
 			g.screenDirty = true
 		} else if !leftPressed && leftWas {
-			if g.selDragging {
-				g.selDragging = false
+			if g.selDrag.Active {
+				g.selDrag.Active = false
 				g.focused.Term.Buf.Lock()
 				sel := g.focused.Term.Buf.Selection.Normalize()
 				if sel.StartRow == sel.EndRow && sel.StartCol == sel.EndCol {
