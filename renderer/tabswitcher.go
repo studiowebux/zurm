@@ -26,8 +26,8 @@ func (r *Renderer) drawTabSwitcher(tabs []*tab.Tab, activeTab int, state *TabSwi
 	// Semi-transparent backdrop.
 	if r.overlayBg == nil {
 		r.overlayBg = ebiten.NewImage(1, 1)
+		r.overlayBg.Fill(r.ui.Backdrop)
 	}
-	r.overlayBg.Fill(r.ui.Backdrop)
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Scale(float64(physW), float64(physH))
 	r.modalLayer.DrawImage(r.overlayBg, op)

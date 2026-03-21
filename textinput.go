@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
@@ -192,7 +193,7 @@ func (t *TextInput) MoveLeft() {
 // MoveRight moves the cursor one rune to the right.
 func (t *TextInput) MoveRight() {
 	t.clampCursor()
-	if t.CursorPos < len([]rune(t.Text)) {
+	if t.CursorPos < utf8.RuneCountInString(t.Text) {
 		t.CursorPos++
 	}
 }
@@ -204,7 +205,7 @@ func (t *TextInput) MoveToStart() {
 
 // MoveToEnd moves the cursor to the end of the text.
 func (t *TextInput) MoveToEnd() {
-	t.CursorPos = len([]rune(t.Text))
+	t.CursorPos = utf8.RuneCountInString(t.Text)
 }
 
 // WithCursor returns the text with a block cursor character (|) inserted at

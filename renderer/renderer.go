@@ -149,6 +149,10 @@ func (r *Renderer) ReloadColors(cfg *config.Config) {
 	r.borderColor = config.ParseHexColor(cfg.Colors.Border)
 	r.bellColor = config.ParseHexColor(cfg.Bell.Color)
 	r.ui = deriveUIColors(cfg)
+	if r.overlayBg != nil {
+		r.overlayBg.Deallocate()
+		r.overlayBg = nil // recreated with new Backdrop color on next draw
+	}
 	r.paneCache = make(map[*pane.Pane]*paneCacheEntry)
 	r.layoutDirty = true
 }

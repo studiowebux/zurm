@@ -6227,11 +6227,13 @@ func loadFontFallbacks(fc config.FontConfig) [][]byte {
 		paths = append(paths, fc.Fallback)
 	}
 	paths = append(paths, fc.Fallbacks...)
+	seen := make(map[string]bool, len(paths))
 	var result [][]byte
 	for _, p := range paths {
-		if p == "" {
+		if p == "" || seen[p] {
 			continue
 		}
+		seen[p] = true
 		data, err := os.ReadFile(p) // #nosec G304 -- desktop app loading user-configured font paths
 		if err != nil {
 			log.Printf("fallback font %q not found, skipping: %v", p, err)

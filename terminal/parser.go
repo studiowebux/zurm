@@ -30,6 +30,15 @@ const (
 	maxOSCBuffer = 4096 // maximum bytes collected in an OSC string
 )
 
+// formatOSCColor formats an OSC 10/11 color query response.
+func formatOSCColor(code int, c color.RGBA) []byte {
+	return []byte(fmt.Sprintf("\x1B]%d;rgb:%04x/%04x/%04x\x1B\\",
+		code,
+		uint16(c.R)<<8|uint16(c.R),
+		uint16(c.G)<<8|uint16(c.G),
+		uint16(c.B)<<8|uint16(c.B)))
+}
+
 // Parser processes raw PTY bytes and applies them to a ScreenBuffer.
 // All methods must be called with the ScreenBuffer write lock held.
 type Parser struct {
@@ -421,21 +430,11 @@ func (p *Parser) dispatchOSC(s string) {
 		}
 	case "10": // foreground color query
 		if value == "?" {
-			fg := p.sb.DefaultFG
-			resp := fmt.Sprintf("\x1B]10;rgb:%04x/%04x/%04x\x1B\\",
-				uint16(fg.R)<<8|uint16(fg.R),
-				uint16(fg.G)<<8|uint16(fg.G),
-				uint16(fg.B)<<8|uint16(fg.B))
-			p.sb.PendingDCSResponses = append(p.sb.PendingDCSResponses, []byte(resp))
+			p.sb.PendingDCSResponses = append(p.sb.PendingDCSResponses, formatOSCColor(10, p.sb.DefaultFG))
 		}
 	case "11": // background color query — nvim uses this to adapt theme colors
 		if value == "?" {
-			bg := p.sb.DefaultBG
-			resp := fmt.Sprintf("\x1B]11;rgb:%04x/%04x/%04x\x1B\\",
-				uint16(bg.R)<<8|uint16(bg.R),
-				uint16(bg.G)<<8|uint16(bg.G),
-				uint16(bg.B)<<8|uint16(bg.B))
-			p.sb.PendingDCSResponses = append(p.sb.PendingDCSResponses, []byte(resp))
+			p.sb.PendingDCSResponses = append(p.sb.PendingDCSResponses, formatOSCColor(11, p.sb.DefaultBG))
 		}
 	case "133": // FinalTerm / iTerm2 shell integration
 		// value is one of: "A" (prompt start), "B" (prompt end),

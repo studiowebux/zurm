@@ -127,8 +127,8 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 	// Semi-transparent backdrop: scale a 1×1 image to full screen.
 	if r.overlayBg == nil {
 		r.overlayBg = ebiten.NewImage(1, 1)
+		r.overlayBg.Fill(r.ui.Backdrop)
 	}
-	r.overlayBg.Fill(r.ui.Backdrop)
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Scale(float64(physW), float64(physH))
 	r.modalLayer.DrawImage(r.overlayBg, op)
@@ -392,8 +392,8 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	// Semi-transparent backdrop.
 	if r.overlayBg == nil {
 		r.overlayBg = ebiten.NewImage(1, 1)
+		r.overlayBg.Fill(r.ui.Backdrop)
 	}
-	r.overlayBg.Fill(r.ui.Backdrop)
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Scale(float64(physW), float64(physH))
 	r.modalLayer.DrawImage(r.overlayBg, op)
@@ -723,8 +723,8 @@ func (r *Renderer) drawURLInput(state *URLInputState) {
 	// Semi-transparent backdrop.
 	if r.overlayBg == nil {
 		r.overlayBg = ebiten.NewImage(1, 1)
+		r.overlayBg.Fill(r.ui.Backdrop)
 	}
-	r.overlayBg.Fill(r.ui.Backdrop)
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Scale(float64(physW), float64(physH))
 	r.modalLayer.DrawImage(r.overlayBg, op)
