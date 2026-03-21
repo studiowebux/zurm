@@ -5343,6 +5343,14 @@ func (g *Game) reloadRuntimeSettings(cfg *config.Config) {
 	ebiten.SetTPS(cfg.Performance.TPS)
 	g.blocksEnabled = cfg.Blocks.Enabled
 	g.renderer.BlocksEnabled = g.blocksEnabled
+
+	// Propagate cursor blink and ShowProcess to all terminals.
+	for _, t := range g.tabs {
+		for _, leaf := range t.Layout.Leaves() {
+			leaf.Pane.Term.Cursor.SetBlink(cfg.Input.CursorBlink)
+			leaf.Pane.Term.SetShowProcess(cfg.StatusBar.ShowProcess)
+		}
+	}
 }
 
 // recomputeAllTabs recomputes layout rects for every tab and restores the active layout pointer.

@@ -285,6 +285,11 @@ func (t *Terminal) SendClipboardResponses() {
 	}
 }
 
+// SetShowProcess updates the ShowProcess flag (used by RefreshForeground).
+func (t *Terminal) SetShowProcess(show bool) {
+	t.tcfg.ShowProcess = show
+}
+
 // UpdateColors propagates new color settings to the buffer and parser.
 // Called during config hot-reload.
 func (t *Terminal) UpdateColors(fg, bg color.RGBA, palette [16]color.RGBA) {

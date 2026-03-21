@@ -39,6 +39,16 @@ func (c *Cursor) EnableBlink() {
 	c.blinkPeriod = cursorBlinkPeriod
 }
 
+// SetBlink enables or disables cursor blinking.
+func (c *Cursor) SetBlink(on bool) {
+	if on {
+		c.blinkPeriod = cursorBlinkPeriod
+	} else {
+		c.blinkPeriod = 0
+		c.blinkOn = true
+	}
+}
+
 // Update advances the blink animation. Call once per Ebitengine Update().
 // Returns true when blinkOn toggled — caller should mark the screen dirty.
 func (c *Cursor) Update() bool {
