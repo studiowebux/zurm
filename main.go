@@ -48,6 +48,16 @@ import (
 // Defaults to "dev" for local builds.
 var version = "dev"
 
+// Internal timing constants — not user-configurable.
+const (
+	unfocusSuspendDelay = 5 * time.Second       // idle before reducing TPS when unfocused
+	gitInfoTimeout      = 5 * time.Second       // max wait for git status subprocess
+	cwdPollInterval     = 2 * time.Second       // how often to query CWD via lsof/OSC 7
+	fgPollInterval      = 1 * time.Second       // how often to query foreground process via ps
+	bellDebounce        = 500 * time.Millisecond // min interval between bell sounds
+	llmsFetchTimeout    = 10 * time.Second       // HTTP client timeout for llms.txt fetch
+)
+
 // keyRepeatDelay and keyRepeatInterval are set from config at startup.
 var (
 	keyRepeatDelay    = 500 * time.Millisecond
@@ -1424,7 +1434,7 @@ func (g *Game) handleFocus() {
 
 	// Idle suspension: reduce TPS after 5 seconds unfocused (when auto_idle is enabled).
 	if g.cfg.Performance.AutoIdle && !focused && !g.suspended && !g.unfocusedAt.IsZero() &&
-		time.Since(g.unfocusedAt) > 5*time.Second {
+		time.Since(g.unfocusedAt) > unfocusSuspendDelay {
 		ebiten.SetTPS(5)
 		g.suspended = true
 		for _, t := range g.tabs {
@@ -1721,7 +1731,7 @@ func (g *Game) drainCwd() {
 				}
 				g.gitInfoGen++
 				gen := g.gitInfoGen
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				ctx, cancel := context.WithTimeout(context.Background(), gitInfoTimeout)
 				g.gitInfoCancel = cancel
 				ch := g.gitInfoCh // persistent channel, never replaced
 				go func() {
@@ -1828,7 +1838,7 @@ func (g *Game) drainBell() {
 	}
 
 	// Debounce sound + dock notifications (500ms).
-	if now.Sub(g.lastBellSound) < 500*time.Millisecond {
+	if now.Sub(g.lastBellSound) < bellDebounce {
 		return
 	}
 	g.lastBellSound = now
@@ -2023,14 +2033,14 @@ func (g *Game) pollStatusOnOutput() {
 	g.lastPollSeq = seq
 	now := time.Now()
 
-	if now.Sub(g.lastCwdPoll) >= 2*time.Second {
+	if now.Sub(g.lastCwdPoll) >= cwdPollInterval {
 		g.lastCwdPoll = now
 		if g.focused != nil {
 			go g.focused.Term.QueryCWD()
 		}
 	}
 
-	if g.cfg.StatusBar.ShowProcess && now.Sub(g.lastFgPoll) >= 1*time.Second && g.activeTab < len(g.tabs) {
+	if g.cfg.StatusBar.ShowProcess && now.Sub(g.lastFgPoll) >= fgPollInterval && g.activeTab < len(g.tabs) {
 		g.lastFgPoll = now
 		for _, leaf := range g.tabs[g.activeTab].Layout.Leaves() {
 			// Skip ps polling for terminals with OSC 133 shell integration —
@@ -6428,7 +6438,7 @@ func (g *Game) startLLMSFetch(domain string) {
 	g.llmsFetchCh = ch
 
 	go func() {
-		client := &http.Client{Timeout: 10 * time.Second}
+		client := &http.Client{Timeout: llmsFetchTimeout}
 		type partial struct {
 			body string
 			ok   bool
