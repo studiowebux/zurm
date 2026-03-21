@@ -19,7 +19,13 @@ const (
 	MsgError          uint8 = 0x0A
 	MsgSessionList    uint8 = 0x0B
 	MsgRenameSession  uint8 = 0x0C
+	MsgKillSession    uint8 = 0x0D
 )
+
+// KillSessionRequest is the JSON payload for MsgKillSession.
+type KillSessionRequest struct {
+	ID string `json:"id"`
+}
 
 // Message is a framed protocol message.
 type Message struct {

@@ -58,6 +58,21 @@ func (srv *Server) handleConn(conn net.Conn) {
 		WriteMessage(conn, MsgSessionList, data) // #nosec G104 — fire-and-forget response; client may have disconnected
 		return
 
+	case MsgKillSession:
+		var req KillSessionRequest
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			WriteMessage(conn, MsgError, []byte("invalid kill request: "+err.Error())) // #nosec G104
+			return
+		}
+		s, ok := srv.manager.Get(req.ID)
+		if !ok {
+			WriteMessage(conn, MsgError, []byte("session not found: "+req.ID)) // #nosec G104
+			return
+		}
+		log.Printf("zserver: killing session %s (pid %d)", s.ID, s.pid())
+		s.Kill()
+		return
+
 	case MsgCreateSession:
 		var req CreateSessionRequest
 		if err := json.Unmarshal(msg.Payload, &req); err != nil {

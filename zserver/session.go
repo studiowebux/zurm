@@ -74,6 +74,10 @@ func (s *Session) Rename(name string) {
 	s.mu.Unlock()
 }
 
+// Kill sends SIGHUP to the shell process and closes the PTY.
+// The cleanup goroutine in Manager.Create will remove the session from the map.
+func (s *Session) Kill() { s.spty.close() }
+
 func (s *Session) write(p []byte) { s.spty.write(p) } // #nosec G104 — best-effort PTY write; process may already be dead
 
 func (s *Session) resize(cols, rows int) {

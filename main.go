@@ -7167,6 +7167,17 @@ func fetchSessions(addr string) ([]zserver.SessionInfo, error) {
 	return sessions, nil
 }
 
+// killSession connects to zurm-server and kills the session with the given ID.
+func killSession(addr, id string) error {
+	conn, err := net.Dial("unix", addr)
+	if err != nil {
+		return fmt.Errorf("cannot connect to zurm-server at %s: %w", addr, err)
+	}
+	defer conn.Close()
+	data, _ := json.Marshal(zserver.KillSessionRequest{ID: id})
+	return zserver.WriteMessage(conn, zserver.MsgKillSession, data)
+}
+
 // resolveSessionPrefix matches a short prefix (like Docker short IDs) against
 // active server sessions. Returns the full ID or an error if zero or multiple
 // sessions match.
@@ -7247,16 +7258,26 @@ func (g *Game) attachServerSession() {
 		} else if len(si.ID) > 8 {
 			displayName = si.ID[:8]
 		}
-		label := fmt.Sprintf("Attach: %s (pid %d, %dx%d, %s)", displayName, si.PID, si.Cols, si.Rows, si.Dir)
-		g.paletteEntries = append(g.paletteEntries, renderer.PaletteEntry{Name: label})
+		attachLabel := fmt.Sprintf("Attach: %s (pid %d, %dx%d, %s)", displayName, si.PID, si.Cols, si.Rows, si.Dir)
+		g.paletteEntries = append(g.paletteEntries, renderer.PaletteEntry{Name: attachLabel})
 		g.paletteActions = append(g.paletteActions, func() {
 			g.openServerTabForSession(si.ID)
+		})
+
+		killLabel := fmt.Sprintf("Kill: %s (pid %d)", displayName, si.PID)
+		g.paletteEntries = append(g.paletteEntries, renderer.PaletteEntry{Name: killLabel})
+		g.paletteActions = append(g.paletteActions, func() {
+			if err := killSession(addr, si.ID); err != nil {
+				g.flashStatus("Kill failed: " + err.Error())
+			} else {
+				g.flashStatus("Killed session " + displayName)
+			}
 		})
 	}
 
 	// Open palette pre-filtered to the injected entries.
 	g.paletteState.Open = true
-	g.paletteState.Query = "Attach: "
+	g.paletteState.Query = ""
 	g.screenDirty = true
 }
 
