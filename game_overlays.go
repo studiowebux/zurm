@@ -443,7 +443,13 @@ func (g *Game) buildPalette() {
 		g.copySelection,
 		g.handlePaste,
 		// Search
-		g.openSearch,
+		func() {
+			g.search.Open()
+			g.screenDirty = true
+			if g.focused != nil {
+				g.focused.Term.Buf.BumpRenderGen()
+			}
+		},
 		// File Explorer
 		g.openFileExplorer,
 		// Pins

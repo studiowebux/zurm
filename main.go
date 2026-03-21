@@ -189,11 +189,8 @@ type Game struct {
 	confirmState         renderer.ConfirmState
 	confirmPendingAction func()
 
-	// In-buffer search state (Cmd+F).
-	searchState      renderer.SearchState
-	lastSearchQuery  string                 // detects query change to avoid recomputing every frame
-	searchResultCh   chan searchResult       // receives async SearchAll results
-	searchGen        uint64                 // incremented each query; stale results discarded
+	// In-buffer search controller (Cmd+F).
+	search *SearchController
 
 	// Async clipboard — requestClipboard() spawns pbpaste in a goroutine,
 	// result arrives on clipboardCh. Each handler's Cmd+V triggers a request;
@@ -252,7 +249,6 @@ type Game struct {
 	renameRepeat     TextInputRepeat // tab rename
 	noteRepeat       TextInputRepeat // tab note
 	paneRenameRepeat TextInputRepeat // pane rename
-	searchRepeat     TextInputRepeat // in-buffer search (Cmd+F)
 	overlayRepeat    TextInputRepeat // help overlay search
 	mdSearchRepeat   TextInputRepeat // markdown viewer search
 
@@ -495,7 +491,7 @@ func main() {
 		screenshotDone:   make(chan string, 1),
 		tabHoverState:    renderer.TabHoverState{TabIdx: -1},
 		poller:           NewStatusPoller(),
-		searchResultCh:   make(chan searchResult, 1),
+		search:           NewSearchController(),
 		clipboardCh:      make(chan string, 1),
 	}
 
@@ -683,7 +679,11 @@ func (g *Game) Update() error {
 	g.drainForeground()
 	g.drainShellIntegration()
 	g.pollStatusOnOutput()
-	g.recomputeSearch()
+	if g.focused != nil {
+		if g.search.Recompute(g.focused.Term.Buf) {
+			g.screenDirty = true
+		}
+	}
 
 	for _, leaf := range g.layout.Leaves() {
 		leaf.Pane.Term.SendCPRResponse()
@@ -790,7 +790,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	hintMode := ebiten.IsKeyPressed(ebiten.KeyMeta) &&
 		!g.overlayState.Open && !g.paletteState.Open && !g.confirmState.Open &&
 		!g.mdViewerState.Open && !g.urlInputState.Open && !g.tabSwitcherState.Open &&
-		!g.tabSearchState.Open && !g.searchState.Open &&
+		!g.tabSearchState.Open && !g.search.State.Open &&
 		!g.menuState.Open && !g.fileExplorerState.Open
 	g.renderer.DrawAll(renderer.DrawState{
 		Screen:         screen,
@@ -801,7 +801,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		Menu:           &g.menuState,
 		Overlay:        &g.overlayState,
 		Confirm:        &g.confirmState,
-		Search:         &g.searchState,
+		Search:         &g.search.State,
 		StatusBar:      &g.statusBarState,
 		TabSwitcher:    &g.tabSwitcherState,
 		Palette:        &g.paletteState,
@@ -957,7 +957,7 @@ func (g *Game) handleInput() {
 	}
 
 	// When search is open, route input to search handling.
-	if g.searchState.Open {
+	if g.search.State.Open {
 		g.screenDirty = true
 		g.handleSearchInput()
 		return
@@ -1102,7 +1102,11 @@ func (g *Game) handleInput() {
 
 			case meta && key == ebiten.KeyF:
 				// Cmd+F — open in-buffer search.
-				g.openSearch()
+				g.search.Open()
+				g.screenDirty = true
+				if g.focused != nil {
+					g.focused.Term.Buf.BumpRenderGen()
+				}
 
 			case meta && !shift && key == ebiten.KeyB:
 				// Cmd+B — toggle command blocks.

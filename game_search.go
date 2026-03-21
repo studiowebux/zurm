@@ -15,71 +15,79 @@ type searchResult struct {
 	matches []terminal.SearchMatch
 }
 
-func (g *Game) openSearch() {
-	g.searchState.Open = true
-	g.screenDirty = true
-	if g.focused != nil {
-		g.focused.Term.Buf.BumpRenderGen()
+// SearchController owns in-buffer search state (Cmd+F) and logic.
+// Game holds a *SearchController and delegates all search operations to it.
+type SearchController struct {
+	State     renderer.SearchState
+	lastQuery string
+	resultCh  chan searchResult
+	gen       uint64
+	repeat    TextInputRepeat
+}
+
+// NewSearchController creates a ready-to-use search controller.
+func NewSearchController() *SearchController {
+	return &SearchController{
+		resultCh: make(chan searchResult, 1),
 	}
 }
 
-// closeSearch clears all search state including matches and query.
-// Called on Esc to fully exit search mode.
-func (g *Game) closeSearch() {
-	g.searchState = renderer.SearchState{}
-	g.lastSearchQuery = ""
-	g.screenDirty = true
-	if g.focused != nil {
-		g.focused.Term.Buf.BumpRenderGen()
-	}
+// Open activates the search overlay.
+func (sc *SearchController) Open() {
+	sc.State.Open = true
 }
 
-// recomputeSearch triggers an async SearchAll when the query changes and
-// drains completed results each frame. Called every Update.
-func (g *Game) recomputeSearch() {
-	if g.focused == nil {
-		return
+// Close deactivates search and clears all state including matches and query.
+func (sc *SearchController) Close() {
+	sc.State = renderer.SearchState{}
+	sc.lastQuery = ""
+}
+
+// Recompute triggers an async SearchAll when the query changes and drains
+// completed results. Returns true if the screen needs redrawing.
+func (sc *SearchController) Recompute(buf *terminal.ScreenBuffer) bool {
+	if buf == nil {
+		return false
 	}
+	dirty := false
 
 	// Drain completed search result (arrives from background goroutine).
 	select {
-	case res := <-g.searchResultCh:
-		if res.gen == g.searchGen {
-			g.searchState.Matches = res.matches
-			g.searchState.Current = 0
+	case res := <-sc.resultCh:
+		if res.gen == sc.gen {
+			sc.State.Matches = res.matches
+			sc.State.Current = 0
 			if len(res.matches) > 0 {
-				g.jumpToMatch(0)
+				sc.jumpToMatch(0, buf)
 			}
-			g.focused.Term.Buf.BumpRenderGen()
-			g.screenDirty = true
+			buf.BumpRenderGen()
+			dirty = true
 		}
 	default:
 	}
 
-	if !g.searchState.Open || g.searchState.Query == g.lastSearchQuery {
-		return
+	if !sc.State.Open || sc.State.Query == sc.lastQuery {
+		return dirty
 	}
-	g.lastSearchQuery = g.searchState.Query
+	sc.lastQuery = sc.State.Query
 
 	// Empty query — clear immediately, no goroutine needed.
-	if g.searchState.Query == "" {
-		g.searchState.Matches = nil
-		g.searchState.Current = 0
-		g.focused.Term.Buf.BumpRenderGen()
-		g.screenDirty = true
-		return
+	if sc.State.Query == "" {
+		sc.State.Matches = nil
+		sc.State.Current = 0
+		buf.BumpRenderGen()
+		return true
 	}
 
 	// Drain stale result before spawning to keep the channel available.
 	select {
-	case <-g.searchResultCh:
+	case <-sc.resultCh:
 	default:
 	}
-	g.searchGen++
-	gen := g.searchGen
-	query := g.searchState.Query
-	buf := g.focused.Term.Buf
-	ch := g.searchResultCh
+	sc.gen++
+	gen := sc.gen
+	query := sc.State.Query
+	ch := sc.resultCh
 	go func() {
 		buf.RLock()
 		matches := buf.SearchAll(query)
@@ -89,19 +97,20 @@ func (g *Game) recomputeSearch() {
 		default:
 		}
 	}()
+	return dirty
 }
 
-// jumpToMatch scrolls the focused pane so match i is centered on screen.
-func (g *Game) jumpToMatch(i int) {
-	if i < 0 || i >= len(g.searchState.Matches) {
+// jumpToMatch scrolls the buffer so match i is centered on screen.
+func (sc *SearchController) jumpToMatch(i int, buf *terminal.ScreenBuffer) {
+	if i < 0 || i >= len(sc.State.Matches) {
 		return
 	}
-	g.searchState.Current = i
-	m := g.searchState.Matches[i]
-	g.focused.Term.Buf.RLock()
-	sbLen := g.focused.Term.Buf.ScrollbackLen()
-	rows := g.focused.Term.Buf.Rows
-	g.focused.Term.Buf.RUnlock()
+	sc.State.Current = i
+	m := sc.State.Matches[i]
+	buf.RLock()
+	sbLen := buf.ScrollbackLen()
+	rows := buf.Rows
+	buf.RUnlock()
 
 	viewOffset := sbLen - m.AbsRow + rows/2
 	if viewOffset < 0 {
@@ -110,37 +119,43 @@ func (g *Game) jumpToMatch(i int) {
 	if viewOffset > sbLen {
 		viewOffset = sbLen
 	}
-	g.focused.Term.Buf.Lock()
-	g.focused.Term.Buf.SetViewOffset(viewOffset)
-	g.focused.Term.Buf.Unlock()
-	g.screenDirty = true
+	buf.Lock()
+	buf.SetViewOffset(viewOffset)
+	buf.Unlock()
 }
 
-// searchNext advances to the next match, wrapping around.
-func (g *Game) searchNext() {
-	if len(g.searchState.Matches) == 0 {
-		return
+// Next advances to the next match, wrapping around. Returns true if dirty.
+func (sc *SearchController) Next(buf *terminal.ScreenBuffer) bool {
+	if len(sc.State.Matches) == 0 {
+		return false
 	}
-	g.jumpToMatch((g.searchState.Current + 1) % len(g.searchState.Matches))
+	sc.jumpToMatch((sc.State.Current+1)%len(sc.State.Matches), buf)
+	return true
 }
 
-// searchPrev retreats to the previous match, wrapping around.
-func (g *Game) searchPrev() {
-	if len(g.searchState.Matches) == 0 {
-		return
+// Prev retreats to the previous match, wrapping around. Returns true if dirty.
+func (sc *SearchController) Prev(buf *terminal.ScreenBuffer) bool {
+	if len(sc.State.Matches) == 0 {
+		return false
 	}
-	n := len(g.searchState.Matches)
-	g.jumpToMatch((g.searchState.Current - 1 + n) % n)
+	n := len(sc.State.Matches)
+	sc.jumpToMatch((sc.State.Current-1+n)%n, buf)
+	return true
 }
 
 // handleSearchInput routes keyboard events while the search bar is open.
+// This stays on Game because it accesses prevKeys, clipboard, and TextInput.
 func (g *Game) handleSearchInput() {
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
 	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 
 	// inpututil.IsKeyJustPressed catches sub-frame taps that polling misses.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		g.closeSearch()
+		g.search.Close()
+		g.screenDirty = true
+		if g.focused != nil {
+			g.focused.Term.Buf.BumpRenderGen()
+		}
 		g.prevKeys[ebiten.KeyEscape] = true
 		return
 	}
@@ -150,16 +165,24 @@ func (g *Game) handleSearchInput() {
 		pressed := ebiten.IsKeyPressed(key)
 		wasPressed := g.prevKeys[key]
 		if pressed && !wasPressed {
+			var buf *terminal.ScreenBuffer
+			if g.focused != nil {
+				buf = g.focused.Term.Buf
+			}
 			if key == ebiten.KeyArrowDown {
-				g.searchNext()
+				if g.search.Next(buf) {
+					g.screenDirty = true
+				}
 			} else {
-				g.searchPrev()
+				if g.search.Prev(buf) {
+					g.screenDirty = true
+				}
 			}
 		}
 		g.prevKeys[key] = pressed
 	}
 
-	ti := &TextInput{Text: g.searchState.Query, CursorPos: g.searchState.CursorPos}
+	ti := &TextInput{Text: g.search.State.Query, CursorPos: g.search.State.CursorPos}
 
 	// Cmd+V — async clipboard paste into search query.
 	if meta && inpututil.IsKeyJustPressed(ebiten.KeyV) {
@@ -175,13 +198,13 @@ func (g *Game) handleSearchInput() {
 	default:
 	}
 
-	prevQuery := g.searchState.Query
-	prevCursor := g.searchState.CursorPos
-	ti.Update(&g.searchRepeat, meta, alt)
+	prevQuery := g.search.State.Query
+	prevCursor := g.search.State.CursorPos
+	ti.Update(&g.search.repeat, meta, alt)
 	if ti.Text != prevQuery || ti.CursorPos != prevCursor {
 		g.screenDirty = true
 	}
 
-	g.searchState.Query = ti.Text
-	g.searchState.CursorPos = ti.CursorPos
+	g.search.State.Query = ti.Text
+	g.search.State.CursorPos = ti.CursorPos
 }

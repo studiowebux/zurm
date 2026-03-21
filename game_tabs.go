@@ -124,7 +124,7 @@ func (g *Game) updateTabHover(mx, my int) {
 
 	// Dismiss conditions: single tab, overlays open, dragging, cursor outside tab bar.
 	if numTabs <= 1 || g.tabDragging || g.menuState.Open || g.overlayState.Open ||
-		g.confirmState.Open || g.searchState.Open || g.paletteState.Open ||
+		g.confirmState.Open || g.search.State.Open || g.paletteState.Open ||
 		g.fileExplorerState.Open || g.tabSwitcherState.Open || g.tabSearchState.Open {
 		g.dismissTabHover()
 		return
@@ -282,8 +282,11 @@ func (g *Game) switchTabNoHistory(i int) {
 	g.selDragging = false
 	g.statusBarState.ForegroundProc = ""
 	g.focused.Term.RefreshForeground()
-	if g.searchState.Open {
-		g.closeSearch()
+	if g.search.State.Open {
+		g.search.Close()
+		if g.focused != nil {
+			g.focused.Term.Buf.BumpRenderGen()
+		}
 	}
 	g.screenDirty = true
 }

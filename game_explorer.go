@@ -42,7 +42,11 @@ func (g *Game) openFileExplorer() {
 	g.closePalette()
 	g.overlayState = renderer.OverlayState{}
 	g.closeMenu()
-	g.closeSearch()
+	g.search.Close()
+	g.screenDirty = true
+	if g.focused != nil {
+		g.focused.Term.Buf.BumpRenderGen()
+	}
 
 	// Reset prevKeys for all explorer-relevant keys to the CURRENT pressed state.
 	// This prevents stale "was pressed" state from prior handlers causing missed

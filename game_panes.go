@@ -228,8 +228,12 @@ func (g *Game) setFocusNoHistory(p *pane.Pane) {
 	g.lastMouseRow = 0
 	g.statusBarState.ForegroundProc = ""
 	p.Term.RefreshForeground()
-	if g.searchState.Open {
-		g.closeSearch()
+	if g.search.State.Open {
+		g.search.Close()
+		g.screenDirty = true
+		if g.focused != nil {
+			g.focused.Term.Buf.BumpRenderGen()
+		}
 	}
 	// Force both old and new pane borders to redraw; the pane cache
 	// does not track focus state, so clearing it ensures correct borders.
