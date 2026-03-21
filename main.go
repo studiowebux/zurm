@@ -213,17 +213,8 @@ type Game struct {
 	palette *PaletteController
 
 
-	// File explorer sidebar state (Cmd+E).
-	fileExplorerState renderer.FileExplorerState
-
-	// Key repeat state for file explorer navigation (arrow keys).
-	explorerRepeatKey    ebiten.Key
-	explorerRepeatActive bool
-	explorerRepeatStart  time.Time
-	explorerRepeatLast   time.Time
-
-	// Key repeat state for file explorer text inputs (search / rename / new).
-	explorerInputRepeat TextInputRepeat
+	// File explorer controller (Cmd+E).
+	explorer *ExplorerController
 
 
 	// Key repeat state for text input overlays.
@@ -470,6 +461,7 @@ func main() {
 		screenshotDone:   make(chan string, 1),
 		tabHoverState:    renderer.TabHoverState{TabIdx: -1},
 		tabMgr:           NewTabManager(),
+		explorer:         NewExplorerController(),
 		poller:           NewStatusPoller(),
 		search:           NewSearchController(),
 		palette:          NewPaletteController(),
@@ -774,7 +766,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		!g.overlayState.Open && !g.palette.State.Open && !g.confirmState.Open &&
 		!g.mdViewerState.Open && !g.urlInputState.Open && !g.tabSwitcherState.Open &&
 		!g.tabSearchState.Open && !g.search.State.Open &&
-		!g.menuState.Open && !g.fileExplorerState.Open
+		!g.menuState.Open && !g.explorer.State.Open
 	g.renderer.DrawAll(renderer.DrawState{
 		Screen:         screen,
 		Tabs:           g.tabMgr.Tabs,
@@ -789,7 +781,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		TabSwitcher:    &g.tabSwitcherState,
 		Palette:        &g.palette.State,
 		PaletteEntries: g.palette.Entries,
-		FileExplorer:   &g.fileExplorerState,
+		FileExplorer:   &g.explorer.State,
 		TabSearch:      &g.tabSearchState,
 		Stats:          &g.statsState,
 		TabHover:       &g.tabHoverState,
@@ -877,7 +869,7 @@ func (g *Game) handleInput() {
 	}
 
 	// File explorer has second-highest priority so ESC always reaches it cleanly.
-	if g.fileExplorerState.Open {
+	if g.explorer.State.Open {
 		g.screenDirty = true
 		g.handleFileExplorerInput()
 		return
@@ -1127,7 +1119,7 @@ func (g *Game) handleInput() {
 
 			case meta && key == ebiten.KeyE:
 				// Cmd+E — toggle file explorer.
-				if g.fileExplorerState.Open {
+				if g.explorer.State.Open {
 					g.closeFileExplorer()
 				} else if g.cfg.FileExplorer.Enabled {
 					g.openFileExplorer()
@@ -2110,23 +2102,23 @@ func (g *Game) handleMouse() {
 	}
 
 	// File explorer: wheel scrolls content, left-click outside panel closes it.
-	if g.fileExplorerState.Open {
+	if g.explorer.State.Open {
 		panelW := g.renderer.FileExplorerPanelWidth()
 		var panelX int
 		physW := int(float64(g.winW) * g.dpi)
-		if g.fileExplorerState.Side == "right" {
+		if g.explorer.State.Side == "right" {
 			panelX = physW - panelW
 		}
 		panelRect := image.Rect(panelX, tabBarH, panelX+panelW, int(float64(g.winH)*g.dpi))
 
-		if scrollY != 0 && g.fileExplorerState.RowH > 0 {
-			step := int(-scrollY*float64(g.fileExplorerState.RowH)*3 + 0.5)
-			g.fileExplorerState.ScrollOffset += step
-			if g.fileExplorerState.ScrollOffset < 0 {
-				g.fileExplorerState.ScrollOffset = 0
+		if scrollY != 0 && g.explorer.State.RowH > 0 {
+			step := int(-scrollY*float64(g.explorer.State.RowH)*3 + 0.5)
+			g.explorer.State.ScrollOffset += step
+			if g.explorer.State.ScrollOffset < 0 {
+				g.explorer.State.ScrollOffset = 0
 			}
-			if g.fileExplorerState.ScrollOffset > g.fileExplorerState.MaxScroll {
-				g.fileExplorerState.ScrollOffset = g.fileExplorerState.MaxScroll
+			if g.explorer.State.ScrollOffset > g.explorer.State.MaxScroll {
+				g.explorer.State.ScrollOffset = g.explorer.State.MaxScroll
 			}
 		}
 		if leftPressed && !leftWas {

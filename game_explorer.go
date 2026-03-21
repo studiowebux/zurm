@@ -33,7 +33,7 @@ func (g *Game) openFileExplorer() {
 	if err != nil {
 		return
 	}
-	g.fileExplorerState = renderer.FileExplorerState{
+	g.explorer.State = renderer.FileExplorerState{
 		Open:    true,
 		Root:    root,
 		Entries: entries,
@@ -54,66 +54,25 @@ func (g *Game) openFileExplorer() {
 	for _, k := range explorerInputKeys {
 		g.prevKeys[k] = ebiten.IsKeyPressed(k)
 	}
-	g.explorerRepeatActive = false
+	g.explorer.repeatActive = false
 	g.screenDirty = true
 }
 
 // closeFileExplorer closes the file explorer sidebar.
 func (g *Game) closeFileExplorer() {
-	g.fileExplorerState = renderer.FileExplorerState{}
+	g.explorer.Close()
 	g.screenDirty = true
 }
 
 // reloadExplorerTree rebuilds the entry list from the current root.
-// It preserves: scroll position, cursor (by path), and the expanded state of
-// every directory that was open before the reload.
 func (g *Game) reloadExplorerTree() {
-	st := &g.fileExplorerState
-
-	// Snapshot state before rebuild.
-	var cursorPath string
-	if st.Cursor >= 0 && st.Cursor < len(st.Entries) {
-		cursorPath = st.Entries[st.Cursor].Path
-	}
-	expandedPaths := make(map[string]bool)
-	for _, e := range st.Entries {
-		if e.Expanded {
-			expandedPaths[e.Path] = true
-		}
-	}
-
-	entries, err := fileexplorer.BuildTree(st.Root)
-	if err != nil {
-		return
-	}
-
-	// Replay expansions. Iterating forward is correct: ExpandAt inserts
-	// children immediately after the parent, so the loop naturally visits
-	// them and can re-expand nested dirs too.
-	for i := 0; i < len(entries); i++ {
-		if entries[i].IsDir && expandedPaths[entries[i].Path] {
-			if expanded, err := fileexplorer.ExpandAt(entries, i); err == nil {
-				entries = expanded
-			}
-		}
-	}
-
-	// Restore cursor to the same path; fall back to 0 if gone.
-	cursor := 0
-	if cursorPath != "" {
-		if idx := fileexplorer.FindIdx(entries, cursorPath); idx >= 0 {
-			cursor = idx
-		}
-	}
-
-	st.Entries = entries
-	st.Cursor = cursor
+	g.explorer.ReloadTree()
 	g.screenDirty = true
 }
 
 // handleFileExplorerInput routes keyboard events while the file explorer is open.
 func (g *Game) handleFileExplorerInput() {
-	st := &g.fileExplorerState
+	st := &g.explorer.State
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
 	shift := ebiten.IsKeyPressed(ebiten.KeyShift)
 
@@ -175,12 +134,16 @@ func (g *Game) handleFileExplorerInput() {
 
 	// Arrow keys with key-repeat (same parameters as PTY key repeat).
 	now := time.Now()
-	if g.updateExplorerRepeat(ebiten.KeyArrowUp, now) {
-		g.explorerMoveUp()
+	upPressed := ebiten.IsKeyPressed(ebiten.KeyArrowUp)
+	downPressed := ebiten.IsKeyPressed(ebiten.KeyArrowDown)
+	if g.explorer.UpdateRepeat(ebiten.KeyArrowUp, upPressed, g.prevKeys[ebiten.KeyArrowUp], now) {
+		g.explorer.Move(-1)
 	}
-	if g.updateExplorerRepeat(ebiten.KeyArrowDown, now) {
-		g.explorerMoveDown()
+	if g.explorer.UpdateRepeat(ebiten.KeyArrowDown, downPressed, g.prevKeys[ebiten.KeyArrowDown], now) {
+		g.explorer.Move(1)
 	}
+	g.prevKeys[ebiten.KeyArrowUp] = upPressed
+	g.prevKeys[ebiten.KeyArrowDown] = downPressed
 
 	// Non-repeating action keys — edge-triggered only.
 	actionKeys := []ebiten.Key{
@@ -380,82 +343,10 @@ func (g *Game) handleFileExplorerInput() {
 	}
 }
 
-// updateExplorerRepeat handles a navigation key with repeat semantics.
-// Returns true if the action should fire this frame (initial press or repeat tick).
-func (g *Game) updateExplorerRepeat(key ebiten.Key, now time.Time) bool {
-	pressed := ebiten.IsKeyPressed(key)
-	was := g.prevKeys[key]
-	g.prevKeys[key] = pressed
-
-	if !pressed {
-		if g.explorerRepeatActive && g.explorerRepeatKey == key {
-			g.explorerRepeatActive = false
-		}
-		return false
-	}
-	if !was {
-		// Initial press — fire immediately and start repeat timer.
-		g.explorerRepeatKey = key
-		g.explorerRepeatActive = true
-		g.explorerRepeatStart = now
-		g.explorerRepeatLast = now
-		return true
-	}
-	// Held — fire only after delay + interval.
-	if g.explorerRepeatActive && g.explorerRepeatKey == key &&
-		now.Sub(g.explorerRepeatStart) >= keyRepeatDelay &&
-		now.Sub(g.explorerRepeatLast) >= keyRepeatInterval {
-		g.explorerRepeatLast = now
-		return true
-	}
-	return false
-}
-
-// explorerMoveUp moves the cursor up one entry.
-// explorerMove moves the file explorer cursor by delta (-1 = up, +1 = down).
-func (g *Game) explorerMove(delta int) {
-	st := &g.fileExplorerState
-
-	if len(st.SearchResults) > 0 {
-		next := st.Cursor + delta
-		if next >= 0 && next < len(st.SearchResults) {
-			st.Cursor = next
-		}
-	} else if st.SearchQuery != "" && len(st.FilteredIndices) > 0 {
-		currentFilterIdx := -1
-		for i, idx := range st.FilteredIndices {
-			if idx == st.Cursor {
-				currentFilterIdx = i
-				break
-			}
-		}
-		next := currentFilterIdx + delta
-		if currentFilterIdx >= 0 && next >= 0 && next < len(st.FilteredIndices) {
-			st.Cursor = st.FilteredIndices[next]
-		} else if currentFilterIdx == -1 {
-			// Not on a filtered item — jump to first (down) or last (up).
-			if delta > 0 {
-				st.Cursor = st.FilteredIndices[0]
-			} else {
-				st.Cursor = st.FilteredIndices[len(st.FilteredIndices)-1]
-			}
-		}
-	} else {
-		next := st.Cursor + delta
-		if next >= 0 && next < len(st.Entries) {
-			st.Cursor = next
-		}
-	}
-	g.explorerEnsureVisible()
-}
-
-func (g *Game) explorerMoveUp()   { g.explorerMove(-1) }
-func (g *Game) explorerMoveDown() { g.explorerMove(1) }
-
 // handleExplorerConfirmInput handles Enter/Y in the confirm dialog.
 // ESC is handled at the top of handleFileExplorerInput before this is called.
 func (g *Game) handleExplorerConfirmInput() {
-	st := &g.fileExplorerState
+	st := &g.explorer.State
 	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyY} {
 		pressed := ebiten.IsKeyPressed(key)
 		wasPressed := g.prevKeys[key]
@@ -472,7 +363,7 @@ func (g *Game) handleExplorerConfirmInput() {
 
 // handleExplorerSearchInput handles text input while in search mode.
 func (g *Game) handleExplorerSearchInput() {
-	st := &g.fileExplorerState
+	st := &g.explorer.State
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
 	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 	prevQuery := st.SearchQuery
@@ -494,7 +385,7 @@ func (g *Game) handleExplorerSearchInput() {
 		return
 	}
 
-	ti.Update(&g.explorerInputRepeat, meta, alt)
+	ti.Update(&g.explorer.inputRepeat, meta, alt)
 
 	st.SearchQuery = ti.Text
 	st.SearchCursorPos = ti.CursorPos
@@ -516,7 +407,7 @@ func (g *Game) handleExplorerSearchInput() {
 // handleExplorerInputMode handles text input for rename/new-file/new-dir modes.
 // ESC is handled at the top of handleFileExplorerInput before this is called.
 func (g *Game) handleExplorerInputMode() {
-	st := &g.fileExplorerState
+	st := &g.explorer.State
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
 	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 
@@ -533,7 +424,7 @@ func (g *Game) handleExplorerInputMode() {
 		return
 	}
 
-	ti.Update(&g.explorerInputRepeat, meta, alt)
+	ti.Update(&g.explorer.inputRepeat, meta, alt)
 
 	st.InputText = ti.Text
 	st.InputCursorPos = ti.CursorPos
@@ -541,7 +432,7 @@ func (g *Game) handleExplorerInputMode() {
 
 // executeExplorerInputMode commits the rename/new-file/new-dir operation.
 func (g *Game) executeExplorerInputMode() {
-	st := &g.fileExplorerState
+	st := &g.explorer.State
 	name := st.InputText
 	if name == "" {
 		st.Mode = renderer.ExplorerModeNormal
@@ -578,44 +469,9 @@ func (g *Game) executeExplorerInputMode() {
 	g.reloadExplorerTree()
 }
 
-// explorerEnsureVisible adjusts ScrollOffset so the cursor row is in view.
-func (g *Game) explorerEnsureVisible() {
-	st := &g.fileExplorerState
-	if st.RowH <= 0 {
-		return
-	}
-
-	// Calculate the visual row index based on filtering
-	visualIdx := st.Cursor
-	if len(st.SearchResults) > 0 {
-		// cursor is already the visual index for search results
-	} else if st.SearchQuery != "" && len(st.FilteredIndices) > 0 {
-		// Legacy filtering support
-		// Find the position of the cursor in the filtered list
-		for i, idx := range st.FilteredIndices {
-			if idx == st.Cursor {
-				visualIdx = i
-				break
-			}
-		}
-	}
-
-	rowTop := visualIdx * st.RowH
-	rowBot := rowTop + st.RowH
-	if rowTop < st.ScrollOffset {
-		st.ScrollOffset = rowTop
-	}
-	if rowBot > st.ScrollOffset+st.MaxScroll+st.RowH {
-		st.ScrollOffset = rowBot - st.MaxScroll - st.RowH
-		if st.ScrollOffset < 0 {
-			st.ScrollOffset = 0
-		}
-	}
-}
-
 // handleExplorerClick moves the cursor to the clicked row or toggles dir expand.
 func (g *Game) handleExplorerClick(mx, my int, panelRect image.Rectangle) {
-	st := &g.fileExplorerState
+	st := &g.explorer.State
 	if st.RowH <= 0 {
 		return
 	}

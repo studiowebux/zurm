@@ -119,7 +119,7 @@ func (g *Game) updateTabHover(mx, my int) {
 	// Dismiss conditions: single tab, overlays open, dragging, cursor outside tab bar.
 	if numTabs <= 1 || g.tabMgr.Dragging || g.menuState.Open || g.overlayState.Open ||
 		g.confirmState.Open || g.search.State.Open || g.palette.State.Open ||
-		g.fileExplorerState.Open || g.tabSwitcherState.Open || g.tabSearchState.Open {
+		g.explorer.State.Open || g.tabSwitcherState.Open || g.tabSearchState.Open {
 		g.dismissTabHover()
 		return
 	}
