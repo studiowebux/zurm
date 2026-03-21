@@ -73,6 +73,29 @@ var (
 	keyRepeatInterval = 50 * time.Millisecond
 )
 
+// allKeys is the set of keyboard keys polled each frame for terminal input.
+var allKeys = []ebiten.Key{
+	ebiten.KeyA, ebiten.KeyB, ebiten.KeyC, ebiten.KeyD, ebiten.KeyE,
+	ebiten.KeyF, ebiten.KeyG, ebiten.KeyH, ebiten.KeyI, ebiten.KeyJ,
+	ebiten.KeyK, ebiten.KeyL, ebiten.KeyM, ebiten.KeyN, ebiten.KeyO,
+	ebiten.KeyP, ebiten.KeyQ, ebiten.KeyR, ebiten.KeyS, ebiten.KeyT,
+	ebiten.KeyU, ebiten.KeyV, ebiten.KeyW, ebiten.KeyX, ebiten.KeyY,
+	ebiten.KeyZ,
+	ebiten.Key0, ebiten.Key1, ebiten.Key2, ebiten.Key3, ebiten.Key4,
+	ebiten.Key5, ebiten.Key6, ebiten.Key7, ebiten.Key8, ebiten.Key9,
+	ebiten.KeyEnter, ebiten.KeyNumpadEnter, ebiten.KeyBackspace,
+	ebiten.KeyTab, ebiten.KeyEscape, ebiten.KeySpace,
+	ebiten.KeyArrowUp, ebiten.KeyArrowDown, ebiten.KeyArrowLeft, ebiten.KeyArrowRight,
+	ebiten.KeyHome, ebiten.KeyEnd, ebiten.KeyPageUp, ebiten.KeyPageDown,
+	ebiten.KeyInsert, ebiten.KeyDelete,
+	ebiten.KeyF1, ebiten.KeyF2, ebiten.KeyF3, ebiten.KeyF4,
+	ebiten.KeyF5, ebiten.KeyF6, ebiten.KeyF7, ebiten.KeyF8,
+	ebiten.KeyF9, ebiten.KeyF10, ebiten.KeyF11, ebiten.KeyF12,
+	ebiten.KeyMinus, ebiten.KeyEqual, ebiten.KeyBracketLeft, ebiten.KeyBracketRight,
+	ebiten.KeyBackslash, ebiten.KeySemicolon, ebiten.KeyApostrophe,
+	ebiten.KeyComma, ebiten.KeyPeriod, ebiten.KeySlash, ebiten.KeyBackquote,
+}
+
 // defaultHistoryPath returns the shell history file path based on the configured shell.
 func defaultHistoryPath(shell string) string {
 	home, err := os.UserHomeDir()
@@ -967,28 +990,6 @@ func (g *Game) handleInput() {
 		g.screenDirty = true
 		g.handleMenuKeys()
 		return
-	}
-
-	allKeys := []ebiten.Key{
-		ebiten.KeyA, ebiten.KeyB, ebiten.KeyC, ebiten.KeyD, ebiten.KeyE,
-		ebiten.KeyF, ebiten.KeyG, ebiten.KeyH, ebiten.KeyI, ebiten.KeyJ,
-		ebiten.KeyK, ebiten.KeyL, ebiten.KeyM, ebiten.KeyN, ebiten.KeyO,
-		ebiten.KeyP, ebiten.KeyQ, ebiten.KeyR, ebiten.KeyS, ebiten.KeyT,
-		ebiten.KeyU, ebiten.KeyV, ebiten.KeyW, ebiten.KeyX, ebiten.KeyY,
-		ebiten.KeyZ,
-		ebiten.Key0, ebiten.Key1, ebiten.Key2, ebiten.Key3, ebiten.Key4,
-		ebiten.Key5, ebiten.Key6, ebiten.Key7, ebiten.Key8, ebiten.Key9,
-		ebiten.KeyEnter, ebiten.KeyNumpadEnter, ebiten.KeyBackspace,
-		ebiten.KeyTab, ebiten.KeyEscape, ebiten.KeySpace,
-		ebiten.KeyArrowUp, ebiten.KeyArrowDown, ebiten.KeyArrowLeft, ebiten.KeyArrowRight,
-		ebiten.KeyHome, ebiten.KeyEnd, ebiten.KeyPageUp, ebiten.KeyPageDown,
-		ebiten.KeyInsert, ebiten.KeyDelete,
-		ebiten.KeyF1, ebiten.KeyF2, ebiten.KeyF3, ebiten.KeyF4,
-		ebiten.KeyF5, ebiten.KeyF6, ebiten.KeyF7, ebiten.KeyF8,
-		ebiten.KeyF9, ebiten.KeyF10, ebiten.KeyF11, ebiten.KeyF12,
-		ebiten.KeyMinus, ebiten.KeyEqual, ebiten.KeyBracketLeft, ebiten.KeyBracketRight,
-		ebiten.KeyBackslash, ebiten.KeySemicolon, ebiten.KeyApostrophe,
-		ebiten.KeyComma, ebiten.KeyPeriod, ebiten.KeySlash, ebiten.KeyBackquote,
 	}
 
 	ctrl := ebiten.IsKeyPressed(ebiten.KeyControl)
@@ -4522,6 +4523,7 @@ func (g *Game) detachPaneToTab() {
 // mergePaneToTab moves the focused pane into the target tab as a horizontal split.
 // If the current tab becomes empty, it is removed.
 func (g *Game) mergePaneToTab(targetIdx int) {
+	g.dismissTabHover()
 	if targetIdx < 0 || targetIdx >= len(g.tabs) || targetIdx == g.activeTab {
 		return
 	}
@@ -6730,7 +6732,7 @@ func (g *Game) mdViewerUpdateSearch() {
 			lower := strings.ToLower(span.Text)
 			runes := []rune(lower)
 			for j := 0; j <= len(runes)-qLen; j++ {
-				if strings.ToLower(string(runes[j:j+qLen])) == q {
+				if string(runes[j:j+qLen]) == q {
 					g.mdViewerState.SearchMatches = append(g.mdViewerState.SearchMatches, renderer.SearchMatch{
 						LineIdx: lineIdx,
 						Col:     col + j,

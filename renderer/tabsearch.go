@@ -211,6 +211,9 @@ func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearc
 
 // shortenCwd truncates a CWD path to fit maxCols, showing the last path segments.
 func shortenCwd(path string, maxCols int) string {
+	if maxCols < 2 {
+		return "…"
+	}
 	if len([]rune(path)) <= maxCols {
 		return path
 	}
