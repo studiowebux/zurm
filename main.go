@@ -58,6 +58,13 @@ const (
 	llmsFetchTimeout    = 10 * time.Second       // HTTP client timeout for llms.txt fetch
 	statusMessageFrames = 60                     // status message display duration in frames (~1s at 60fps)
 	paneHeaderPadding   = 4                      // extra pixels added to cellH for pane header bars
+
+	// X10/SGR mouse protocol constants.
+	mouseScrollUp      = 64  // button code for scroll up
+	mouseScrollDown    = 65  // button code for scroll down
+	mouseX10CoordMax   = 222 // max column/row encodable in X10 mode
+	mouseX10Offset     = 32  // added to button/coordinate in X10 encoding
+	mouseX10Release    = 35  // X10 button-release code (3 + offset)
 )
 
 // keyRepeatDelay and keyRepeatInterval are set from config at startup.
@@ -3641,9 +3648,9 @@ func (g *Game) handleMouse() {
 				g.focused.Term.Buf.Unlock()
 			}
 		} else {
-			btn := 64
+			btn := mouseScrollUp
 			if wy < 0 {
-				btn = 65
+				btn = mouseScrollDown
 			}
 			g.sendMouseEvent(btn, col, row, true, sgrMouse)
 		}
@@ -3753,27 +3760,29 @@ func (g *Game) copySelection() {
 	}
 	cmd := exec.Command("pbcopy")
 	cmd.Stdin = strings.NewReader(result)
-	_ = cmd.Run()
+	if err := cmd.Run(); err != nil {
+		log.Printf("pbcopy (selection): %v", err)
+	}
 }
 
 // sendMouseEvent encodes and sends a single mouse event to the focused PTY.
 func (g *Game) sendMouseEvent(btn, col, row int, press bool, sgr bool) {
 	if sgr {
 		final := 'M'
-		if !press && btn < 64 {
+		if !press && btn < mouseScrollUp {
 			final = 'm'
 		}
 		seq := fmt.Sprintf("\x1B[<%d;%d;%d%c", btn, col, row, final)
 		g.focused.Term.SendBytes([]byte(seq))
 	} else {
-		if col > 222 || row > 222 {
+		if col > mouseX10CoordMax || row > mouseX10CoordMax {
 			return
 		}
-		b := byte(btn + 32) // #nosec G115 — btn is 0-4; col/row guarded ≤222 above; all fit byte
+		b := byte(btn + mouseX10Offset) // #nosec G115 — btn is 0-4; col/row guarded above; all fit byte
 		if !press {
-			b = 35
+			b = mouseX10Release
 		}
-		g.focused.Term.SendBytes([]byte{0x1B, '[', 'M', b, byte(col + 32), byte(row + 32)}) // #nosec G115
+		g.focused.Term.SendBytes([]byte{0x1B, '[', 'M', b, byte(col + mouseX10Offset), byte(row + mouseX10Offset)}) // #nosec G115
 	}
 }
 
@@ -3784,10 +3793,10 @@ func (g *Game) sendMouseMotion(btn, col, row int, sgr bool) {
 		seq := fmt.Sprintf("\x1B[<%d;%d;%dM", btn, col, row)
 		g.focused.Term.SendBytes([]byte(seq))
 	} else {
-		if col > 222 || row > 222 {
+		if col > mouseX10CoordMax || row > mouseX10CoordMax {
 			return
 		}
-		g.focused.Term.SendBytes([]byte{0x1B, '[', 'M', byte(btn), byte(col + 32), byte(row + 32)}) // #nosec G115 — col/row guarded ≤222 above
+		g.focused.Term.SendBytes([]byte{0x1B, '[', 'M', byte(btn), byte(col + mouseX10Offset), byte(row + mouseX10Offset)}) // #nosec G115 — col/row guarded above
 	}
 }
 

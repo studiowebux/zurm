@@ -26,29 +26,24 @@ type Clipboard struct {
 // LoadChildren reads the directory at root and returns sorted entries at the given depth.
 // Directories appear before files; each group is sorted alphabetically.
 func LoadChildren(root string, depth int) ([]Entry, error) {
-	f, err := os.Open(root) // #nosec G304 — file explorer opens user-selected filesystem paths by design
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	infos, err := f.Readdir(-1)
+	dirEntries, err := os.ReadDir(root)
 	if err != nil {
 		return nil, err
 	}
 
 	var dirs, files []Entry
-	for _, info := range infos {
-		if len(info.Name()) == 0 || info.Name()[0] == '.' {
+	for _, de := range dirEntries {
+		name := de.Name()
+		if len(name) == 0 || name[0] == '.' {
 			continue // skip hidden entries
 		}
 		e := Entry{
-			Path:  filepath.Join(root, info.Name()),
-			Name:  info.Name(),
-			IsDir: info.IsDir(),
+			Path:  filepath.Join(root, name),
+			Name:  name,
+			IsDir: de.IsDir(),
 			Depth: depth,
 		}
-		if info.IsDir() {
+		if de.IsDir() {
 			dirs = append(dirs, e)
 		} else {
 			files = append(files, e)
