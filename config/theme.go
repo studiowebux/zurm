@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -94,6 +95,7 @@ func ApplyTheme(cfg *Config, meta toml.MetaData) {
 	}
 	themeColors, err := LoadTheme(cfg.Theme.Name)
 	if err != nil {
+		log.Printf("config: load theme %q: %v", cfg.Theme.Name, err)
 		return
 	}
 	cfg.Colors = MergeColorsWithMeta(themeColors, cfg.Colors, meta)

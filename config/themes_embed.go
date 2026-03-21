@@ -2,6 +2,7 @@ package config
 
 import (
 	_ "embed"
+	"log"
 	"os"
 	"path/filepath"
 )
@@ -29,7 +30,9 @@ func EnsureBuiltinThemes() {
 	for name, data := range builtins {
 		path := filepath.Join(dir, name)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			_ = os.WriteFile(path, data, 0o600)
+			if wErr := os.WriteFile(path, data, 0o600); wErr != nil {
+				log.Printf("config: write builtin theme %s: %v", name, wErr)
+			}
 		}
 	}
 }

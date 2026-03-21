@@ -1519,6 +1519,19 @@ func (g *Game) unsuspendAndRedraw() {
 	}
 }
 
+// physSize returns the physical pixel dimensions of the window.
+func (g *Game) physSize() (int, int) {
+	return int(float64(g.winW) * g.dpi), int(float64(g.winH) * g.dpi)
+}
+
+// contentRect returns the pane content area: full window minus tab bar and status bar.
+func (g *Game) contentRect() image.Rectangle {
+	physW, physH := g.physSize()
+	tabBarH := g.renderer.TabBarHeight()
+	statusBarH := g.renderer.StatusBarHeight()
+	return image.Rect(0, tabBarH, physW, physH-statusBarH)
+}
+
 // handleDroppedFiles checks for files dropped onto the window and sends their
 // paths to the focused PTY as space-separated, shell-escaped strings.
 func (g *Game) handleDroppedFiles() {
@@ -1583,15 +1596,12 @@ func (g *Game) handleResize() {
 	}
 	g.winW = w
 	g.winH = h
-	physW := int(float64(w) * g.dpi)
-	physH := int(float64(h) * g.dpi)
+	physW, physH := g.physSize()
 	g.renderer.SetSize(physW, physH)
 	g.renderer.SetLayoutDirty()
 	g.recorder.Resize(physW, physH)
 
-	tabBarH := g.renderer.TabBarHeight()
-	statusBarH := g.renderer.StatusBarHeight()
-	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
+	paneRect := g.contentRect()
 
 	// Pause all PTY readers before resizing to avoid lock starvation.
 	// Without this, heavy PTY output (e.g. Claude Code streaming) continuously
@@ -2560,7 +2570,10 @@ func (g *Game) handleFileExplorerInput() {
 				st.ConfirmMsg = "Delete " + name + "?"
 				captured := path
 				st.ConfirmAction = func() {
-					_ = fileexplorer.DeletePath(captured)
+					if err := fileexplorer.DeletePath(captured); err != nil {
+						st.StatusMsg = "Error: " + err.Error()
+						st.StatusTimer = 60
+					}
 					g.reloadExplorerTree()
 				}
 				st.ConfirmOpen = true
@@ -2606,7 +2619,9 @@ func (g *Game) handleFileExplorerInput() {
 					// Reveal file in Finder with parent selected.
 					cmd = exec.Command("open", "-R", e.Path) // #nosec G204
 				}
-				_ = cmd.Start()
+				if err := cmd.Start(); err != nil {
+					log.Printf("explorer: open %s: %v", e.Path, err)
+				}
 			}
 
 		case key == ebiten.KeySlash && !meta:
@@ -3108,7 +3123,9 @@ func (g *Game) handleMouse() {
 			if copyText != "" {
 				cmd := exec.Command("pbcopy")
 				cmd.Stdin = strings.NewReader(copyText)
-				_ = cmd.Run()
+				if err := cmd.Run(); err != nil {
+					log.Printf("pbcopy (block): %v", err)
+				}
 				g.flashStatus(label)
 			}
 			g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
@@ -3783,11 +3800,7 @@ func (g *Game) sendMouseMotion(btn, col, row int, sgr bool) {
 //   - "cwd"  → inherit the active tab's current working directory
 //   - "home" → always open in $HOME
 func (g *Game) newTab() {
-	physW := int(float64(g.winW) * g.dpi)
-	physH := int(float64(g.winH) * g.dpi)
-	tabBarH := g.renderer.TabBarHeight()
-	statusBarH := g.renderer.StatusBarHeight()
-	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
+	paneRect := g.contentRect()
 
 	var dir string
 	switch g.cfg.Tabs.NewTabDir {
@@ -3815,11 +3828,7 @@ func (g *Game) newTab() {
 // If the server binary is not found or the connection fails, the pane falls back
 // to a local PTY — the tab is always created.
 func (g *Game) newServerTab() {
-	physW := int(float64(g.winW) * g.dpi)
-	physH := int(float64(g.winH) * g.dpi)
-	tabBarH := g.renderer.TabBarHeight()
-	statusBarH := g.renderer.StatusBarHeight()
-	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
+	paneRect := g.contentRect()
 
 	var dir string
 	switch g.cfg.Tabs.NewTabDir {
@@ -4404,16 +4413,11 @@ func (g *Game) handleTabSearchInput() {
 // --- Pane management ---
 
 // splitH splits the focused pane horizontally (Cmd+D).
-func (g *Game) splitH() {
+func (g *Game) performSplit(splitFn func(*pane.Pane, *config.Config, int, int, string) (*pane.LayoutNode, *pane.Pane, error)) {
 	g.zoomed = false
-	physW := int(float64(g.winW) * g.dpi)
-	physH := int(float64(g.winH) * g.dpi)
-	tabBarH := g.renderer.TabBarHeight()
-	statusBarH := g.renderer.StatusBarHeight()
-	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
-
+	paneRect := g.contentRect()
 	dir := sanitizeDirectory(g.statusBarState.Cwd)
-	newRoot, newPane, err := g.layout.SplitH(g.focused, g.cfg, g.font.CellW, g.font.CellH, dir)
+	newRoot, newPane, err := splitFn(g.focused, g.cfg, g.font.CellW, g.font.CellH, dir)
 	if err != nil {
 		return
 	}
@@ -4427,86 +4431,15 @@ func (g *Game) splitH() {
 	g.setFocus(newPane)
 }
 
-// splitV splits the focused pane vertically (Cmd+Shift+D).
-func (g *Game) splitV() {
-	g.zoomed = false
-	physW := int(float64(g.winW) * g.dpi)
-	physH := int(float64(g.winH) * g.dpi)
-	tabBarH := g.renderer.TabBarHeight()
-	statusBarH := g.renderer.StatusBarHeight()
-	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
-
-	dir := sanitizeDirectory(g.statusBarState.Cwd)
-	newRoot, newPane, err := g.layout.SplitV(g.focused, g.cfg, g.font.CellW, g.font.CellH, dir)
-	if err != nil {
-		return
-	}
-	g.updateLayout(newRoot)
-	setPaneHeaders(g.layout, g.font.CellH)
-	g.layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
-	for _, leaf := range g.layout.Leaves() {
-		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
-	}
-	g.renderer.SetLayoutDirty()
-	g.setFocus(newPane)
-}
-
-// splitHServer splits the focused pane horizontally with a server-backed pane (Cmd+Shift+H).
-func (g *Game) splitHServer() {
-	g.zoomed = false
-	physW := int(float64(g.winW) * g.dpi)
-	physH := int(float64(g.winH) * g.dpi)
-	tabBarH := g.renderer.TabBarHeight()
-	statusBarH := g.renderer.StatusBarHeight()
-	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
-
-	dir := sanitizeDirectory(g.statusBarState.Cwd)
-	newRoot, newPane, err := g.layout.SplitHServer(g.focused, g.cfg, g.font.CellW, g.font.CellH, dir)
-	if err != nil {
-		return
-	}
-	g.updateLayout(newRoot)
-	setPaneHeaders(g.layout, g.font.CellH)
-	g.layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
-	for _, leaf := range g.layout.Leaves() {
-		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
-	}
-	g.renderer.SetLayoutDirty()
-	g.setFocus(newPane)
-}
-
-// splitVServer splits the focused pane vertically with a server-backed pane (Cmd+Shift+V).
-func (g *Game) splitVServer() {
-	g.zoomed = false
-	physW := int(float64(g.winW) * g.dpi)
-	physH := int(float64(g.winH) * g.dpi)
-	tabBarH := g.renderer.TabBarHeight()
-	statusBarH := g.renderer.StatusBarHeight()
-	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
-
-	dir := sanitizeDirectory(g.statusBarState.Cwd)
-	newRoot, newPane, err := g.layout.SplitVServer(g.focused, g.cfg, g.font.CellW, g.font.CellH, dir)
-	if err != nil {
-		return
-	}
-	g.updateLayout(newRoot)
-	setPaneHeaders(g.layout, g.font.CellH)
-	g.layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
-	for _, leaf := range g.layout.Leaves() {
-		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
-	}
-	g.renderer.SetLayoutDirty()
-	g.setFocus(newPane)
-}
+func (g *Game) splitH()       { g.performSplit(g.layout.SplitH) }
+func (g *Game) splitV()       { g.performSplit(g.layout.SplitV) }
+func (g *Game) splitHServer() { g.performSplit(g.layout.SplitHServer) }
+func (g *Game) splitVServer() { g.performSplit(g.layout.SplitVServer) }
 
 // closePane removes a pane. Focuses the nearest remaining pane.
 func (g *Game) closePane(p *pane.Pane) {
 	g.zoomed = false
-	physW := int(float64(g.winW) * g.dpi)
-	physH := int(float64(g.winH) * g.dpi)
-	tabBarH := g.renderer.TabBarHeight()
-	statusBarH := g.renderer.StatusBarHeight()
-	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
+	paneRect := g.contentRect()
 
 	var nextFocus *pane.Pane
 	if p == g.focused {
@@ -5284,11 +5217,7 @@ func (g *Game) toggleZoom() {
 		g.unzoom()
 		return
 	}
-	physW := int(float64(g.winW) * g.dpi)
-	physH := int(float64(g.winH) * g.dpi)
-	tabBarH := g.renderer.TabBarHeight()
-	statusBarH := g.renderer.StatusBarHeight()
-	fullRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
+	fullRect := g.contentRect()
 
 	g.zoomed = true
 	g.screenDirty = true
@@ -5321,11 +5250,7 @@ func (g *Game) recomputeLayout() {
 // (e.g. iterating over all tabs during font size change or config reload).
 func (g *Game) recomputeLayoutNode(n *pane.LayoutNode) {
 	g.dismissTabHover()
-	physW := int(float64(g.winW) * g.dpi)
-	physH := int(float64(g.winH) * g.dpi)
-	tabBarH := g.renderer.TabBarHeight()
-	statusBarH := g.renderer.StatusBarHeight()
-	fullRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
+	fullRect := g.contentRect()
 
 	setPaneHeaders(n, g.font.CellH)
 	n.ComputeRects(fullRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
@@ -5358,11 +5283,7 @@ func (g *Game) unzoom() {
 	g.renderer.SetLayoutDirty()
 	g.renderer.ClearPaneCache()
 
-	physW := int(float64(g.winW) * g.dpi)
-	physH := int(float64(g.winH) * g.dpi)
-	tabBarH := g.renderer.TabBarHeight()
-	statusBarH := g.renderer.StatusBarHeight()
-	fullRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
+	fullRect := g.contentRect()
 
 	setPaneHeaders(g.layout, g.font.CellH)
 	g.layout.ComputeRects(fullRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
@@ -7131,11 +7052,7 @@ func (g *Game) sendViewerToPane() {
 	g.renderer.ClearPaneCache()
 
 	// Create a new tab with a pane running `less -R <tmpfile>`.
-	physW := int(float64(g.winW) * g.dpi)
-	physH := int(float64(g.winH) * g.dpi)
-	tabBarH := g.renderer.TabBarHeight()
-	statusBarH := g.renderer.StatusBarHeight()
-	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
+	paneRect := g.contentRect()
 
 	term := terminal.New(g.cfg)
 	term.StartCmd("less", []string{"-R", tmpFile.Name()}, "")
@@ -7310,11 +7227,7 @@ func (g *Game) attachServerSession() {
 // openServerTabForSession opens a new tab backed by an existing zurm-server
 // session identified by sessionID.
 func (g *Game) openServerTabForSession(sessionID string) {
-	physW := int(float64(g.winW) * g.dpi)
-	physH := int(float64(g.winH) * g.dpi)
-	tabBarH := g.renderer.TabBarHeight()
-	statusBarH := g.renderer.StatusBarHeight()
-	paneRect := image.Rect(0, tabBarH, physW, physH-statusBarH)
+	paneRect := g.contentRect()
 
 	p, err := pane.NewServer(g.cfg, paneRect, g.font.CellW, g.font.CellH, "", sessionID)
 	if err != nil {
