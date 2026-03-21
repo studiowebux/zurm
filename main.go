@@ -2703,17 +2703,16 @@ func (g *Game) updatePaletteRepeat(key ebiten.Key, now time.Time) bool {
 }
 
 // explorerMoveUp moves the cursor up one entry.
-func (g *Game) explorerMoveUp() {
+// explorerMove moves the file explorer cursor by delta (-1 = up, +1 = down).
+func (g *Game) explorerMove(delta int) {
 	st := &g.fileExplorerState
 
-	// If we have search results, navigate within them
 	if len(st.SearchResults) > 0 {
-		if st.Cursor > 0 {
-			st.Cursor--
+		next := st.Cursor + delta
+		if next >= 0 && next < len(st.SearchResults) {
+			st.Cursor = next
 		}
 	} else if st.SearchQuery != "" && len(st.FilteredIndices) > 0 {
-		// Legacy filtering support
-		// Find current position in filtered list
 		currentFilterIdx := -1
 		for i, idx := range st.FilteredIndices {
 			if idx == st.Cursor {
@@ -2721,58 +2720,28 @@ func (g *Game) explorerMoveUp() {
 				break
 			}
 		}
-
-		// Move to previous filtered item if possible
-		if currentFilterIdx > 0 {
-			st.Cursor = st.FilteredIndices[currentFilterIdx-1]
-		} else if currentFilterIdx == -1 && len(st.FilteredIndices) > 0 {
-			// Not on a filtered item, jump to last filtered item
-			st.Cursor = st.FilteredIndices[len(st.FilteredIndices)-1]
-		}
-	} else {
-		// Normal navigation
-		if st.Cursor > 0 {
-			st.Cursor--
-		}
-	}
-	g.explorerEnsureVisible()
-}
-
-// explorerMoveDown moves the cursor down one entry.
-func (g *Game) explorerMoveDown() {
-	st := &g.fileExplorerState
-
-	// If we have search results, navigate within them
-	if len(st.SearchResults) > 0 {
-		if st.Cursor < len(st.SearchResults)-1 {
-			st.Cursor++
-		}
-	} else if st.SearchQuery != "" && len(st.FilteredIndices) > 0 {
-		// Legacy filtering support
-		// Find current position in filtered list
-		currentFilterIdx := -1
-		for i, idx := range st.FilteredIndices {
-			if idx == st.Cursor {
-				currentFilterIdx = i
-				break
+		next := currentFilterIdx + delta
+		if currentFilterIdx >= 0 && next >= 0 && next < len(st.FilteredIndices) {
+			st.Cursor = st.FilteredIndices[next]
+		} else if currentFilterIdx == -1 {
+			// Not on a filtered item — jump to first (down) or last (up).
+			if delta > 0 {
+				st.Cursor = st.FilteredIndices[0]
+			} else {
+				st.Cursor = st.FilteredIndices[len(st.FilteredIndices)-1]
 			}
 		}
-
-		// Move to next filtered item if possible
-		if currentFilterIdx >= 0 && currentFilterIdx < len(st.FilteredIndices)-1 {
-			st.Cursor = st.FilteredIndices[currentFilterIdx+1]
-		} else if currentFilterIdx == -1 && len(st.FilteredIndices) > 0 {
-			// Not on a filtered item, jump to first filtered item
-			st.Cursor = st.FilteredIndices[0]
-		}
 	} else {
-		// Normal navigation
-		if st.Cursor < len(st.Entries)-1 {
-			st.Cursor++
+		next := st.Cursor + delta
+		if next >= 0 && next < len(st.Entries) {
+			st.Cursor = next
 		}
 	}
 	g.explorerEnsureVisible()
 }
+
+func (g *Game) explorerMoveUp()   { g.explorerMove(-1) }
+func (g *Game) explorerMoveDown() { g.explorerMove(1) }
 
 // handleExplorerConfirmInput handles Enter/Y in the confirm dialog.
 // ESC is handled at the top of handleFileExplorerInput before this is called.

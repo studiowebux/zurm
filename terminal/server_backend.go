@@ -20,41 +20,41 @@ type ServerBackend struct {
 	dead      chan struct{}
 }
 
-// NewServerBackend connects to zurm-server and creates a new session.
-func NewServerBackend(address, shell string, args []string, cols, rows int, env []string, dir string) (*ServerBackend, error) {
+// connectServer dials zurm-server, sends a request message, reads the SessionInfo
+// response, and returns a connected ServerBackend. Shared by New and Attach.
+func connectServer(address string, msgType byte, req any) (*ServerBackend, error) {
 	conn, err := net.Dial("unix", address)
 	if err != nil {
 		return nil, fmt.Errorf("connect to zurm-server at %s: %w", address, err)
 	}
 
-	req := zserver.CreateSessionRequest{Shell: shell, Args: args, Cols: cols, Rows: rows, Env: env, Dir: dir}
 	data, err := json.Marshal(req)
 	if err != nil {
 		conn.Close() // #nosec G104 — error cleanup
-		return nil, fmt.Errorf("marshal create request: %w", err)
+		return nil, fmt.Errorf("marshal request: %w", err)
 	}
-	if err := zserver.WriteMessage(conn, zserver.MsgCreateSession, data); err != nil {
-		conn.Close() // #nosec G104 — error cleanup; already returning an error
-		return nil, fmt.Errorf("send create: %w", err)
+	if err := zserver.WriteMessage(conn, msgType, data); err != nil {
+		conn.Close() // #nosec G104 — error cleanup
+		return nil, fmt.Errorf("send request: %w", err)
 	}
 
 	msg, err := zserver.ReadMessage(conn)
 	if err != nil {
-		conn.Close() // #nosec G104 — error cleanup; already returning an error
+		conn.Close() // #nosec G104 — error cleanup
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 	if msg.Type == zserver.MsgError {
-		conn.Close() // #nosec G104 — error cleanup; already returning an error
+		conn.Close() // #nosec G104 — error cleanup
 		return nil, fmt.Errorf("server: %s", msg.Payload)
 	}
 	if msg.Type != zserver.MsgSessionInfo {
-		conn.Close() // #nosec G104 — error cleanup; already returning an error
+		conn.Close() // #nosec G104 — error cleanup
 		return nil, fmt.Errorf("unexpected response type 0x%02x", msg.Type)
 	}
 
 	var info zserver.SessionInfo
 	if err := json.Unmarshal(msg.Payload, &info); err != nil {
-		conn.Close() // #nosec G104 — error cleanup; already returning an error
+		conn.Close() // #nosec G104 — error cleanup
 		return nil, fmt.Errorf("decode session info: %w", err)
 	}
 
@@ -66,50 +66,16 @@ func NewServerBackend(address, shell string, args []string, cols, rows int, env 
 	}, nil
 }
 
+// NewServerBackend connects to zurm-server and creates a new session.
+func NewServerBackend(address, shell string, args []string, cols, rows int, env []string, dir string) (*ServerBackend, error) {
+	return connectServer(address, zserver.MsgCreateSession,
+		zserver.CreateSessionRequest{Shell: shell, Args: args, Cols: cols, Rows: rows, Env: env, Dir: dir})
+}
+
 // AttachServerBackend connects to an existing zurm-server session by ID.
 func AttachServerBackend(address, sessionID string) (*ServerBackend, error) {
-	conn, err := net.Dial("unix", address)
-	if err != nil {
-		return nil, fmt.Errorf("connect to zurm-server at %s: %w", address, err)
-	}
-
-	req := zserver.AttachSessionRequest{ID: sessionID}
-	data, err := json.Marshal(req)
-	if err != nil {
-		conn.Close() // #nosec G104 — error cleanup
-		return nil, fmt.Errorf("marshal attach request: %w", err)
-	}
-	if err := zserver.WriteMessage(conn, zserver.MsgAttachSession, data); err != nil {
-		conn.Close() // #nosec G104 — error cleanup; already returning an error
-		return nil, fmt.Errorf("send attach: %w", err)
-	}
-
-	msg, err := zserver.ReadMessage(conn)
-	if err != nil {
-		conn.Close() // #nosec G104 — error cleanup; already returning an error
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-	if msg.Type == zserver.MsgError {
-		conn.Close() // #nosec G104 — error cleanup; already returning an error
-		return nil, fmt.Errorf("server: %s", msg.Payload)
-	}
-	if msg.Type != zserver.MsgSessionInfo {
-		conn.Close() // #nosec G104 — error cleanup; already returning an error
-		return nil, fmt.Errorf("unexpected response type 0x%02x", msg.Type)
-	}
-
-	var info zserver.SessionInfo
-	if err := json.Unmarshal(msg.Payload, &info); err != nil {
-		conn.Close() // #nosec G104 — error cleanup; already returning an error
-		return nil, fmt.Errorf("decode session info: %w", err)
-	}
-
-	return &ServerBackend{
-		conn:      conn,
-		sessionID: info.ID,
-		pid:       info.PID,
-		dead:      make(chan struct{}),
-	}, nil
+	return connectServer(address, zserver.MsgAttachSession,
+		zserver.AttachSessionRequest{ID: sessionID})
 }
 
 // SessionID returns the server-assigned session ID (for session save/restore).

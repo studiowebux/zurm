@@ -343,15 +343,15 @@ func buildHintBars(state *FileExplorerState, cw, panelW int) (line1, line2 strin
 
 	if state.SearchMode {
 		const searchHints = "Type to search  Enter accept  Esc cancel"
-		line1 = truncHintRunes(searchHints, maxChars)
+		line1 = truncateRunes(searchHints, maxChars)
 		if state.SearchQuery != "" {
 			found := len(state.SearchResults)
 			if found == 0 {
 				found = len(state.FilteredIndices)
 			}
-			line2 = truncHintRunes(fmt.Sprintf("Found %d matches", found), maxChars)
+			line2 = truncateRunes(fmt.Sprintf("Found %d matches", found), maxChars)
 		} else {
-			line2 = truncHintRunes("Start typing to filter files...", maxChars)
+			line2 = truncateRunes("Start typing to filter files...", maxChars)
 		}
 		return
 	}
@@ -359,7 +359,7 @@ func buildHintBars(state *FileExplorerState, cw, panelW int) (line1, line2 strin
 	const actions = "c cp  x cut  p pst  d del  r ren  n fil  N dir  o fin  / srch"
 	const nav = "Enter open  \u2191\u2193 nav  \u2190 col  \u2192 exp  ../ parent  Esc close"
 
-	line1 = truncHintRunes(actions, maxChars)
+	line1 = truncateRunes(actions, maxChars)
 
 	if state.Clipboard != nil {
 		name := filepath.Base(state.Clipboard.Path)
@@ -368,22 +368,15 @@ func buildHintBars(state *FileExplorerState, cw, panelW int) (line1, line2 strin
 			name = string([]rune(name)[:maxName-1]) + "\u2026"
 		}
 		raw := fmt.Sprintf("[%s: %s]  p pst  d del  r ren", state.Clipboard.Op, name)
-		line2 = truncHintRunes(raw, maxChars)
+		line2 = truncateRunes(raw, maxChars)
 	} else if state.SearchQuery != "" {
-		line2 = truncHintRunes(fmt.Sprintf("Filter: %s (/ to edit, Esc to clear)", state.SearchQuery), maxChars)
+		line2 = truncateRunes(fmt.Sprintf("Filter: %s (/ to edit, Esc to clear)", state.SearchQuery), maxChars)
 	} else {
-		line2 = truncHintRunes(nav, maxChars)
+		line2 = truncateRunes(nav, maxChars)
 	}
 	return
 }
 
-func truncHintRunes(s string, max int) string {
-	runes := []rune(s)
-	if len(runes) <= max {
-		return s
-	}
-	return string(runes[:max])
-}
 
 // filterFileEntries returns indices of entries that match the search query.
 // Matches are case-insensitive and check both file name and full path.

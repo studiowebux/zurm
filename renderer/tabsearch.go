@@ -194,7 +194,7 @@ func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearc
 			titleColor = ui.Accent
 		}
 		maxTitleCols := nameMaxW / cw
-		title := truncatePalette(entry.DisplayTitle, maxTitleCols)
+		title := truncateRunes(entry.DisplayTitle, maxTitleCols)
 		r.font.DrawString(r.modalLayer, title, nameX+badgeW, textY, titleColor)
 
 		// CWD right-aligned (dimmed, truncated).

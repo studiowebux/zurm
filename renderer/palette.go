@@ -167,7 +167,7 @@ func (r *Renderer) drawPalette(allEntries []PaletteEntry, state *PaletteState) {
 		nameX := panelX + palPad*r.font.CellW/2
 
 		// Truncate name if needed.
-		name := truncatePalette(entry.Name, nameMaxW/r.font.CellW)
+		name := truncateRunes(entry.Name, nameMaxW/r.font.CellW)
 		fg := ui.Fg
 		if idx == state.Cursor {
 			fg = ui.Accent
@@ -193,7 +193,8 @@ func drawRect(img *ebiten.Image, r image.Rectangle, c color.RGBA) {
 	img.SubImage(image.Rect(r.Max.X-1, r.Min.Y, r.Max.X, r.Max.Y)).(*ebiten.Image).Fill(c)
 }
 
-func truncatePalette(s string, maxCols int) string {
+// truncateRunes truncates s to maxCols runes, appending "…" if truncated.
+func truncateRunes(s string, maxCols int) string {
 	r := []rune(s)
 	if len(r) <= maxCols {
 		return s
