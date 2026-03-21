@@ -693,7 +693,9 @@ func (g *Game) Update() error {
 		leaf.Pane.Term.SendPendingResponses()
 		leaf.Pane.Term.SyncCursorStyle()
 	}
-	g.focused.Term.SendClipboardResponses()
+	if g.focused != nil {
+		g.focused.Term.SendClipboardResponses()
+	}
 
 	return nil
 }
@@ -757,6 +759,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.statusBarState.Zoomed = g.zoomed
 	g.statusBarState.PinMode = g.pinMode
 	g.statusBarState.BlocksEnabled = g.blocksEnabled
+	g.statusBarState.ServerSession = g.focused != nil && g.focused.ServerSessionID != ""
 	var srvCount int
 	for _, t := range g.tabs {
 		for _, leaf := range t.Layout.Leaves() {
@@ -838,7 +841,9 @@ func (g *Game) syncActive() {
 // updateLayout writes a new layout to both g.layout and the active tab.
 func (g *Game) updateLayout(n *pane.LayoutNode) {
 	g.layout = n
-	g.tabs[g.activeTab].Layout = n
+	if g.activeTab >= 0 && g.activeTab < len(g.tabs) {
+		g.tabs[g.activeTab].Layout = n
+	}
 }
 
 func (g *Game) handleInput() {
@@ -1682,6 +1687,9 @@ func (g *Game) handleResize() {
 }
 
 func (g *Game) drainTitle() {
+	if g.focused == nil || g.activeTab >= len(g.tabs) {
+		return
+	}
 	select {
 	case title := <-g.focused.Term.TitleCh:
 		clean := sanitizeTitle(title) // SEC-003
@@ -1740,6 +1748,9 @@ type llmsHistoryEntry struct {
 // drainCwd reads the latest CWD from the focused pane's OSC 7 channel.
 // When the CWD changes it kicks off an async git status lookup.
 func (g *Game) drainCwd() {
+	if g.focused == nil {
+		return
+	}
 	select {
 	case cwd := <-g.focused.Term.CwdCh:
 		if cwd != g.statusBarState.Cwd {
@@ -5078,13 +5089,19 @@ func (g *Game) startRenameTab(idx int) {
 }
 
 // commitRename applies the rename text and exits rename mode.
+// If the tab's focused pane is server-backed, propagate the name to the server
+// so it appears in the session list / attach palette.
 func (g *Game) commitRename() {
 	for _, t := range g.tabs {
 		if t.Renaming {
-			t.Title = sanitizeTitle(t.RenameText)
+			name := sanitizeTitle(t.RenameText)
+			t.Title = name
 			t.UserRenamed = true
 			t.Renaming = false
 			t.RenameText = ""
+			if t.Focused != nil && t.Focused.ServerSessionID != "" {
+				t.Focused.Term.RenameSession(name)
+			}
 			break
 		}
 	}
@@ -5473,7 +5490,9 @@ func (g *Game) adjustFontSize(delta float64) {
 		g.layout = t.Layout
 		g.recomputeLayout()
 	}
-	g.layout = g.tabs[g.activeTab].Layout
+	if g.activeTab < len(g.tabs) {
+		g.layout = g.tabs[g.activeTab].Layout
+	}
 	g.screenDirty = true
 	g.flashStatus(fmt.Sprintf("Font size: %.0fpt", newSize))
 }
@@ -5523,7 +5542,9 @@ func (g *Game) reloadConfig() {
 				g.recomputeLayout()
 			}
 			// Restore active tab layout pointer.
-			g.layout = g.tabs[g.activeTab].Layout
+			if g.activeTab < len(g.tabs) {
+				g.layout = g.tabs[g.activeTab].Layout
+			}
 		} else {
 			// Rollback font config to match the actual font renderer.
 			g.cfg.Font = oldFont
@@ -5547,7 +5568,9 @@ func (g *Game) reloadConfig() {
 		g.layout = t.Layout
 		g.recomputeLayout()
 	}
-	g.layout = g.tabs[g.activeTab].Layout
+	if g.activeTab < len(g.tabs) {
+		g.layout = g.tabs[g.activeTab].Layout
+	}
 
 	// Rebuild palette to pick up new theme files.
 	g.buildPalette()

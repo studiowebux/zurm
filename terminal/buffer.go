@@ -948,11 +948,11 @@ func (sb *ScreenBuffer) scrollbackPush(row []Cell, wrapped bool) {
 	if sb.maxScrollback <= 0 {
 		return
 	}
-	// Keep the user's view pinned when scrolled up.
-	if sb.ViewOffset > 0 {
-		sb.ViewOffset++
-	}
 	if sb.scrollCount < sb.maxScrollback {
+		// Scrollback is growing — bump ViewOffset to keep the user's view pinned.
+		if sb.ViewOffset > 0 {
+			sb.ViewOffset++
+		}
 		sb.scrollback[sb.scrollCount] = row
 		sb.scrollbackWrapped[sb.scrollCount] = wrapped
 		sb.scrollCount++

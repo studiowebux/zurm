@@ -36,6 +36,7 @@ type StatusBarState struct {
 	Listening         bool          // true while STT dictation is active
 	Version           string        // app version, e.g. "v0.4.1"
 	TabNote           string        // active tab's annotation, shown as a middle segment
+	ServerSession      bool           // true when the focused pane is backed by zurm-server
 	ServerSessionCount int           // number of open panes backed by zurm-server; 0 in local mode
 }
 
@@ -97,6 +98,9 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 	}
 	if state.ScrollOffset > 0 {
 		rightSegs = append(rightSegs, seg{fmt.Sprintf("↑ %d", state.ScrollOffset), accentFg})
+	}
+	if state.ServerSession {
+		rightSegs = append(rightSegs, seg{"[SERVER]", config.ParseHexColor(r.cfg.Colors.Cyan)})
 	}
 	if state.ServerSessionCount > 0 {
 		rightSegs = append(rightSegs, seg{fmt.Sprintf("S%d", state.ServerSessionCount), config.ParseHexColor(r.cfg.Colors.Cyan)})
