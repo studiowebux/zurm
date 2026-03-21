@@ -9,8 +9,6 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/studiowebux/zurm/fileexplorer"
-	"github.com/studiowebux/zurm/help"
-	"github.com/studiowebux/zurm/markdown"
 	"github.com/studiowebux/zurm/terminal"
 )
 
@@ -48,12 +46,12 @@ type PaletteState struct {
 // Stored on Game; passed by pointer to DrawAll.
 type MenuState struct {
 	Open     bool
-	Items    []help.MenuItem
+	Items    []OverlayMenuItem
 	Rect     image.Rectangle // bounding rect of main menu (physical px)
 	HoverIdx int             // -1 = none
 
 	SubOpen      bool
-	SubItems     []help.MenuItem
+	SubItems     []OverlayMenuItem
 	SubRect      image.Rectangle
 	SubHoverIdx  int
 	SubParentIdx int // index in Items that owns this submenu
@@ -69,6 +67,11 @@ type OverlayState struct {
 	ScrollOffset    int
 	MaxScroll       int // written by renderer each frame
 	RowH            int // written by renderer each frame
+
+	// AllBindings is the full keybinding list, set by Game at open time.
+	AllBindings []OverlayKeyBinding
+	// FilteredBindings is pre-filtered by SearchQuery, set by Game each frame.
+	FilteredBindings []OverlayKeyBinding
 }
 
 // --- Confirm dialog ---
@@ -110,7 +113,7 @@ type LinkHint struct {
 type MarkdownViewerState struct {
 	Open         bool
 	Title        string
-	Lines        []markdown.StyledLine
+	Lines        []MdStyledLine
 	ScrollOffset int
 	MaxScroll    int // written by renderer each frame
 	RowH         int // written by renderer each frame

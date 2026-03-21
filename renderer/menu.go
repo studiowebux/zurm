@@ -4,7 +4,6 @@ import (
 	"image"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/studiowebux/zurm/help"
 )
 
 
@@ -24,7 +23,7 @@ func (r *Renderer) menuWidth() int {
 
 // menuTotalH returns the total height of a menu panel for the given items,
 // including the 1px top and bottom border.
-func (r *Renderer) menuTotalH(items []help.MenuItem) int {
+func (r *Renderer) menuTotalH(items []OverlayMenuItem) int {
 	h := 2 // 1px top + 1px bottom border
 	for _, item := range items {
 		if item.Separator {
@@ -38,7 +37,7 @@ func (r *Renderer) menuTotalH(items []help.MenuItem) int {
 
 // BuildMenuRect computes and clamps the bounding rect for a menu of items
 // positioned at (x, y) within a physical screen of (physW, physH).
-func (r *Renderer) BuildMenuRect(items []help.MenuItem, x, y, physW, physH int) image.Rectangle {
+func (r *Renderer) BuildMenuRect(items []OverlayMenuItem, x, y, physW, physH int) image.Rectangle {
 	w := r.menuWidth()
 	h := r.menuTotalH(items)
 	x, y = clampMenuPos(x, y, w, h, physW, physH)
@@ -101,7 +100,7 @@ func (r *Renderer) SubItemAt(state *MenuState, px, py int) int {
 
 // itemAtInRect returns the index of the non-separator item at (px, py) within
 // menuRect, or -1.
-func (r *Renderer) itemAtInRect(items []help.MenuItem, menuRect image.Rectangle, px, py int) int {
+func (r *Renderer) itemAtInRect(items []OverlayMenuItem, menuRect image.Rectangle, px, py int) int {
 	if !image.Pt(px, py).In(menuRect) {
 		return -1
 	}
@@ -136,7 +135,7 @@ func (r *Renderer) drawContextMenu(state *MenuState) {
 
 // drawMenuPanel renders a single menu panel onto r.modalLayer.
 // showArrows controls whether parent-item "▶" arrows are drawn.
-func (r *Renderer) drawMenuPanel(items []help.MenuItem, rect image.Rectangle, hoverIdx int, showArrows bool) {
+func (r *Renderer) drawMenuPanel(items []OverlayMenuItem, rect image.Rectangle, hoverIdx int, showArrows bool) {
 	img := r.modalLayer
 	ui := r.ui
 	itemH := r.menuItemH()

@@ -38,7 +38,7 @@ func (g *Game) openTabContextMenu(px, py int) {
 		}
 	}
 
-	items := []help.MenuItem{
+	items := []renderer.OverlayMenuItem{
 		{Label: "Rename Tab", Action: func() { g.startRenameTab(clickedTab) }},
 		{Label: "Edit Tab Note", Shortcut: "Cmd+Shift+N", Action: func() { g.startNoteEdit(clickedTab) }},
 		{Label: "New Tab", Shortcut: "Cmd+T", Action: g.newTab},
@@ -60,12 +60,12 @@ func (g *Game) openTabContextMenu(px, py int) {
 // --- Context menu ---
 
 // buildContextMenu returns the default top-level menu items with action closures.
-func (g *Game) buildContextMenu() []help.MenuItem {
-	return []help.MenuItem{
+func (g *Game) buildContextMenu() []renderer.OverlayMenuItem {
+	return []renderer.OverlayMenuItem{
 		{Label: "Copy", Shortcut: "Cmd+C", Action: g.copySelection},
 		{Label: "Paste", Shortcut: "Cmd+V", Action: g.handlePaste},
 		{Separator: true},
-		{Label: "Panes", Children: []help.MenuItem{
+		{Label: "Panes", Children: []renderer.OverlayMenuItem{
 			{Label: "Split Horizontal", Shortcut: "Cmd+D", Action: g.splitH},
 			{Label: "Split Vertical", Shortcut: "Cmd+Shift+D", Action: g.splitV},
 			{Label: "Close Pane", Shortcut: "Cmd+W", Action: func() {
@@ -86,7 +86,7 @@ func (g *Game) buildContextMenu() []help.MenuItem {
 			{Label: "Focus Down", Shortcut: "Cmd+\u2193", Action: func() { g.focusDir(0, 1) }},
 		}},
 		{Separator: true},
-		{Label: "Scroll", Children: []help.MenuItem{
+		{Label: "Scroll", Children: []renderer.OverlayMenuItem{
 			{Label: "Scroll Up", Shortcut: "Shift+PgUp", Action: func() {
 				half := g.cfg.Window.Rows / 2
 				if half < 1 {
@@ -259,7 +259,7 @@ func (g *Game) menuExecute() {
 
 // nextNonSep returns the next non-separator item index in direction dir (+1/-1),
 // starting from cur (-1 means before the first element).
-func (g *Game) nextNonSep(items []help.MenuItem, cur, dir int) int {
+func (g *Game) nextNonSep(items []renderer.OverlayMenuItem, cur, dir int) int {
 	n := len(items)
 	if n == 0 {
 		return -1
@@ -283,12 +283,22 @@ func (g *Game) nextNonSep(items []help.MenuItem, cur, dir int) int {
 
 // --- Keybinding overlay ---
 
+// convertBindings converts help.KeyBinding slices to renderer.OverlayKeyBinding.
+func convertBindings(src []help.KeyBinding) []renderer.OverlayKeyBinding {
+	out := make([]renderer.OverlayKeyBinding, len(src))
+	for i, b := range src {
+		out[i] = renderer.OverlayKeyBinding{Category: b.Category, Key: b.Key, Description: b.Description}
+	}
+	return out
+}
+
 // toggleOverlay opens the overlay if closed, closes it if open.
 func (g *Game) toggleOverlay() {
 	if g.overlayState.Open {
 		g.overlayState = renderer.OverlayState{}
 	} else {
-		g.overlayState = renderer.OverlayState{Open: true}
+		all := convertBindings(help.AllBindings())
+		g.overlayState = renderer.OverlayState{Open: true, AllBindings: all, FilteredBindings: all}
 		g.closeMenu()
 		g.closePalette()
 	}
@@ -351,9 +361,14 @@ func (g *Game) handleOverlayInput() {
 	g.overlayState.SearchQuery = ti.Text
 	g.overlayState.SearchCursorPos = ti.CursorPos
 
-	// Reset scroll when search query changes so new results start at top.
+	// Reset scroll and re-filter when search query changes.
 	if g.overlayState.SearchQuery != prevQuery {
 		g.overlayState.ScrollOffset = 0
+		if g.overlayState.SearchQuery == "" {
+			g.overlayState.FilteredBindings = g.overlayState.AllBindings
+		} else {
+			g.overlayState.FilteredBindings = convertBindings(help.FilterBindings(g.overlayState.SearchQuery))
+		}
 	}
 
 	// Clamp scroll offset.

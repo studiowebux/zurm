@@ -65,7 +65,7 @@ func (g *Game) openMarkdownViewerWithContent(content, title string) {
 		wrapCols = 40
 	}
 
-	lines := markdown.Parse(content, wrapCols)
+	lines := convertMdLines(markdown.Parse(content, wrapCols))
 	g.mdViewerState = renderer.MarkdownViewerState{
 		Open:  true,
 		Title: title,
@@ -599,46 +599,59 @@ func (g *Game) clampMdViewerScroll() {
 	}
 }
 
+// convertMdLines converts markdown.StyledLine slices to renderer.MdStyledLine.
+func convertMdLines(src []markdown.StyledLine) []renderer.MdStyledLine {
+	out := make([]renderer.MdStyledLine, len(src))
+	for i, line := range src {
+		spans := make([]renderer.MdSpan, len(line.Spans))
+		for j, s := range line.Spans {
+			spans[j] = renderer.MdSpan{Text: s.Text, Style: renderer.MdSpanStyle(s.Style), Extra: s.Extra}
+		}
+		out[i] = renderer.MdStyledLine{Spans: spans, Indent: line.Indent}
+	}
+	return out
+}
+
 // spanToANSI converts a markdown span to ANSI-colored text for terminal display.
-func spanToANSI(span markdown.Span) string {
+func spanToANSI(span renderer.MdSpan) string {
 	const reset = "\033[0m"
 	switch span.Style {
-	case markdown.StyleHeading1:
+	case renderer.MdStyleHeading1:
 		return "\033[1;97m" + span.Text + reset // bold bright white
-	case markdown.StyleHeading2:
+	case renderer.MdStyleHeading2:
 		return "\033[1;36m" + span.Text + reset // bold cyan
-	case markdown.StyleHeading3:
+	case renderer.MdStyleHeading3:
 		return "\033[2;37m" + span.Text + reset // dim white
-	case markdown.StyleBold:
+	case renderer.MdStyleBold:
 		return "\033[1;97m" + span.Text + reset // bold bright white
-	case markdown.StyleItalic:
+	case renderer.MdStyleItalic:
 		return "\033[3;37m" + span.Text + reset // italic dim
-	case markdown.StyleInlineCode:
+	case renderer.MdStyleInlineCode:
 		return "\033[7;33m" + span.Text + reset // reverse yellow
-	case markdown.StyleCodeBlock:
+	case renderer.MdStyleCodeBlock:
 		return "\033[32m" + span.Text + reset // green
-	case markdown.StyleLink:
+	case renderer.MdStyleLink:
 		if span.Extra != "" {
 			return "\033[4;36m" + span.Text + reset + "\033[2m (" + span.Extra + ")" + reset
 		}
 		return "\033[4;36m" + span.Text + reset // underline cyan
-	case markdown.StyleBlockquote:
+	case renderer.MdStyleBlockquote:
 		return "\033[2;37m" + span.Text + reset // dim
-	case markdown.StyleListItem:
+	case renderer.MdStyleListItem:
 		return "\033[36m" + span.Text + reset // cyan marker
-	case markdown.StyleTableHeader:
+	case renderer.MdStyleTableHeader:
 		return "\033[1;97m" + span.Text + reset // bold white
-	case markdown.StyleTableCell:
+	case renderer.MdStyleTableCell:
 		return span.Text
-	case markdown.StyleTableSeparator, markdown.StyleHRule:
+	case renderer.MdStyleTableSeparator, renderer.MdStyleHRule:
 		return "\033[2m────────────────────────────────────────" + reset
-	case markdown.StyleStrikethrough:
+	case renderer.MdStyleStrikethrough:
 		return "\033[9;2m" + span.Text + reset // strikethrough dim
-	case markdown.StyleImage:
+	case renderer.MdStyleImage:
 		return "\033[35m" + span.Text + reset // magenta
-	case markdown.StyleCheckboxChecked:
+	case renderer.MdStyleCheckboxChecked:
 		return "\033[32m" + span.Text + reset // green
-	case markdown.StyleCheckboxUnchecked:
+	case renderer.MdStyleCheckboxUnchecked:
 		return "\033[2m" + span.Text + reset // dim
 	default:
 		return span.Text
@@ -670,7 +683,7 @@ func (g *Game) collectVisibleLinkHints() []renderer.LinkHint {
 		}
 
 		for spanIdx, span := range line.Spans {
-			if span.Style == markdown.StyleLink && span.Extra != "" {
+			if span.Style == renderer.MdStyleLink && span.Extra != "" {
 				hints = append(hints, renderer.LinkHint{
 					LineIdx: lineIdx,
 					SpanIdx: spanIdx,
@@ -799,7 +812,7 @@ func (g *Game) sendViewerToPane() {
 		// Heading underlines.
 		if len(line.Spans) > 0 {
 			switch line.Spans[0].Style {
-			case markdown.StyleHeading1:
+			case renderer.MdStyleHeading1:
 				textLen := 0
 				for _, s := range line.Spans {
 					textLen += len([]rune(s.Text))
@@ -808,7 +821,7 @@ func (g *Game) sendViewerToPane() {
 				buf.WriteString("\033[97m")
 				buf.WriteString(strings.Repeat("━", textLen))
 				buf.WriteString("\033[0m")
-			case markdown.StyleHeading2:
+			case renderer.MdStyleHeading2:
 				textLen := 0
 				for _, s := range line.Spans {
 					textLen += len([]rune(s.Text))

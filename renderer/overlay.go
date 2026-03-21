@@ -5,18 +5,16 @@ import (
 	"image"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/studiowebux/zurm/help"
-	"github.com/studiowebux/zurm/markdown"
 )
 
 // categoryGroup groups bindings under one category for rendering.
 type categoryGroup struct {
 	Category string
-	Bindings []help.KeyBinding
+	Bindings []OverlayKeyBinding
 }
 
 // groupByCategory converts a flat binding list into ordered categoryGroups.
-func groupByCategory(bindings []help.KeyBinding) []categoryGroup {
+func groupByCategory(bindings []OverlayKeyBinding) []categoryGroup {
 	var groups []categoryGroup
 	idx := make(map[string]int)
 	for _, b := range bindings {
@@ -24,15 +22,15 @@ func groupByCategory(bindings []help.KeyBinding) []categoryGroup {
 			groups[i].Bindings = append(groups[i].Bindings, b)
 		} else {
 			idx[b.Category] = len(groups)
-			groups = append(groups, categoryGroup{Category: b.Category, Bindings: []help.KeyBinding{b}})
+			groups = append(groups, categoryGroup{Category: b.Category, Bindings: []OverlayKeyBinding{b}})
 		}
 	}
 	return groups
 }
 
 // columnHeight returns the total pixel height for the given category names.
-func (r *Renderer) columnHeight(categories []string, rowH, headerH int) int {
-	all := groupByCategory(help.AllBindings())
+func (r *Renderer) columnHeight(allBindings []OverlayKeyBinding, categories []string, rowH, headerH int) int {
+	all := groupByCategory(allBindings)
 	catMap := make(map[string]int)
 	for _, g := range all {
 		catMap[g.Category] = len(g.Bindings)
@@ -63,8 +61,8 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 	leftCats := []string{"Navigation", "Panes", "File Explorer"}
 	rightCats := []string{"Pins", "Scroll", "Copy / Paste", "Search", "Blocks", "Recording", "Help", "App"}
 
-	leftH := r.columnHeight(leftCats, rowH, headerH)
-	rightH := r.columnHeight(rightCats, rowH, headerH)
+	leftH := r.columnHeight(state.AllBindings, leftCats, rowH, headerH)
+	rightH := r.columnHeight(state.AllBindings, rightCats, rowH, headerH)
 	totalContentH := leftH
 	if rightH > totalContentH {
 		totalContentH = rightH
@@ -87,8 +85,7 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 
 	// When searching, total content is the flat filtered list height.
 	if state.SearchQuery != "" {
-		filtered := help.FilterBindings(state.SearchQuery)
-		n := len(filtered)
+		n := len(state.FilteredBindings)
 		if n == 0 {
 			n = 1 // "No matches" line
 		}
@@ -162,13 +159,12 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 	drawY := contentTop - state.ScrollOffset
 
 	if state.SearchQuery != "" {
-		filtered := help.FilterBindings(state.SearchQuery)
-		r.drawFlatBindings(contentImg, filtered, panelX+panelPad, drawY, panelW-2*panelPad, keyColW, rowH)
+		r.drawFlatBindings(contentImg, state.FilteredBindings, panelX+panelPad, drawY, panelW-2*panelPad, keyColW, rowH)
 	} else {
 		leftX := panelX + panelPad
 		rightX := leftX + colW + colGap
-		r.drawColumnGroups(contentImg, leftCats, leftX, drawY, keyColW, descColW, rowH, headerH)
-		r.drawColumnGroups(contentImg, rightCats, rightX, drawY, keyColW, descColW, rowH, headerH)
+		r.drawColumnGroups(contentImg, state.AllBindings, leftCats, leftX, drawY, keyColW, descColW, rowH, headerH)
+		r.drawColumnGroups(contentImg, state.AllBindings, rightCats, rightX, drawY, keyColW, descColW, rowH, headerH)
 	}
 
 	// Scrollbar — only when content overflows.
@@ -187,9 +183,9 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 
 // drawColumnGroups renders category headers and binding rows for the given
 // categories into img (a clipped sub-image) starting at absolute coords (x, y).
-func (r *Renderer) drawColumnGroups(img *ebiten.Image, categories []string, x, y, keyW, descW, rowH, headerH int) {
-	all := groupByCategory(help.AllBindings())
-	catMap := make(map[string][]help.KeyBinding)
+func (r *Renderer) drawColumnGroups(img *ebiten.Image, allBindings []OverlayKeyBinding, categories []string, x, y, keyW, descW, rowH, headerH int) {
+	all := groupByCategory(allBindings)
+	catMap := make(map[string][]OverlayKeyBinding)
 	for _, g := range all {
 		catMap[g.Category] = g.Bindings
 	}
@@ -225,7 +221,7 @@ func (r *Renderer) drawColumnGroups(img *ebiten.Image, categories []string, x, y
 
 // drawFlatBindings renders a filtered flat list of bindings into img (a clipped
 // sub-image) starting at absolute coords (x, y).
-func (r *Renderer) drawFlatBindings(img *ebiten.Image, bindings []help.KeyBinding, x, y, width, keyW, rowH int) {
+func (r *Renderer) drawFlatBindings(img *ebiten.Image, bindings []OverlayKeyBinding, x, y, width, keyW, rowH int) {
 	if len(bindings) == 0 {
 		r.font.DrawString(img, "No matches", x, y+1, r.ui.Dim)
 		return
@@ -418,7 +414,7 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	lineIdx := 0
 	for _, line := range state.Lines {
 		// HRule or table separator: draw a horizontal line.
-		if len(line.Spans) == 1 && (line.Spans[0].Style == markdown.StyleHRule || line.Spans[0].Style == markdown.StyleTableSeparator) {
+		if len(line.Spans) == 1 && (line.Spans[0].Style == MdStyleHRule || line.Spans[0].Style == MdStyleTableSeparator) {
 			lineY := drawY + rowH/2
 			contentImg.SubImage(image.Rect(contentLeft, lineY, contentRight, lineY+1)).(*ebiten.Image).Fill(r.ui.Border)
 			drawY += rowH
@@ -429,7 +425,7 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 		x := contentLeft + line.Indent*cw
 
 		// Code block lines get full-width background + left border stripe.
-		isCodeLine := len(line.Spans) > 0 && line.Spans[0].Style == markdown.StyleCodeBlock
+		isCodeLine := len(line.Spans) > 0 && line.Spans[0].Style == MdStyleCodeBlock
 		if isCodeLine {
 			bgRect := image.Rect(contentLeft, drawY, contentRight, drawY+rowH)
 			contentImg.SubImage(bgRect).(*ebiten.Image).Fill(r.ui.HoverBg)
@@ -437,13 +433,13 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 		}
 
 		// Table row lines get a subtle bottom border.
-		isTableLine := len(line.Spans) > 0 && (line.Spans[0].Style == markdown.StyleTableHeader || line.Spans[0].Style == markdown.StyleTableCell)
+		isTableLine := len(line.Spans) > 0 && (line.Spans[0].Style == MdStyleTableHeader || line.Spans[0].Style == MdStyleTableCell)
 		if isTableLine {
 			contentImg.SubImage(image.Rect(contentLeft, drawY+rowH-1, contentRight, drawY+rowH)).(*ebiten.Image).Fill(tableBorder)
 		}
 
 		// Blockquote accent stripe.
-		if len(line.Spans) > 0 && line.Spans[0].Style == markdown.StyleBlockquote {
+		if len(line.Spans) > 0 && line.Spans[0].Style == MdStyleBlockquote {
 			stripeX := contentLeft
 			contentImg.SubImage(image.Rect(stripeX, drawY, stripeX+2, drawY+rowH)).(*ebiten.Image).Fill(r.ui.Accent)
 		}
@@ -471,39 +467,39 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 			textW := len([]rune(span.Text)) * cw
 
 			switch span.Style {
-			case markdown.StyleHeading1:
+			case MdStyleHeading1:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, h1Color)
-			case markdown.StyleHeading2:
+			case MdStyleHeading2:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, h2Color)
-			case markdown.StyleHeading3:
+			case MdStyleHeading3:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, h3Color)
-			case markdown.StyleBold:
+			case MdStyleBold:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, boldColor)
-			case markdown.StyleItalic:
+			case MdStyleItalic:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Dim)
-			case markdown.StyleInlineCode:
+			case MdStyleInlineCode:
 				bgRect := image.Rect(x-1, drawY, x+textW+1, drawY+rowH)
 				contentImg.SubImage(bgRect).(*ebiten.Image).Fill(r.ui.HoverBg)
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.KeyName)
-			case markdown.StyleCodeBlock:
+			case MdStyleCodeBlock:
 				r.font.DrawString(contentImg, span.Text, x+cw, drawY+1, codeFg)
-			case markdown.StyleLink:
+			case MdStyleLink:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
-			case markdown.StyleBlockquote:
+			case MdStyleBlockquote:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Dim)
-			case markdown.StyleListItem:
+			case MdStyleListItem:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
-			case markdown.StyleTableHeader:
+			case MdStyleTableHeader:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, boldColor)
-			case markdown.StyleTableCell:
+			case MdStyleTableCell:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Fg)
-			case markdown.StyleStrikethrough:
+			case MdStyleStrikethrough:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Dim)
-			case markdown.StyleImage:
+			case MdStyleImage:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
-			case markdown.StyleCheckboxChecked:
+			case MdStyleCheckboxChecked:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
-			case markdown.StyleCheckboxUnchecked:
+			case MdStyleCheckboxUnchecked:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Dim)
 			default:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Fg)
@@ -515,10 +511,10 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 		// Heading underlines after the line is drawn.
 		if len(line.Spans) > 0 {
 			switch line.Spans[0].Style {
-			case markdown.StyleHeading1:
+			case MdStyleHeading1:
 				ulY := drawY + rowH - 2
 				contentImg.SubImage(image.Rect(contentLeft, ulY, contentRight, ulY+1)).(*ebiten.Image).Fill(h1Color)
-			case markdown.StyleHeading2:
+			case MdStyleHeading2:
 				ulY := drawY + rowH - 2
 				contentImg.SubImage(image.Rect(contentLeft, ulY, x, ulY+1)).(*ebiten.Image).Fill(h2Color)
 			}
