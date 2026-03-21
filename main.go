@@ -2923,19 +2923,26 @@ func (g *Game) handleExplorerClick(mx, my int, panelRect image.Rectangle) {
 	}
 	visualIdx := relY / st.RowH
 
+	// When search results are visible, visual rows map to SearchResults.
+	if len(st.SearchResults) > 0 {
+		if visualIdx < 0 || visualIdx >= len(st.SearchResults) {
+			return
+		}
+		st.Cursor = visualIdx
+		g.screenDirty = true
+		return
+	}
+
 	// Convert visual index to actual index when filtering
 	actualIdx := visualIdx
 	if st.SearchQuery != "" && len(st.FilteredIndices) > 0 {
 		if visualIdx >= 0 && visualIdx < len(st.FilteredIndices) {
 			actualIdx = st.FilteredIndices[visualIdx]
 		} else {
-			return // Click was outside filtered results
-		}
-	} else {
-		// No filtering, check bounds on full list
-		if actualIdx < 0 || actualIdx >= len(st.Entries) {
 			return
 		}
+	} else if actualIdx < 0 || actualIdx >= len(st.Entries) {
+		return
 	}
 
 	if actualIdx == st.Cursor && st.Entries[actualIdx].IsDir {
@@ -2947,7 +2954,6 @@ func (g *Game) handleExplorerClick(mx, my int, panelRect image.Rectangle) {
 				st.Entries = entries
 			}
 		}
-		// After expand/collapse, clear search to show the new structure
 		if st.SearchQuery != "" {
 			st.SearchQuery = ""
 			st.FilteredIndices = nil
