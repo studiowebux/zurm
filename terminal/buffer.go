@@ -185,7 +185,7 @@ type ScreenBuffer struct {
 	maxBlocks   int // 0 = unlimited
 
 	// BlockDoneCh receives the output text of completed command blocks (OSC 133 D).
-	// The game loop drains this for TTS auto-speak. Buffered to avoid blocking the parser.
+	// The game loop drains this for completed block notifications. Buffered to avoid blocking the parser.
 	BlockDoneCh chan string
 }
 
@@ -1201,7 +1201,7 @@ func (sb *ScreenBuffer) applyBlockEvent(kind rune, exitCode int) {
 			}
 			sb.appendBlock(*sb.activeBlock)
 
-			// Send output text (rows between command and end) for TTS auto-speak.
+			// Send output text (rows between command and end) for block-done notifications.
 			// C fires after the shell echoes the newline (pre-execution), so AbsCmdRow
 			// is the first row where command output appears — use it directly.
 			if sb.activeBlock.AbsCmdRow >= 0 {

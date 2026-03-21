@@ -69,15 +69,6 @@ func AllCommands() []Command {
 		// Recording
 		{Name: "Take Screenshot", Shortcut: "Cmd+Shift+S"},
 		{Name: "Toggle Recording", Shortcut: "Cmd+Shift+."},
-		// Speech
-		{Name: "Read Selection Aloud", Shortcut: "Cmd+Shift+U"},
-		{Name: "Stop Speaking", Shortcut: ""},
-		{Name: "Pause Speaking", Shortcut: ""},
-		{Name: "Continue Speaking", Shortcut: ""},
-		{Name: "Select Voice", Shortcut: ""},
-		// Dictation
-		{Name: "Start Dictation", Shortcut: "Cmd+Shift+Space"},
-		{Name: "Stop Dictation", Shortcut: ""},
 		// Help
 		{Name: "Show Keybindings", Shortcut: "Cmd+/"},
 		{Name: "Command Palette", Shortcut: "Cmd+P"},

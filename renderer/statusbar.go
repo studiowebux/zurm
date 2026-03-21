@@ -33,7 +33,6 @@ type StatusBarState struct {
 	RecordingDuration time.Duration // elapsed recording time
 	RecordingBytes    int64         // output MP4 file size on disk
 	RecordingMode     string        // "MP4"
-	Listening         bool          // true while STT dictation is active
 	Version           string        // app version, e.g. "v0.4.1"
 	TabNote           string        // active tab's annotation, shown as a middle segment
 	ServerSession      bool           // true when the focused pane is backed by zurm-server
@@ -126,13 +125,6 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 			recText += " " + fmtFileSize(state.RecordingBytes)
 		}
 		rightSegs = append(rightSegs, seg{recText, config.ParseHexColor(r.cfg.Colors.Red)})
-	}
-	if state.Listening {
-		dot := "●"
-		if time.Now().Second()%2 == 0 {
-			dot = "○"
-		}
-		rightSegs = append(rightSegs, seg{dot + " MIC", config.ParseHexColor(r.cfg.Colors.Green)})
 	}
 	if state.Version != "" {
 		rightSegs = append(rightSegs, seg{state.Version, fg})

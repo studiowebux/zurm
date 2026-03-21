@@ -106,15 +106,6 @@ sound       = false        # play system beep sound
 duration_ms = 100          # flash duration in ms
 color       = "#F59E0B"   # hex color for the visual flash
 
-[voice]
-enabled    = false      # enable TTS commands
-voice_id   = ""         # AVSpeechSynthesisVoice identifier; empty = system default
-rate       = 0.5        # speech rate (0.0-1.0; 0.5 = normal)
-pitch      = 1.0        # pitch multiplier (0.5-2.0; 1.0 = normal)
-volume     = 1.0        # volume (0.0-1.0; 1.0 = full)
-locale     = "en-US"    # speech recognition language
-read_lines = 10         # lines to read on Cmd+Shift+U
-
 [vault]
 enabled          = false        # encrypted local command history + ghost suggestions
 ghost_text       = true         # show inline ghost suggestions while typing; false = keep history without suggestions

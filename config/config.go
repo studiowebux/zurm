@@ -125,15 +125,6 @@ fail_color    = "#F87171" # border color for non-zero exit codes
 bg_color      = ""        # optional hex background tint (empty = none)
 bg_alpha      = 0.0       # opacity of background tint (0.0–1.0)
 
-[voice]
-enabled  = false   # enable TTS commands (Read Selection Aloud, auto-speak output)
-voice_id = ""      # AVSpeechSynthesisVoice identifier; empty = system default
-rate     = 0.5     # speech rate (0.0–1.0; 0.5 = normal)
-pitch    = 1.0     # pitch multiplier (0.5–2.0; 1.0 = normal)
-volume   = 1.0     # volume (0.0–1.0; 1.0 = full)
-locale     = "en-US" # speech recognition language
-read_lines = 10     # lines to read on bell or Cmd+Shift+U (recent buffer)
-
 [vault]
 enabled          = false  # enable command vault (encrypted local command history + ghost suggestions)
 history_path     = ""     # path to zsh history file; empty = ~/.zsh_history
@@ -339,23 +330,6 @@ type BellConfig struct {
 	Color string `toml:"color"`
 }
 
-type VoiceConfig struct {
-	// Enabled controls whether TTS commands are available.
-	Enabled bool `toml:"enabled"`
-	// VoiceID is the AVSpeechSynthesisVoice identifier. Empty = system default.
-	VoiceID string `toml:"voice_id"`
-	// Rate is the speech rate (0.0–1.0; 0.5 = normal).
-	Rate float64 `toml:"rate"`
-	// Pitch is the pitch multiplier (0.5–2.0; 1.0 = normal).
-	Pitch float64 `toml:"pitch"`
-	// Volume is the speech volume (0.0–1.0; 1.0 = full).
-	Volume float64 `toml:"volume"`
-	// Locale is the SFSpeechRecognizer language (e.g. "en-US", "fr-CA").
-	Locale string `toml:"locale"`
-	// ReadLines is the number of recent buffer lines to read on bell or Cmd+Shift+U.
-	ReadLines int `toml:"read_lines"`
-}
-
 type VaultConfig struct {
 	// Enabled controls whether the command vault is active.
 	Enabled bool `toml:"enabled"`
@@ -438,7 +412,6 @@ type Config struct {
 	FileExplorer FileExplorerConfig `toml:"file_explorer"`
 	Blocks       BlocksConfig       `toml:"blocks"`
 	Bell         BellConfig         `toml:"bell"`
-	Voice        VoiceConfig        `toml:"voice"`
 	Theme        ThemeConfig        `toml:"theme"`
 	Vault        VaultConfig        `toml:"vault"`
 	Server       ServerConfig       `toml:"server"`
@@ -482,7 +455,6 @@ func Load() (*Config, error) {
 	}
 
 	resolveShell(&cfg)
-	clampVoice(&cfg)
 	ApplyTheme(&cfg, meta)
 	return &cfg, nil
 }
@@ -501,7 +473,6 @@ func Reload() (*Config, error) {
 		return nil, fmt.Errorf("config reload: %w", err)
 	}
 	resolveShell(&cfg)
-	clampVoice(&cfg)
 	return &cfg, nil
 }
 
@@ -522,30 +493,7 @@ func LoadWithMeta() (*Config, toml.MetaData, error) {
 		return &cfg, meta, fmt.Errorf("config: %w", err)
 	}
 	resolveShell(&cfg)
-	clampVoice(&cfg)
 	return &cfg, meta, nil
-}
-
-// clampVoice migrates old WPM values and clamps voice parameters to valid ranges.
-func clampVoice(cfg *Config) {
-	if cfg.Voice.Rate > 1.0 {
-		cfg.Voice.Rate = 0.5
-	}
-	if cfg.Voice.Rate < 0.0 {
-		cfg.Voice.Rate = 0.0
-	}
-	if cfg.Voice.Pitch < 0.5 {
-		cfg.Voice.Pitch = 0.5
-	}
-	if cfg.Voice.Pitch > 2.0 {
-		cfg.Voice.Pitch = 2.0
-	}
-	if cfg.Voice.Volume < 0.0 {
-		cfg.Voice.Volume = 0.0
-	}
-	if cfg.Voice.Volume > 1.0 {
-		cfg.Voice.Volume = 1.0
-	}
 }
 
 // resolveShell fills in Shell.Program from $SHELL if not set.
