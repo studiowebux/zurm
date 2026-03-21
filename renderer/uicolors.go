@@ -2,8 +2,6 @@ package renderer
 
 import (
 	"image/color"
-
-	"github.com/studiowebux/zurm/config"
 )
 
 const backdropAlpha = 0xb4 // 180 — translucency for modal overlays
@@ -81,28 +79,28 @@ type UIColors struct {
 //   - KeyName  = config.Colors.Yellow
 //   - Fg       = config.Colors.Foreground
 //   - Dim      = config.Colors.BrightBlack
-func deriveUIColors(cfg *config.Config) UIColors {
-	bg := config.ParseHexColor(cfg.Colors.Background)
+func deriveUIColors(cfg *RenderConfig) UIColors {
+	bg := parseHexColor(cfg.Colors.Background)
 	return UIColors{
 		PanelBg:     darken(darken(bg)),
 		HoverBg:     brighten(bg),
 		Backdrop:    color.RGBA{R: bg.R * 2 / 5, G: bg.G * 2 / 5, B: bg.B * 2 / 5, A: backdropAlpha},
-		Border:      config.ParseHexColor(cfg.Colors.Border),
-		Accent:      config.ParseHexColor(cfg.Colors.Cursor),
-		CatHdr:      config.ParseHexColor(cfg.Colors.BrightMagenta),
-		KeyName:     config.ParseHexColor(cfg.Colors.Yellow),
-		Fg:          config.ParseHexColor(cfg.Colors.Foreground),
-		Dim:         config.ParseHexColor(cfg.Colors.BrightBlack),
-		SearchMatch:   config.ParseHexColor(cfg.Colors.Yellow),
-		MdBold:        config.ParseHexColor(cfg.Colors.MdBold),
-		MdHeading:     config.ParseHexColor(cfg.Colors.MdHeading),
-		MdCode:        config.ParseHexColor(cfg.Colors.MdCode),
-		MdCodeBorder:  config.ParseHexColor(cfg.Colors.MdCodeBorder),
-		MdTableBorder: config.ParseHexColor(cfg.Colors.MdTableBorder),
-		MdMatchBg:     withAlpha(config.ParseHexColor(cfg.Colors.MdMatchBg), 0x60),
-		MdMatchCurBg:  withAlpha(config.ParseHexColor(cfg.Colors.MdMatchCurBg), 0x80),
-		MdBadgeBg:     config.ParseHexColor(cfg.Colors.MdBadgeBg),
-		MdBadgeFg:     config.ParseHexColor(cfg.Colors.MdBadgeFg),
+		Border:      parseHexColor(cfg.Colors.Border),
+		Accent:      parseHexColor(cfg.Colors.Cursor),
+		CatHdr:      parseHexColor(cfg.Colors.BrightMagenta),
+		KeyName:     parseHexColor(cfg.Colors.Yellow),
+		Fg:          parseHexColor(cfg.Colors.Foreground),
+		Dim:         parseHexColor(cfg.Colors.BrightBlack),
+		SearchMatch:   parseHexColor(cfg.Colors.Yellow),
+		MdBold:        parseHexColor(cfg.Colors.MdBold),
+		MdHeading:     parseHexColor(cfg.Colors.MdHeading),
+		MdCode:        parseHexColor(cfg.Colors.MdCode),
+		MdCodeBorder:  parseHexColor(cfg.Colors.MdCodeBorder),
+		MdTableBorder: parseHexColor(cfg.Colors.MdTableBorder),
+		MdMatchBg:     withAlpha(parseHexColor(cfg.Colors.MdMatchBg), 0x60),
+		MdMatchCurBg:  withAlpha(parseHexColor(cfg.Colors.MdMatchCurBg), 0x80),
+		MdBadgeBg:     parseHexColor(cfg.Colors.MdBadgeBg),
+		MdBadgeFg:     parseHexColor(cfg.Colors.MdBadgeFg),
 	}
 }
 
@@ -114,9 +112,9 @@ func withAlpha(c color.RGBA, a uint8) color.RGBA {
 // separatorColor returns the configured separator color, falling back to BrightBlack.
 func (r *Renderer) separatorColor() color.RGBA {
 	if r.cfg.Colors.Separator != "" {
-		return config.ParseHexColor(r.cfg.Colors.Separator)
+		return parseHexColor(r.cfg.Colors.Separator)
 	}
-	return config.ParseHexColor(r.cfg.Colors.BrightBlack)
+	return parseHexColor(r.cfg.Colors.BrightBlack)
 }
 
 // brighten returns a lighter version of c (scales RGB by 130%, clamped at 255).

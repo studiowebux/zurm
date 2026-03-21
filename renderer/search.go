@@ -6,7 +6,6 @@ import (
 	"image/color"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/studiowebux/zurm/config"
 	"github.com/studiowebux/zurm/terminal"
 )
 
@@ -31,13 +30,13 @@ func (r *Renderer) drawSearchBar(state *SearchState) {
 	barTop := physH - statusH - h
 	barRect := image.Rect(0, barTop, physW, barTop+h)
 
-	barBg := config.ParseHexColor(r.cfg.Colors.Background)
+	barBg := parseHexColor(r.cfg.Colors.Background)
 	r.offscreen.SubImage(barRect).(*ebiten.Image).Fill(barBg)
 	r.offscreen.SubImage(image.Rect(0, barTop, physW, barTop+1)).(*ebiten.Image).Fill(r.borderColor)
 
-	fg := config.ParseHexColor(r.cfg.Colors.Foreground)
-	dimFg := config.ParseHexColor(r.cfg.Colors.BrightBlack)
-	redFg := config.ParseHexColor(r.cfg.Colors.Red)
+	fg := parseHexColor(r.cfg.Colors.Foreground)
+	dimFg := parseHexColor(r.cfg.Colors.BrightBlack)
+	redFg := parseHexColor(r.cfg.Colors.Red)
 	textY := barTop + (h-r.font.CellH)/2
 	x := r.font.CellW
 

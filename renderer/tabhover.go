@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/studiowebux/zurm/config"
 	"github.com/studiowebux/zurm/tab"
 )
 
@@ -39,7 +38,7 @@ func (r *Renderer) RenderTabThumbnail(t *tab.Tab, contentRect image.Rectangle) *
 	}
 
 	tmp := ebiten.NewImage(w, h)
-	tmp.Fill(config.ParseHexColor(r.cfg.Colors.Background))
+	tmp.Fill(parseHexColor(r.cfg.Colors.Background))
 
 	offsetX := -contentRect.Min.X
 	offsetY := -contentRect.Min.Y

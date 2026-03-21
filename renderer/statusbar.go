@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/studiowebux/zurm/config"
 )
 
 // StatusBarState holds the data the renderer needs to draw one frame of the bar.
@@ -41,7 +40,7 @@ type StatusBarState struct {
 
 // StatusBarHeight returns the physical pixel height of the status bar,
 // or 0 when the bar is disabled.
-func StatusBarHeight(font *FontRenderer, cfg *config.Config) int {
+func StatusBarHeight(font *FontRenderer, cfg *RenderConfig) int {
 	if !cfg.StatusBar.Enabled {
 		return 0
 	}
@@ -60,7 +59,7 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 	physW, physH := r.screenSize()
 	barRect := image.Rect(0, physH-h, physW, physH)
 
-	barBg := darken(config.ParseHexColor(r.cfg.Colors.Background))
+	barBg := darken(parseHexColor(r.cfg.Colors.Background))
 	r.offscreen.SubImage(barRect).(*ebiten.Image).Fill(barBg)
 
 	// Separator line at the top of the bar.
@@ -70,8 +69,8 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 		r.offscreen.SubImage(image.Rect(0, physH-h, physW, physH-h+sepH)).(*ebiten.Image).Fill(sepColor)
 	}
 
-	fg := config.ParseHexColor(r.cfg.Colors.BrightBlack)
-	accentFg := config.ParseHexColor(r.cfg.Colors.Foreground)
+	fg := parseHexColor(r.cfg.Colors.BrightBlack)
+	accentFg := parseHexColor(r.cfg.Colors.Foreground)
 	padding := r.cfg.StatusBar.PaddingPx
 	textY := physH - h + sepH + padding + (h-sepH-padding-r.font.CellH)/2
 
@@ -98,10 +97,10 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 		rightSegs = append(rightSegs, seg{fmt.Sprintf("↑ %d", state.ScrollOffset), accentFg})
 	}
 	if state.ServerSession {
-		rightSegs = append(rightSegs, seg{"[SERVER]", config.ParseHexColor(r.cfg.Colors.Cyan)})
+		rightSegs = append(rightSegs, seg{"[SERVER]", parseHexColor(r.cfg.Colors.Cyan)})
 	}
 	if state.ServerSessionCount > 0 {
-		rightSegs = append(rightSegs, seg{fmt.Sprintf("S%d", state.ServerSessionCount), config.ParseHexColor(r.cfg.Colors.Cyan)})
+		rightSegs = append(rightSegs, seg{fmt.Sprintf("S%d", state.ServerSessionCount), parseHexColor(r.cfg.Colors.Cyan)})
 	}
 	if state.Zoomed {
 		rightSegs = append(rightSegs, seg{"[ZOOM]", accentFg})
@@ -123,7 +122,7 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 		if state.RecordingBytes > 0 {
 			recText += " " + fmtFileSize(state.RecordingBytes)
 		}
-		rightSegs = append(rightSegs, seg{recText, config.ParseHexColor(r.cfg.Colors.Red)})
+		rightSegs = append(rightSegs, seg{recText, parseHexColor(r.cfg.Colors.Red)})
 	}
 	if state.Version != "" {
 		rightSegs = append(rightSegs, seg{state.Version, fg})

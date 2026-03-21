@@ -633,7 +633,7 @@ func (g *Game) reloadConfig() {
 
 // reloadColors propagates the new color config to the renderer and all terminal panes.
 func (g *Game) reloadColors(cfg *config.Config) {
-	g.renderer.ReloadColors(cfg)
+	g.renderer.ReloadColors(buildRenderConfig(cfg))
 	for _, t := range g.tabMgr.Tabs {
 		for _, leaf := range t.Layout.Leaves() {
 			leaf.Pane.Term.UpdateColors(config.ParseHexColor(cfg.Colors.Foreground), config.ParseHexColor(cfg.Colors.Background), cfg.Palette())
@@ -727,7 +727,7 @@ func (g *Game) switchTheme(name string) {
 	g.cfg.Colors = themeColors
 
 	// Propagate.
-	g.renderer.ReloadColors(g.cfg)
+	g.renderer.ReloadColors(buildRenderConfig(g.cfg))
 	for _, t := range g.tabMgr.Tabs {
 		for _, leaf := range t.Layout.Leaves() {
 			leaf.Pane.Term.UpdateColors(config.ParseHexColor(g.cfg.Colors.Foreground), config.ParseHexColor(g.cfg.Colors.Background), g.cfg.Palette())

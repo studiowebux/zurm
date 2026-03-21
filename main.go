@@ -282,6 +282,72 @@ type Game struct {
 
 }
 
+// buildRenderConfig extracts the subset of config the renderer needs,
+// decoupling the renderer package from the config package.
+func buildRenderConfig(cfg *config.Config) *renderer.RenderConfig {
+	return &renderer.RenderConfig{
+		Colors: renderer.RenderColorConfig{
+			Background:    cfg.Colors.Background,
+			Foreground:    cfg.Colors.Foreground,
+			Cursor:        cfg.Colors.Cursor,
+			Border:        cfg.Colors.Border,
+			BrightBlack:   cfg.Colors.BrightBlack,
+			BrightMagenta: cfg.Colors.BrightMagenta,
+			Yellow:        cfg.Colors.Yellow,
+			Red:           cfg.Colors.Red,
+			Blue:          cfg.Colors.Blue,
+			Cyan:          cfg.Colors.Cyan,
+			Separator:     cfg.Colors.Separator,
+			MdBold:        cfg.Colors.MdBold,
+			MdHeading:     cfg.Colors.MdHeading,
+			MdCode:        cfg.Colors.MdCode,
+			MdCodeBorder:  cfg.Colors.MdCodeBorder,
+			MdTableBorder: cfg.Colors.MdTableBorder,
+			MdMatchBg:     cfg.Colors.MdMatchBg,
+			MdMatchCurBg:  cfg.Colors.MdMatchCurBg,
+			MdBadgeBg:     cfg.Colors.MdBadgeBg,
+			MdBadgeFg:     cfg.Colors.MdBadgeFg,
+		},
+		Window: renderer.RenderWindowConfig{
+			Padding: cfg.Window.Padding,
+		},
+		Tabs: renderer.RenderTabsConfig{
+			MaxWidthChars: cfg.Tabs.MaxWidthChars,
+		},
+		StatusBar: renderer.RenderStatusBarConfig{
+			Enabled:           cfg.StatusBar.Enabled,
+			PaddingPx:         cfg.StatusBar.PaddingPx,
+			SeparatorHeightPx: cfg.StatusBar.SeparatorHeightPx,
+			ShowClock:         cfg.StatusBar.ShowClock,
+			ShowGit:           cfg.StatusBar.ShowGit,
+			BranchPrefix:      cfg.StatusBar.BranchPrefix,
+			ShowCommit:        cfg.StatusBar.ShowCommit,
+			ShowDirty:         cfg.StatusBar.ShowDirty,
+			ShowAheadBehind:   cfg.StatusBar.ShowAheadBehind,
+			ShowProcess:       cfg.StatusBar.ShowProcess,
+			ShowCwd:           cfg.StatusBar.ShowCwd,
+			SegmentSeparator:  cfg.StatusBar.SegmentSeparator,
+		},
+		Blocks: renderer.RenderBlocksConfig{
+			Enabled:      cfg.Blocks.Enabled,
+			ShowDuration: cfg.Blocks.ShowDuration,
+			BorderWidth:  cfg.Blocks.BorderWidth,
+			BorderColor:  cfg.Blocks.BorderColor,
+			SuccessColor: cfg.Blocks.SuccessColor,
+			FailColor:    cfg.Blocks.FailColor,
+			ShowBorder:   cfg.Blocks.ShowBorder,
+			BgColor:      cfg.Blocks.BgColor,
+			BgAlpha:      cfg.Blocks.BgAlpha,
+		},
+		Bell: renderer.RenderBellConfig{
+			Color: cfg.Bell.Color,
+		},
+		Vault: renderer.RenderVaultConfig{
+			SuggestionColor: cfg.Vault.SuggestionColor,
+		},
+	}
+}
+
 func main() {
 	noRestore := flag.Bool("no-restore", false, "skip session restore on launch")
 	showVersion := flag.Bool("version", false, "print version and exit")
@@ -342,7 +408,7 @@ func main() {
 	}
 
 	// Compute tab bar and status bar heights first so they're included in the window size budget.
-	rend := renderer.NewRenderer(fontR, cfg)
+	rend := renderer.NewRenderer(fontR, buildRenderConfig(cfg))
 	tabBarH := rend.TabBarHeight()
 	statusBarH := rend.StatusBarHeight()
 

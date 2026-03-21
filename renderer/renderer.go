@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/studiowebux/zurm/config"
 	"github.com/studiowebux/zurm/pane"
 	"github.com/studiowebux/zurm/tab"
 	"github.com/studiowebux/zurm/terminal"
@@ -46,7 +45,7 @@ type blockSnap struct {
 // It reads from the ScreenBuffer (read lock) and paints each cell.
 type Renderer struct {
 	font    *FontRenderer
-	cfg     *config.Config
+	cfg     *RenderConfig
 	padding int
 
 	// offscreen is the render target for pane content, tab bar, and always-visible UI
@@ -223,14 +222,14 @@ type BlockHoverState struct {
 }
 
 // NewRenderer creates a Renderer. Call SetSize after window dimensions are known.
-func NewRenderer(font *FontRenderer, cfg *config.Config) *Renderer {
+func NewRenderer(font *FontRenderer, cfg *RenderConfig) *Renderer {
 	return &Renderer{
 		font:         font,
 		cfg:          cfg,
 		padding:      cfg.Window.Padding,
-		cursorColor:  config.ParseHexColor(cfg.Colors.Cursor),
-		borderColor:  config.ParseHexColor(cfg.Colors.Border),
-		bellColor:    config.ParseHexColor(cfg.Bell.Color),
+		cursorColor:  parseHexColor(cfg.Colors.Cursor),
+		borderColor:  parseHexColor(cfg.Colors.Border),
+		bellColor:    parseHexColor(cfg.Bell.Color),
 		paneCache:    make(map[*pane.Pane]*paneCacheEntry),
 		layoutDirty:  true, // force full clear on first frame
 		blockTintImg: ebiten.NewImage(1, 1),
@@ -241,11 +240,11 @@ func NewRenderer(font *FontRenderer, cfg *config.Config) *Renderer {
 // ReloadColors updates the renderer's color state from a new config.
 // Re-parses cursor/border colors, re-derives UI colors, clears pane cache,
 // and marks the layout dirty so everything redraws.
-func (r *Renderer) ReloadColors(cfg *config.Config) {
+func (r *Renderer) ReloadColors(cfg *RenderConfig) {
 	r.cfg = cfg
-	r.cursorColor = config.ParseHexColor(cfg.Colors.Cursor)
-	r.borderColor = config.ParseHexColor(cfg.Colors.Border)
-	r.bellColor = config.ParseHexColor(cfg.Bell.Color)
+	r.cursorColor = parseHexColor(cfg.Colors.Cursor)
+	r.borderColor = parseHexColor(cfg.Colors.Border)
+	r.bellColor = parseHexColor(cfg.Bell.Color)
 	r.ui = deriveUIColors(cfg)
 	if r.overlayBg != nil {
 		r.overlayBg.Deallocate()
@@ -573,7 +572,7 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int, hintMode bool) {
 
 	// Clear the entire tab bar area to prevent artifacts on reorder/close.
 	// Use darkened background (matching status bar) so divider lines are visible.
-	tabBarBg := darken(config.ParseHexColor(r.cfg.Colors.Background))
+	tabBarBg := darken(parseHexColor(r.cfg.Colors.Background))
 	tabBarRect := image.Rect(0, 0, physW, tabBarH)
 	r.offscreen.SubImage(tabBarRect).(*ebiten.Image).Fill(tabBarBg)
 
@@ -587,9 +586,9 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int, hintMode bool) {
 		tabW = maxTabW
 	}
 
-	activeBg := config.ParseHexColor(r.cfg.Colors.Background)
-	activeFg := config.ParseHexColor(r.cfg.Colors.Foreground)
-	inactiveFg := config.ParseHexColor(r.cfg.Colors.BrightBlack)
+	activeBg := parseHexColor(r.cfg.Colors.Background)
+	activeFg := parseHexColor(r.cfg.Colors.Foreground)
+	inactiveFg := parseHexColor(r.cfg.Colors.BrightBlack)
 	divider := r.separatorColor()
 
 	for i, t := range tabs {
@@ -684,7 +683,7 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int, hintMode bool) {
 			r.offscreen.SubImage(badgeRect).(*ebiten.Image).Fill(r.cursorColor)
 			textX := badgeX + (badgeW-r.font.CellW)/2
 			textY := badgeY + 2
-			r.font.DrawString(r.offscreen, badge, textX, textY, config.ParseHexColor(r.cfg.Colors.Background))
+			r.font.DrawString(r.offscreen, badge, textX, textY, parseHexColor(r.cfg.Colors.Background))
 		}
 	}
 }
@@ -703,7 +702,7 @@ func (r *Renderer) DrawPane(buf *terminal.ScreenBuffer, cur *terminal.Cursor,
 func (r *Renderer) drawPaneTo(dst *ebiten.Image, buf *terminal.ScreenBuffer, cur *terminal.Cursor,
 	rect image.Rectangle, isFocused bool, showBorder bool, search *SearchState, headerH int) {
 
-	bg := config.ParseHexColor(r.cfg.Colors.Background)
+	bg := parseHexColor(r.cfg.Colors.Background)
 
 	dst.SubImage(rect).(*ebiten.Image).Fill(bg)
 
@@ -735,9 +734,9 @@ func (r *Renderer) drawPaneTo(dst *ebiten.Image, buf *terminal.ScreenBuffer, cur
 		}
 	}
 
-	searchBgOther := config.ParseHexColor(r.cfg.Colors.Blue)
-	searchBgCurrent := config.ParseHexColor(r.cfg.Colors.Yellow)
-	searchFg := config.ParseHexColor(r.cfg.Colors.Background)
+	searchBgOther := parseHexColor(r.cfg.Colors.Blue)
+	searchBgCurrent := parseHexColor(r.cfg.Colors.Yellow)
+	searchFg := parseHexColor(r.cfg.Colors.Background)
 
 	for row := 0; row < rows; row++ {
 		var rowMatches []matchRange
@@ -837,14 +836,14 @@ func (r *Renderer) drawPaneTo(dst *ebiten.Image, buf *terminal.ScreenBuffer, cur
 					ch = ' '
 				}
 				r.font.DrawGlyph(dst, ch, x, y,
-					config.ParseHexColor(r.cfg.Colors.Background),
+					parseHexColor(r.cfg.Colors.Background),
 					r.cursorColor,
 					cell.Bold, cell.Underline, curW)
 			}
 
 			// Ghost text — vault suggestion rendered after cursor in dim color.
 			if r.VaultSuggestion != "" {
-				ghostColor := config.ParseHexColor(r.cfg.Vault.SuggestionColor)
+				ghostColor := parseHexColor(r.cfg.Vault.SuggestionColor)
 				ghostX := x + curW*cellW
 				for _, gr := range r.VaultSuggestion {
 					if ghostX >= rect.Max.X-pad {
