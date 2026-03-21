@@ -151,6 +151,11 @@ type Game struct {
 	searchResultCh   chan searchResult       // receives async SearchAll results
 	searchGen        uint64                 // incremented each query; stale results discarded
 
+	// Async clipboard — requestClipboard() spawns pbpaste in a goroutine,
+	// result arrives on clipboardCh. Each handler's Cmd+V triggers a request;
+	// the active handler consumes the result next frame via non-blocking receive.
+	clipboardCh chan string
+
 	// Status bar state.
 	statusBarState renderer.StatusBarState
 	gitInfoCh     chan gitInfoResult  // persistent channel — receives async git status results
@@ -453,6 +458,7 @@ func main() {
 		tabHoverState:    renderer.TabHoverState{TabIdx: -1},
 		gitInfoCh:        make(chan gitInfoResult, 1),
 		searchResultCh:   make(chan searchResult, 1),
+		clipboardCh:      make(chan string, 1),
 	}
 
 	game.renderer.BlocksEnabled = game.blocksEnabled
@@ -1039,7 +1045,6 @@ func (g *Game) handleInput() {
 
 			case meta && !shift && key == ebiten.KeyV:
 				g.handlePaste()
-				sentToPTY = true
 
 			case meta && key == ebiten.KeySlash:
 				// Cmd+/ — toggle keybindings help overlay.
@@ -1289,6 +1294,12 @@ func (g *Game) handleInput() {
 			g.repeatActive = false
 		}
 		g.prevKeys[key] = pressed
+	}
+
+	// Consume async clipboard result for terminal paste (from Cmd+V last frame).
+	// No overlays are consuming the clipboard at this point, so terminal owns it.
+	if g.drainTerminalPaste() {
+		sentToPTY = true
 	}
 
 	if sentToPTY {
@@ -2174,15 +2185,18 @@ func (g *Game) handleSearchInput() {
 
 	ti := &TextInput{Text: g.searchState.Query, CursorPos: g.searchState.CursorPos}
 
-	// Cmd+V — paste clipboard into search query.
+	// Cmd+V — async clipboard paste into search query.
 	if meta && inpututil.IsKeyJustPressed(ebiten.KeyV) {
-		if out, err := exec.Command("pbpaste").Output(); err == nil {
-			line := strings.TrimSpace(strings.SplitN(strings.ToValidUTF8(string(out), ""), "\n", 2)[0])
-			if line != "" {
-				ti.AddString(line)
-				g.screenDirty = true
-			}
+		g.requestClipboard()
+	}
+	select {
+	case clip := <-g.clipboardCh:
+		line := strings.TrimSpace(strings.SplitN(clip, "\n", 2)[0])
+		if line != "" {
+			ti.AddString(line)
+			g.screenDirty = true
 		}
+	default:
 	}
 
 	prevQuery := g.searchState.Query
@@ -2951,31 +2965,57 @@ func sanitizeTitle(s string) string {
 	return out
 }
 
-// handlePaste reads the system clipboard and sends it to the focused PTY.
-// Line endings are normalized to \r because the TTY expects carriage return
-// for newlines (keyboard Enter sends \r, the line discipline converts it).
+// requestClipboard spawns a background goroutine that reads the system clipboard
+// via pbpaste and sends the result to clipboardCh. Non-blocking: if a previous
+// request is still pending, the new result replaces it.
+func (g *Game) requestClipboard() {
+	go func() {
+		out, err := exec.Command("pbpaste").Output() // #nosec G204 — fixed binary
+		if err != nil || len(out) == 0 {
+			return
+		}
+		clip := strings.ToValidUTF8(string(out), "")
+		select {
+		case g.clipboardCh <- clip:
+		default:
+		}
+	}()
+}
+
+// handlePaste triggers an async clipboard read. The result is consumed by
+// drainTerminalPaste on the next frame. Called from Cmd+V in the main input
+// handler, context menu, and palette.
 func (g *Game) handlePaste() {
-	out, err := exec.Command("pbpaste").Output()
-	if err != nil || len(out) == 0 {
-		return
-	}
-	// NFC normalize — macOS clipboard uses NFD (decomposed accents).
-	// Terminal programs expect precomposed characters (NFC).
-	out = norm.NFC.Bytes(out)
+	g.requestClipboard()
+}
 
-	// Normalize line endings: \r\n → \r, then remaining \n → \r.
-	out = bytes.ReplaceAll(out, []byte("\r\n"), []byte("\r"))
-	out = bytes.ReplaceAll(out, []byte("\n"), []byte("\r"))
+// drainTerminalPaste consumes a pending clipboard result and sends it to the
+// focused PTY with NFC normalization, line-ending conversion, and bracketed
+// paste wrapping. Called every frame from the main input path when no overlay
+// is consuming the clipboard.
+func (g *Game) drainTerminalPaste() bool {
+	select {
+	case clip := <-g.clipboardCh:
+		if g.focused == nil {
+			return false
+		}
+		out := norm.NFC.Bytes([]byte(clip))
+		out = bytes.ReplaceAll(out, []byte("\r\n"), []byte("\r"))
+		out = bytes.ReplaceAll(out, []byte("\n"), []byte("\r"))
 
-	g.focused.Term.Buf.RLock()
-	bracketed := g.focused.Term.Buf.BracketedPaste
-	g.focused.Term.Buf.RUnlock()
-	if bracketed {
-		g.focused.Term.SendBytes([]byte("\x1B[200~"))
-		g.focused.Term.SendBytes(out)
-		g.focused.Term.SendBytes([]byte("\x1B[201~"))
-	} else {
-		g.focused.Term.SendBytes(out)
+		g.focused.Term.Buf.RLock()
+		bracketed := g.focused.Term.Buf.BracketedPaste
+		g.focused.Term.Buf.RUnlock()
+		if bracketed {
+			g.focused.Term.SendBytes([]byte("\x1B[200~"))
+			g.focused.Term.SendBytes(out)
+			g.focused.Term.SendBytes([]byte("\x1B[201~"))
+		} else {
+			g.focused.Term.SendBytes(out)
+		}
+		return true
+	default:
+		return false
 	}
 }
 
@@ -5121,11 +5161,14 @@ func (g *Game) handleNoteInput() {
 	g.prevKeys[ebiten.KeyMeta] = meta
 	g.prevKeys[ebiten.KeyAlt] = alt
 
-	// Cmd+V — paste.
+	// Cmd+V — async clipboard paste.
 	if meta && inpututil.IsKeyJustPressed(ebiten.KeyV) {
-		if out, err := exec.Command("pbpaste").Output(); err == nil {
-			ti.AddString(strings.ToValidUTF8(string(out), ""))
-		}
+		g.requestClipboard()
+	}
+	select {
+	case clip := <-g.clipboardCh:
+		ti.AddString(clip)
+	default:
 	}
 
 	ti.Update(&g.noteRepeat, meta, alt)
@@ -5166,11 +5209,14 @@ func (g *Game) handleRenameInput() {
 	g.prevKeys[ebiten.KeyMeta] = meta
 	g.prevKeys[ebiten.KeyAlt] = alt
 
-	// Cmd+V — paste.
+	// Cmd+V — async clipboard paste.
 	if meta && inpututil.IsKeyJustPressed(ebiten.KeyV) {
-		if out, err := exec.Command("pbpaste").Output(); err == nil {
-			ti.AddString(strings.ToValidUTF8(string(out), ""))
-		}
+		g.requestClipboard()
+	}
+	select {
+	case clip := <-g.clipboardCh:
+		ti.AddString(clip)
+	default:
 	}
 
 	ti.Update(&g.renameRepeat, meta, alt)
@@ -5200,11 +5246,14 @@ func (g *Game) handlePaneRenameInput() {
 		return
 	}
 
-	// Cmd+V — paste
+	// Cmd+V — async clipboard paste.
 	if meta && inpututil.IsKeyJustPressed(ebiten.KeyV) {
-		if out, err := exec.Command("pbpaste").Output(); err == nil {
-			ti.AddString(strings.ToValidUTF8(string(out), ""))
-		}
+		g.requestClipboard()
+	}
+	select {
+	case clip := <-g.clipboardCh:
+		ti.AddString(clip)
+	default:
 	}
 
 	ti.Update(&g.paneRenameRepeat, meta, alt)
@@ -6334,12 +6383,17 @@ func (g *Game) handleURLInputInput() {
 		g.prevKeys[key] = pressed
 	}
 
-	// Cmd+V — paste (first line only).
+	// Cmd+V — async clipboard paste (first line only).
 	if meta && inpututil.IsKeyJustPressed(ebiten.KeyV) {
-		if out, err := exec.Command("pbpaste").Output(); err == nil && len(out) > 0 {
-			line := strings.TrimSpace(strings.SplitN(strings.ToValidUTF8(string(out), ""), "\n", 2)[0])
+		g.requestClipboard()
+	}
+	select {
+	case clip := <-g.clipboardCh:
+		line := strings.TrimSpace(strings.SplitN(clip, "\n", 2)[0])
+		if line != "" {
 			ti.AddString(line)
 		}
+	default:
 	}
 
 	ti.Update(&g.urlRepeat, meta, alt)
