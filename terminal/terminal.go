@@ -9,8 +9,24 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/studiowebux/zurm/config"
+	"image/color"
 )
+
+// TerminalConfig holds the settings needed to construct and run a Terminal.
+// Passed at creation time instead of the full application config.
+type TerminalConfig struct {
+	Rows           int
+	Cols           int
+	ScrollbackLines int
+	MaxBlocks      int
+	FG             color.RGBA
+	BG             color.RGBA
+	Palette        [16]color.RGBA
+	CursorBlink    bool
+	ShellProgram   string
+	ShellArgs      []string
+	ShowProcess    bool // whether foreground process polling is enabled
+}
 
 // Terminal ties together the screen buffer, PTY, parser, cursor, and input.
 // It is the central coordinator consumed by the renderer and game loop.
@@ -19,7 +35,7 @@ type Terminal struct {
 	Cursor           *Cursor
 	pty              PtyBackend
 	parser           *Parser
-	cfg              *config.Config
+	tcfg             TerminalConfig
 	TitleCh          chan string
 	CwdCh            chan string
 	BellCh           chan struct{}
@@ -52,18 +68,14 @@ type Terminal struct {
 
 // New creates a Terminal from the given config.
 // Call Start() to spawn the shell.
-func New(cfg *config.Config) *Terminal {
-	palette := cfg.Palette()
-	fg := config.ParseHexColor(cfg.Colors.Foreground)
-	bg := config.ParseHexColor(cfg.Colors.Background)
-
+func New(tc TerminalConfig) *Terminal {
 	titleCh := make(chan string, 4)
 	cwdCh := make(chan string, 4)
 	bellCh := make(chan struct{}, 4)
-	buf := NewScreenBuffer(cfg.Window.Rows, cfg.Window.Columns, cfg.Scrollback.Lines, cfg.Blocks.MaxHistory, fg, bg, palette)
+	buf := NewScreenBuffer(tc.Rows, tc.Cols, tc.ScrollbackLines, tc.MaxBlocks, tc.FG, tc.BG, tc.Palette)
 
 	cur := NewCursor()
-	if cfg.Input.CursorBlink {
+	if tc.CursorBlink {
 		cur.EnableBlink()
 	}
 
@@ -71,7 +83,7 @@ func New(cfg *config.Config) *Terminal {
 	t := &Terminal{
 		Buf:              buf,
 		Cursor:           cur,
-		cfg:              cfg,
+		tcfg:             tc,
 		TitleCh:          titleCh,
 		CwdCh:            cwdCh,
 		BellCh:           bellCh,
@@ -85,7 +97,7 @@ func New(cfg *config.Config) *Terminal {
 // Start spawns the shell process.
 // dir is the working directory for the shell; empty string inherits the parent process CWD.
 func (t *Terminal) Start(dir string) error {
-	shell := t.cfg.Shell.Program
+	shell := t.tcfg.ShellProgram
 	if shell == "" {
 		shell = os.Getenv("SHELL")
 		if shell == "" {
@@ -93,9 +105,9 @@ func (t *Terminal) Start(dir string) error {
 		}
 	}
 
-	env := BuildEnv(t.cfg.Window.Columns, t.cfg.Window.Rows)
+	env := BuildEnv(t.tcfg.Cols, t.tcfg.Rows)
 
-	pty, err := NewPTYManager(shell, t.cfg.Shell.Args, t.cfg.Window.Columns, t.cfg.Window.Rows, env, dir)
+	pty, err := NewPTYManager(shell, t.tcfg.ShellArgs, t.tcfg.Cols, t.tcfg.Rows, env, dir)
 	if err != nil {
 		return fmt.Errorf("terminal start: %w", err)
 	}
@@ -106,8 +118,8 @@ func (t *Terminal) Start(dir string) error {
 
 // StartCmd launches a specific command (instead of the user's shell) in the PTY.
 func (t *Terminal) StartCmd(program string, args []string, dir string) error {
-	env := BuildEnv(t.cfg.Window.Columns, t.cfg.Window.Rows)
-	pty, err := NewPTYManager(program, args, t.cfg.Window.Columns, t.cfg.Window.Rows, env, dir)
+	env := BuildEnv(t.tcfg.Cols, t.tcfg.Rows)
+	pty, err := NewPTYManager(program, args, t.tcfg.Cols, t.tcfg.Rows, env, dir)
 	if err != nil {
 		return fmt.Errorf("terminal start cmd: %w", err)
 	}
@@ -275,10 +287,7 @@ func (t *Terminal) SendClipboardResponses() {
 
 // UpdateColors propagates new color settings to the buffer and parser.
 // Called during config hot-reload.
-func (t *Terminal) UpdateColors(cfg *config.Config) {
-	fg := config.ParseHexColor(cfg.Colors.Foreground)
-	bg := config.ParseHexColor(cfg.Colors.Background)
-	palette := cfg.Palette()
+func (t *Terminal) UpdateColors(fg, bg color.RGBA, palette [16]color.RGBA) {
 	t.Buf.Lock()
 	t.Buf.UpdateColors(fg, bg, palette)
 	t.parser.SetPalette(palette)
@@ -414,7 +423,7 @@ func (t *Terminal) foregroundProcessName() string {
 // result to ForegroundProcCh. Called on focus switch so the status bar updates
 // right away without waiting for the next 1-second poll tick.
 func (t *Terminal) RefreshForeground() {
-	if !t.cfg.StatusBar.ShowProcess {
+	if !t.tcfg.ShowProcess {
 		return
 	}
 	go func() {

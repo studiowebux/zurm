@@ -5298,7 +5298,7 @@ func (g *Game) reloadColors(cfg *config.Config) {
 	g.renderer.ReloadColors(cfg)
 	for _, t := range g.tabs {
 		for _, leaf := range t.Layout.Leaves() {
-			leaf.Pane.Term.UpdateColors(cfg)
+			leaf.Pane.Term.UpdateColors(config.ParseHexColor(cfg.Colors.Foreground), config.ParseHexColor(cfg.Colors.Background), cfg.Palette())
 		}
 	}
 }
@@ -5384,7 +5384,7 @@ func (g *Game) switchTheme(name string) {
 	g.renderer.ReloadColors(g.cfg)
 	for _, t := range g.tabs {
 		for _, leaf := range t.Layout.Leaves() {
-			leaf.Pane.Term.UpdateColors(g.cfg)
+			leaf.Pane.Term.UpdateColors(config.ParseHexColor(g.cfg.Colors.Foreground), config.ParseHexColor(g.cfg.Colors.Background), g.cfg.Palette())
 		}
 	}
 
@@ -6929,7 +6929,19 @@ func (g *Game) sendViewerToPane() {
 	// Create a new tab with a pane running `less -R <tmpfile>`.
 	paneRect := g.contentRect()
 
-	term := terminal.New(g.cfg)
+	term := terminal.New(terminal.TerminalConfig{
+		Rows:            g.cfg.Window.Rows,
+		Cols:            g.cfg.Window.Columns,
+		ScrollbackLines: g.cfg.Scrollback.Lines,
+		MaxBlocks:       g.cfg.Blocks.MaxHistory,
+		FG:              config.ParseHexColor(g.cfg.Colors.Foreground),
+		BG:              config.ParseHexColor(g.cfg.Colors.Background),
+		Palette:         g.cfg.Palette(),
+		CursorBlink:     g.cfg.Input.CursorBlink,
+		ShellProgram:    g.cfg.Shell.Program,
+		ShellArgs:       g.cfg.Shell.Args,
+		ShowProcess:     g.cfg.StatusBar.ShowProcess,
+	})
 	term.StartCmd("less", []string{"-R", tmpFile.Name()}, "")
 	p := &pane.Pane{
 		Term:       term,

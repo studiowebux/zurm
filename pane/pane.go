@@ -45,7 +45,7 @@ type Pane struct {
 func New(cfg *config.Config, rect image.Rectangle, cellW, cellH int, dir string) (*Pane, error) {
 	cols, rows := gridDims(rect, cfg.Window.Padding, cellW, cellH)
 
-	term := terminal.New(cfg)
+	term := terminal.New(buildTermConfig(cfg))
 	if err := term.Start(dir); err != nil {
 		return nil, fmt.Errorf("pane new: %w", err)
 	}
@@ -65,7 +65,7 @@ func New(cfg *config.Config, rect image.Rectangle, cellW, cellH int, dir string)
 func NewServer(cfg *config.Config, rect image.Rectangle, cellW, cellH int, dir, serverSessionID string) (*Pane, error) {
 	cols, rows := gridDims(rect, cfg.Window.Padding, cellW, cellH)
 
-	term := terminal.New(cfg)
+	term := terminal.New(buildTermConfig(cfg))
 
 	addr, err := zserver.EnsureServer(cfg.Server.Address, cfg.Server.Binary)
 	if err != nil {
@@ -99,6 +99,23 @@ func localFallback(term *terminal.Terminal, rect image.Rectangle, cols, rows int
 		return nil, fmt.Errorf("pane fallback: %w", err)
 	}
 	return &Pane{Term: term, Rect: rect, Cols: cols, Rows: rows}, nil
+}
+
+// buildTermConfig constructs a TerminalConfig from the application config.
+func buildTermConfig(cfg *config.Config) terminal.TerminalConfig {
+	return terminal.TerminalConfig{
+		Rows:            cfg.Window.Rows,
+		Cols:            cfg.Window.Columns,
+		ScrollbackLines: cfg.Scrollback.Lines,
+		MaxBlocks:       cfg.Blocks.MaxHistory,
+		FG:              config.ParseHexColor(cfg.Colors.Foreground),
+		BG:              config.ParseHexColor(cfg.Colors.Background),
+		Palette:         cfg.Palette(),
+		CursorBlink:     cfg.Input.CursorBlink,
+		ShellProgram:    cfg.Shell.Program,
+		ShellArgs:       cfg.Shell.Args,
+		ShowProcess:     cfg.StatusBar.ShowProcess,
+	}
 }
 
 // gridDims computes terminal grid dimensions from a physical pixel rect.
