@@ -133,39 +133,24 @@ func MetaFromChar(r rune) []byte {
 	return nil
 }
 
+// ctrlKeyMap maps Ebitengine keys to their Ctrl+ control character byte.
+var ctrlKeyMap = map[ebiten.Key]byte{
+	ebiten.KeyA: 0x01, ebiten.KeyB: 0x02, ebiten.KeyC: 0x03,
+	ebiten.KeyD: 0x04, ebiten.KeyE: 0x05, ebiten.KeyF: 0x06,
+	ebiten.KeyG: 0x07, ebiten.KeyH: 0x08, ebiten.KeyI: 0x09,
+	ebiten.KeyJ: 0x0A, ebiten.KeyK: 0x0B, ebiten.KeyL: 0x0C,
+	ebiten.KeyM: 0x0D, ebiten.KeyN: 0x0E, ebiten.KeyO: 0x0F,
+	ebiten.KeyP: 0x10, ebiten.KeyQ: 0x11, ebiten.KeyR: 0x12,
+	ebiten.KeyS: 0x13, ebiten.KeyT: 0x14, ebiten.KeyU: 0x15,
+	ebiten.KeyV: 0x16, ebiten.KeyW: 0x17, ebiten.KeyX: 0x18,
+	ebiten.KeyY: 0x19, ebiten.KeyZ: 0x1A,
+	ebiten.KeyBackslash:    0x1C,
+	ebiten.KeyBracketRight: 0x1D,
+}
+
 // ctrlKey returns the control-character byte for a letter key, or nil.
 func ctrlKey(key ebiten.Key) []byte {
-	letterMap := map[ebiten.Key]byte{
-		ebiten.KeyA: 0x01,
-		ebiten.KeyB: 0x02,
-		ebiten.KeyC: 0x03,
-		ebiten.KeyD: 0x04,
-		ebiten.KeyE: 0x05,
-		ebiten.KeyF: 0x06,
-		ebiten.KeyG: 0x07,
-		ebiten.KeyH: 0x08,
-		ebiten.KeyI: 0x09, // also Tab
-		ebiten.KeyJ: 0x0A,
-		ebiten.KeyK: 0x0B,
-		ebiten.KeyL: 0x0C,
-		ebiten.KeyM: 0x0D, // also Enter
-		ebiten.KeyN: 0x0E,
-		ebiten.KeyO: 0x0F,
-		ebiten.KeyP: 0x10,
-		ebiten.KeyQ: 0x11,
-		ebiten.KeyR: 0x12,
-		ebiten.KeyS: 0x13,
-		ebiten.KeyT: 0x14,
-		ebiten.KeyU: 0x15,
-		ebiten.KeyV: 0x16,
-		ebiten.KeyW: 0x17,
-		ebiten.KeyX: 0x18,
-		ebiten.KeyY: 0x19,
-		ebiten.KeyZ: 0x1A,
-		ebiten.KeyBackslash:  0x1C,
-		ebiten.KeyBracketRight: 0x1D,
-	}
-	if b, ok := letterMap[key]; ok {
+	if b, ok := ctrlKeyMap[key]; ok {
 		return []byte{b}
 	}
 	return nil

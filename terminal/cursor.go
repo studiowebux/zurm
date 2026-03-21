@@ -11,6 +11,8 @@ const (
 	CursorBar                          // vertical bar (I-beam)
 )
 
+const cursorBlinkPeriod = 530 * time.Millisecond
+
 // Cursor tracks cursor visibility, style, and blink state.
 type Cursor struct {
 	Style   CursorStyle
@@ -34,7 +36,7 @@ func NewCursor() *Cursor {
 
 // EnableBlink turns on cursor blinking at the standard 530 ms period.
 func (c *Cursor) EnableBlink() {
-	c.blinkPeriod = 530 * time.Millisecond
+	c.blinkPeriod = cursorBlinkPeriod
 }
 
 // Update advances the blink animation. Call once per Ebitengine Update().
@@ -85,7 +87,7 @@ func (c *Cursor) SetStyle(n int) {
 		c.Style = CursorBlock
 	}
 	if blink {
-		c.blinkPeriod = 530 * time.Millisecond
+		c.blinkPeriod = cursorBlinkPeriod
 	} else {
 		c.blinkPeriod = 0
 		c.blinkOn = true // always visible for steady cursor

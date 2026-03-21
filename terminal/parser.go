@@ -25,6 +25,11 @@ const (
 	stateIgnore                   // collecting ignored sequence
 )
 
+const (
+	maxDCSBuffer = 4096 // maximum bytes collected in a DCS string
+	maxOSCBuffer = 4096 // maximum bytes collected in an OSC string
+)
+
 // Parser processes raw PTY bytes and applies them to a ScreenBuffer.
 // All methods must be called with the ScreenBuffer write lock held.
 type Parser struct {
@@ -117,7 +122,7 @@ func (p *Parser) consume(b byte) {
 		} else if b == 0x1B { // ESC — start of ESC \ (7-bit ST); dispatch now, consume '\' next
 			p.dispatchDCS()
 			p.state = stateIgnore
-		} else if p.dcsBuf.Len() < 4096 {
+		} else if p.dcsBuf.Len() < maxDCSBuffer {
 			p.dcsBuf.WriteByte(b)
 		}
 	case stateIgnore:
@@ -360,7 +365,7 @@ func (p *Parser) osc(b byte) {
 		p.dispatchOSC(p.oscBuf.String())
 		p.state = stateIgnore
 	default:
-		if p.oscBuf.Len() < 4096 {
+		if p.oscBuf.Len() < maxOSCBuffer {
 			p.oscBuf.WriteByte(b)
 		}
 	}

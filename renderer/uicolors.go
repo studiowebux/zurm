@@ -6,6 +6,8 @@ import (
 	"github.com/studiowebux/zurm/config"
 )
 
+const backdropAlpha = 0xb4 // 180 — translucency for modal overlays
+
 // inputWithCursor returns text with a block cursor character (|) inserted at
 // the given rune index. Used by all input field renderers instead of appending "_".
 func inputWithCursor(text string, pos int) string {
@@ -73,7 +75,7 @@ func deriveUIColors(cfg *config.Config) UIColors {
 	return UIColors{
 		PanelBg:     darken(darken(bg)),
 		HoverBg:     brighten(bg),
-		Backdrop:    color.RGBA{R: bg.R * 2 / 5, G: bg.G * 2 / 5, B: bg.B * 2 / 5, A: 0xb4},
+		Backdrop:    color.RGBA{R: bg.R * 2 / 5, G: bg.G * 2 / 5, B: bg.B * 2 / 5, A: backdropAlpha},
 		Border:      config.ParseHexColor(cfg.Colors.Border),
 		Accent:      config.ParseHexColor(cfg.Colors.Cursor),
 		CatHdr:      config.ParseHexColor(cfg.Colors.BrightMagenta),

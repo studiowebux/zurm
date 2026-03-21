@@ -75,7 +75,8 @@ func (m *PTYManager) StartReader(parser *Parser, buf *ScreenBuffer, paused *atom
 			// then block briefly for the kernel to clean up the process entry.
 			m.cmd.Wait() //nolint:errcheck // exit status is irrelevant; we just need to reap
 		}()
-		scratch := make([]byte, 4096)
+		const ptyReadBufSize = 4096
+		scratch := make([]byte, ptyReadBufSize)
 		for {
 			n, err := m.ptmx.Read(scratch)
 			if n > 0 {

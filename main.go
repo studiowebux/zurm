@@ -56,6 +56,8 @@ const (
 	fgPollInterval      = 1 * time.Second       // how often to query foreground process via ps
 	bellDebounce        = 500 * time.Millisecond // min interval between bell sounds
 	llmsFetchTimeout    = 10 * time.Second       // HTTP client timeout for llms.txt fetch
+	statusMessageFrames = 60                     // status message display duration in frames (~1s at 60fps)
+	paneHeaderPadding   = 4                      // extra pixels added to cellH for pane header bars
 )
 
 // keyRepeatDelay and keyRepeatInterval are set from config at startup.
@@ -1305,7 +1307,6 @@ func (g *Game) handleInput() {
 					g.repeatLast = now
 				}
 			}
-			_ = shift
 		} else if !pressed && g.repeatActive && g.repeatKey == key {
 			g.repeatActive = false
 		}
@@ -2559,7 +2560,7 @@ func (g *Game) handleFileExplorerInput() {
 			}
 			if opErr != nil {
 				st.StatusMsg = "Error: " + opErr.Error()
-				st.StatusTimer = 60
+				st.StatusTimer = statusMessageFrames
 			}
 			g.reloadExplorerTree()
 
@@ -2572,7 +2573,7 @@ func (g *Game) handleFileExplorerInput() {
 				st.ConfirmAction = func() {
 					if err := fileexplorer.DeletePath(captured); err != nil {
 						st.StatusMsg = "Error: " + err.Error()
-						st.StatusTimer = 60
+						st.StatusTimer = statusMessageFrames
 					}
 					g.reloadExplorerTree()
 				}
@@ -2867,25 +2868,23 @@ func (g *Game) executeExplorerInputMode() {
 	case renderer.ExplorerModeRename:
 		if st.Cursor < len(st.Entries) {
 			oldPath := st.Entries[st.Cursor].Path
-			newPath, err := fileexplorer.RenamePath(oldPath, name)
+			_, err := fileexplorer.RenamePath(oldPath, name)
 			if err != nil {
 				st.StatusMsg = "Error: " + err.Error()
-				st.StatusTimer = 60
-			} else {
-				_ = newPath
+				st.StatusTimer = statusMessageFrames
 			}
 		}
 	case renderer.ExplorerModeNewFile:
 		_, err := fileexplorer.CreateFile(dstDir, name)
 		if err != nil {
 			st.StatusMsg = "Error: " + err.Error()
-			st.StatusTimer = 60
+			st.StatusTimer = statusMessageFrames
 		}
 	case renderer.ExplorerModeNewDir:
 		_, err := fileexplorer.CreateDir(dstDir, name)
 		if err != nil {
 			st.StatusMsg = "Error: " + err.Error()
-			st.StatusTimer = 60
+			st.StatusTimer = statusMessageFrames
 		}
 	}
 
@@ -2904,8 +2903,7 @@ func (g *Game) explorerEnsureVisible() {
 	// Calculate the visual row index based on filtering
 	visualIdx := st.Cursor
 	if len(st.SearchResults) > 0 {
-		// When showing search results, cursor is already the visual index
-		visualIdx = st.Cursor
+		// cursor is already the visual index for search results
 	} else if st.SearchQuery != "" && len(st.FilteredIndices) > 0 {
 		// Legacy filtering support
 		// Find the position of the cursor in the filtered list
@@ -5238,7 +5236,7 @@ func setPaneHeaders(layout *pane.LayoutNode, cellH int) {
 	leaves := layout.Leaves()
 	headerH := 0
 	if len(leaves) > 1 {
-		headerH = cellH + 4
+		headerH = cellH + paneHeaderPadding
 	}
 	for _, leaf := range leaves {
 		leaf.Pane.HeaderH = headerH
