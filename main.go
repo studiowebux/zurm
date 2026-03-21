@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	_ "embed"
 	"encoding/json"
 	"flag"
@@ -51,9 +50,6 @@ var version = "dev"
 // Internal timing constants — not user-configurable.
 const (
 	unfocusSuspendDelay = 5 * time.Second       // idle before reducing TPS when unfocused
-	gitInfoTimeout      = 5 * time.Second       // max wait for git status subprocess
-	cwdPollInterval     = 2 * time.Second       // how often to query CWD via lsof/OSC 7
-	fgPollInterval      = 1 * time.Second       // how often to query foreground process via ps
 	bellDebounce        = 500 * time.Millisecond // min interval between bell sounds
 	llmsFetchTimeout    = 10 * time.Second       // HTTP client timeout for llms.txt fetch
 	statusMessageFrames = 60                     // status message display duration in frames (~1s at 60fps)
@@ -217,9 +213,7 @@ type Game struct {
 
 	// Status bar state.
 	statusBarState renderer.StatusBarState
-	gitInfoCh     chan gitInfoResult  // persistent channel — receives async git status results
-	gitInfoGen    uint64             // incremented each query; stale results are discarded
-	gitInfoCancel context.CancelFunc // cancels the previous git info goroutine
+	poller *StatusPoller // async git status queries and poll intervals
 
 	// Tab switcher overlay state (pin-style).
 	tabSwitcherState renderer.TabSwitcherState
@@ -278,11 +272,6 @@ type Game struct {
 	lastPtySeq   uint64
 	lastClockSec int64
 
-	// Event-driven status bar polling — replaces fixed-interval tickers.
-	// Polls only fire when PTY output arrives and enough time has passed.
-	lastPollSeq  uint64
-	lastCwdPoll  time.Time
-	lastFgPoll   time.Time
 
 	// blocksEnabled is the runtime toggle for command block rendering.
 	// Initialized from cfg.Blocks.Enabled; toggled via command palette.
@@ -516,7 +505,7 @@ func main() {
 		recDone:          make(chan string, 1),
 		screenshotDone:   make(chan string, 1),
 		tabHoverState:    renderer.TabHoverState{TabIdx: -1},
-		gitInfoCh:        make(chan gitInfoResult, 1),
+		poller:           NewStatusPoller(),
 		searchResultCh:   make(chan searchResult, 1),
 		clipboardCh:      make(chan string, 1),
 	}
@@ -1714,23 +1703,6 @@ func (g *Game) drainTitle() {
 	}
 }
 
-// gitInfo holds all git status data gathered asynchronously.
-type gitInfo struct {
-	Branch  string
-	Commit  string
-	Dirty   int
-	Staged  int
-	Ahead   int
-	Behind  int
-}
-
-// gitInfoResult pairs a query generation counter with the git status result.
-// drainGitBranch discards results whose gen no longer matches g.gitInfoGen,
-// preventing stale goroutines from overwriting a newer query's output.
-type gitInfoResult struct {
-	gen  uint64
-	info gitInfo
-}
 
 // searchResult delivers async SearchAll results to the game loop.
 type searchResult struct {
@@ -1757,7 +1729,7 @@ type llmsHistoryEntry struct {
 }
 
 // drainCwd reads the latest CWD from the focused pane's OSC 7 channel.
-// When the CWD changes it kicks off an async git status lookup.
+// When the CWD changes it kicks off an async git status lookup via the poller.
 func (g *Game) drainCwd() {
 	if g.focused == nil {
 		return
@@ -1767,82 +1739,14 @@ func (g *Game) drainCwd() {
 		if cwd != g.statusBarState.Cwd {
 			g.statusBarState.Cwd = cwd
 			g.focused.Term.Cwd = cwd
-			g.statusBarState.GitBranch = "" // clear until new result arrives
+			g.statusBarState.GitBranch = ""
 			g.statusBarState.GitCommit = ""
 			g.statusBarState.GitDirty = 0
 			g.statusBarState.GitStaged = 0
 			g.statusBarState.GitAhead = 0
 			g.statusBarState.GitBehind = 0
 			if g.cfg.StatusBar.ShowGit {
-				// Cancel any in-flight git query and drain its stale result.
-				if g.gitInfoCancel != nil {
-					g.gitInfoCancel()
-				}
-				select {
-				case <-g.gitInfoCh:
-				default:
-				}
-				g.gitInfoGen++
-				gen := g.gitInfoGen
-				ctx, cancel := context.WithTimeout(context.Background(), gitInfoTimeout)
-				g.gitInfoCancel = cancel
-				ch := g.gitInfoCh // persistent channel, never replaced
-				go func() {
-					defer cancel()
-					info := gitInfo{}
-
-					// Single call: branch + dirty/staged + ahead/behind.
-					// Replaces three separate git commands (rev-parse, status, rev-list).
-					if out, err := exec.CommandContext(ctx, "git", "-C", cwd, "status", "--porcelain", "-b").Output(); err == nil { // #nosec G204
-						lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
-						if len(lines) > 0 && strings.HasPrefix(lines[0], "## ") {
-							header := lines[0][3:]
-							if dotIdx := strings.Index(header, "..."); dotIdx >= 0 {
-								info.Branch = header[:dotIdx]
-								rest := header[dotIdx+3:]
-								if brk := strings.Index(rest, " ["); brk >= 0 && strings.HasSuffix(rest, "]") {
-									for _, part := range strings.Split(rest[brk+2:len(rest)-1], ", ") {
-										fmt.Sscanf(part, "ahead %d", &info.Ahead)  //nolint:errcheck
-										fmt.Sscanf(part, "behind %d", &info.Behind) //nolint:errcheck
-									}
-								}
-							} else if header == "HEAD (no branch)" {
-								info.Branch = "HEAD"
-							} else {
-								info.Branch = header
-							}
-							for _, line := range lines[1:] {
-								if len(line) < 2 {
-									continue
-								}
-								idx := line[0]
-								wt := line[1]
-								if idx != ' ' && idx != '?' {
-									info.Staged++
-								}
-								if wt != ' ' && wt != '?' {
-									info.Dirty++
-								}
-							}
-						}
-					} else {
-						select {
-						case ch <- gitInfoResult{gen: gen, info: info}:
-						default:
-						}
-						return
-					}
-
-					// Short commit hash — no equivalent in porcelain output.
-					if out, err := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse", "--short", "HEAD").Output(); err == nil { // #nosec G204
-						info.Commit = strings.TrimSpace(string(out))
-					}
-
-					select {
-					case ch <- gitInfoResult{gen: gen, info: info}:
-					default:
-					}
-				}()
+				g.poller.StartGitQuery(cwd)
 			}
 			g.screenDirty = true
 		}
@@ -1998,22 +1902,16 @@ func (g *Game) updateVaultSuggestion() {
 	g.vaultSuggest = g.vault.Suggest(lineStr, g.vaultSkip)
 }
 
-// drainGitBranch reads a completed async git info result when available.
-// Results from cancelled goroutines are discarded via generation check.
+// drainGitBranch reads a completed async git info result from the poller.
 func (g *Game) drainGitBranch() {
-	select {
-	case res := <-g.gitInfoCh:
-		if res.gen != g.gitInfoGen {
-			return // stale result from a superseded query — discard
-		}
-		g.statusBarState.GitBranch = res.info.Branch
-		g.statusBarState.GitCommit = res.info.Commit
-		g.statusBarState.GitDirty = res.info.Dirty
-		g.statusBarState.GitStaged = res.info.Staged
-		g.statusBarState.GitAhead = res.info.Ahead
-		g.statusBarState.GitBehind = res.info.Behind
+	if info, ok := g.poller.DrainGit(); ok {
+		g.statusBarState.GitBranch = info.Branch
+		g.statusBarState.GitCommit = info.Commit
+		g.statusBarState.GitDirty = info.Dirty
+		g.statusBarState.GitStaged = info.Staged
+		g.statusBarState.GitAhead = info.Ahead
+		g.statusBarState.GitBehind = info.Behind
 		g.screenDirty = true
-	default:
 	}
 }
 
@@ -2076,28 +1974,18 @@ func (g *Game) drainShellIntegration() {
 }
 
 // pollStatusOnOutput triggers CWD and foreground process queries when PTY
-// output arrives, replacing the old fixed-interval ticker goroutines.
-// CWD polls at most every 2s, foreground at most every 1s.
+// output arrives. Poll intervals are managed by the StatusPoller.
 func (g *Game) pollStatusOnOutput() {
 	seq := terminal.RenderSeq()
-	if seq == g.lastPollSeq {
-		return
-	}
-	g.lastPollSeq = seq
-	now := time.Now()
 
-	if now.Sub(g.lastCwdPoll) >= cwdPollInterval {
-		g.lastCwdPoll = now
+	if g.poller.ShouldPollCwd(seq) {
 		if g.focused != nil {
 			go g.focused.Term.QueryCWD()
 		}
 	}
 
-	if g.cfg.StatusBar.ShowProcess && now.Sub(g.lastFgPoll) >= fgPollInterval && g.activeTab < len(g.tabs) {
-		g.lastFgPoll = now
+	if g.cfg.StatusBar.ShowProcess && g.poller.ShouldPollFg(seq) && g.activeTab < len(g.tabs) {
 		for _, leaf := range g.tabs[g.activeTab].Layout.Leaves() {
-			// Skip ps polling for terminals with OSC 133 shell integration —
-			// drainShellIntegration handles foreground updates event-driven.
 			if !leaf.Pane.Term.HasOSC133() {
 				go leaf.Pane.Term.QueryForeground()
 			}
