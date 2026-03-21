@@ -22,8 +22,9 @@ type paneCacheEntry struct {
 	hadURLHover    bool // true if URL hover was active on last draw
 	lastProcName   string
 	lastCustomName string
-	lastRenaming   bool
-	lastRenameText string
+	lastRenaming      bool
+	lastRenameText    string
+	lastSearchCurrent int
 }
 
 // blockSnap holds a point-in-time copy of block-related buffer state.
@@ -388,6 +389,10 @@ func (r *Renderer) DrawAll(ds DrawState) {
 			// process name) trigger DrawPane + overlay redraw.
 			hasURLHover := isFocused && r.HoveredURL != nil
 			procName := p.ProcName
+			searchCurrent := -1
+			if isFocused && search != nil {
+				searchCurrent = search.Current
+			}
 			unchanged := gen == cache.lastRenderGen &&
 				viewOff == cache.lastViewOffset &&
 				curRow == cache.lastCursorRow &&
@@ -396,7 +401,8 @@ func (r *Renderer) DrawAll(ds DrawState) {
 				procName == cache.lastProcName &&
 				p.CustomName == cache.lastCustomName &&
 				p.Renaming == cache.lastRenaming &&
-				p.RenameText == cache.lastRenameText
+				p.RenameText == cache.lastRenameText &&
+				searchCurrent == cache.lastSearchCurrent
 
 			if !unchanged {
 				var paneSearch *SearchState
@@ -427,6 +433,7 @@ func (r *Renderer) DrawAll(ds DrawState) {
 				cache.lastCustomName = p.CustomName
 				cache.lastRenaming = p.Renaming
 				cache.lastRenameText = p.RenameText
+				cache.lastSearchCurrent = searchCurrent
 			}
 			p.Term.Buf.RUnlock()
 
