@@ -10,50 +10,6 @@ import (
 	"github.com/studiowebux/zurm/fileexplorer"
 )
 
-// ExplorerMode controls what the file explorer input box is doing.
-type ExplorerMode int
-
-const (
-	ExplorerModeNormal  ExplorerMode = iota
-	ExplorerModeRename               // waiting for new name
-	ExplorerModeNewFile              // waiting for new file name
-	ExplorerModeNewDir               // waiting for new dir name
-)
-
-// FileExplorerState holds all rendering and interaction state for the file explorer sidebar.
-type FileExplorerState struct {
-	Open         bool
-	Root         string
-	Entries      []fileexplorer.Entry
-	Cursor       int
-	ScrollOffset int
-	MaxScroll    int // written by renderer each frame
-	RowH         int // written by renderer each frame
-
-	Mode            ExplorerMode
-	InputText       string
-	InputLabel      string
-	InputCursorPos  int // rune index of text cursor within InputText
-
-	Clipboard *fileexplorer.Clipboard
-
-	ConfirmOpen   bool
-	ConfirmMsg    string
-	ConfirmAction func()
-
-	StatusMsg   string
-	StatusTimer int
-
-	Side string // "left" or "right"
-
-	// Search/filter functionality
-	SearchQuery     string
-	SearchCursorPos int                   // rune index of text cursor within SearchQuery
-	SearchMode      bool                  // true when search input is active
-	FilteredIndices []int                 // indices of entries matching search
-	SearchResults   []fileexplorer.Entry  // Full recursive search results
-}
-
 // FileExplorerPanelWidth returns the physical pixel width of the panel when open, 0 when closed.
 func (r *Renderer) FileExplorerPanelWidth() int {
 	if r.offscreen == nil {

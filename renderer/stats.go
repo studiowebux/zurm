@@ -7,30 +7,6 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-// StatsState holds runtime metrics for the stats overlay.
-// Populated by the game loop on a 1-second timer.
-type StatsState struct {
-	Open bool
-
-	// Ebitengine
-	TPS float64
-	FPS float64
-
-	// Go runtime
-	Goroutines int
-	HeapAlloc  uint64 // bytes
-	HeapSys    uint64 // bytes
-	GCPauseNs  uint64 // last GC pause in nanoseconds
-	NumGC      uint32
-
-	// App
-	TabCount  int
-	PaneCount int
-	BufRows   int // focused pane rows
-	BufCols   int // focused pane cols
-	Scrollback int // focused pane scrollback depth
-}
-
 // drawStats renders a small semi-transparent stats panel in the top-right corner.
 // Non-modal: drawn onto offscreen, does not capture input.
 func (r *Renderer) drawStats(state *StatsState) {

@@ -12,32 +12,6 @@ import (
 )
 
 // StatusBarState holds the data the renderer needs to draw one frame of the bar.
-type StatusBarState struct {
-	Cwd             string
-	GitBranch       string
-	GitCommit       string // short commit hash (7 chars)
-	GitDirty        int    // modified file count
-	GitStaged       int    // staged file count
-	GitAhead        int    // commits ahead of upstream
-	GitBehind       int    // commits behind upstream
-	ForegroundProc  string          // foreground process name, "" when shell is foreground
-	ScrollOffset    int             // buf.ViewOffset of the focused pane; 0 = live output
-	Zoomed          bool            // true when a pane is fullscreened via Cmd+Z
-	PinMode         bool            // true while waiting for a pin slot keypress
-	HelpBtnRect     image.Rectangle // set during draw; used by main.go for click detection
-	FlashMessage    string          // transient message shown in place of cwd; cleared by Game.Update
-	BlocksEnabled   bool            // show block indicator when true
-	BlockCount      int             // number of completed blocks in focused pane
-	Recording         bool          // true while a screen recording is in progress
-	RecordingDuration time.Duration // elapsed recording time
-	RecordingBytes    int64         // output MP4 file size on disk
-	RecordingMode     string        // "MP4"
-	Version           string        // app version, e.g. "v0.4.1"
-	TabNote           string        // active tab's annotation, shown as a middle segment
-	ServerSession      bool           // true when the focused pane is backed by zurm-server
-	ServerSessionCount int           // number of open panes backed by zurm-server; 0 in local mode
-}
-
 // StatusBarHeight returns the physical pixel height of the status bar,
 // or 0 when the bar is disabled.
 func StatusBarHeight(font *FontRenderer, cfg *RenderConfig) int {

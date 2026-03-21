@@ -6,22 +6,6 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-// PaletteEntry is a single command shown in the palette.
-// Actions are not stored here — main.go holds a parallel []func() slice.
-type PaletteEntry struct {
-	Name     string
-	Shortcut string
-}
-
-// PaletteState is the rendering + interaction state for the command palette.
-type PaletteState struct {
-	Open      bool
-	Query     string
-	CursorPos int // rune index of the text cursor within Query
-	Cursor    int // index into the filtered list
-}
-
-
 const (
 	palMaxVisible  = 12 // max visible entries at once
 	palPanelWidthP = 60 // panel width as % of screen

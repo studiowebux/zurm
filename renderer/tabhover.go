@@ -2,26 +2,10 @@ package renderer
 
 import (
 	"image"
-	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/studiowebux/zurm/tab"
 )
-
-// TabHoverState tracks the popover state for tab hover minimap preview.
-type TabHoverState struct {
-	Active     bool
-	TabIdx     int       // hovered tab index (-1 = none)
-	HoverStart time.Time // when cursor entered this tab
-
-	PopoverX int // physical pixel position
-	PopoverY int
-	PopoverW int // physical pixel size (after DPI scaling)
-	PopoverH int
-
-	Thumbnail *ebiten.Image // cached scaled snapshot
-	CacheKey  uint64        // sum of RenderGen for invalidation
-}
 
 // RenderTabThumbnail renders a full-resolution snapshot of the given tab's layout
 // into a temporary image. The caller is responsible for scaling it down when drawing.

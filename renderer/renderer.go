@@ -206,20 +206,6 @@ func pinnedBadge(slot rune, placeholder string) string {
 	return placeholder
 }
 
-// BlockHoverState describes the block currently under the cursor.
-type BlockHoverState struct {
-	Active    bool
-	Buf       *terminal.ScreenBuffer // the pane's buffer (for TextRange)
-	AbsStart  int                    // AbsPromptRow of the hovered block
-	AbsCmdRow int                    // AbsCmdRow of the hovered block
-	AbsEnd    int                    // AbsEndRow of the hovered block
-	CmdCol    int                    // column where user input starts (from OSC 133;B); -1 if unknown
-	CopyTarget CopyTarget            // which copy button is under cursor
-	CmdRect   image.Rectangle        // hit rect of "cmd" button
-	OutRect   image.Rectangle        // hit rect of "out" button
-	AllRect   image.Rectangle        // hit rect of "all" button
-	blockIdx  int                    // index in buf.Blocks (-1 = activeBlock)
-}
 
 // NewRenderer creates a Renderer. Call SetSize after window dimensions are known.
 func NewRenderer(font *FontRenderer, cfg *RenderConfig) *Renderer {

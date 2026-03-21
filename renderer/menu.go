@@ -11,21 +11,6 @@ import (
 // menuSepH is the pixel height of a separator row.
 const menuSepH = 9
 
-// MenuState holds the full rendering and hit-test state for a context menu.
-// Stored on Game; passed by pointer to DrawAll.
-type MenuState struct {
-	Open     bool
-	Items    []help.MenuItem
-	Rect     image.Rectangle // bounding rect of main menu (physical px)
-	HoverIdx int             // -1 = none
-
-	SubOpen      bool
-	SubItems     []help.MenuItem
-	SubRect      image.Rectangle
-	SubHoverIdx  int
-	SubParentIdx int // index in Items that owns this submenu
-}
-
 // menuItemH returns the pixel height of a regular menu item row.
 func (r *Renderer) menuItemH() int {
 	return r.font.CellH + 6

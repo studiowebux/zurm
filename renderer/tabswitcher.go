@@ -7,12 +7,6 @@ import (
 	"github.com/studiowebux/zurm/tab"
 )
 
-// TabSwitcherState holds the rendering and interaction state for the tab switcher overlay.
-type TabSwitcherState struct {
-	Open   bool
-	Cursor int // index of the highlighted row
-}
-
 // drawTabSwitcher renders the pin-style tab picker over r.modalLayer.
 func (r *Renderer) drawTabSwitcher(tabs []*tab.Tab, activeTab int, state *TabSwitcherState) {
 	if state == nil || !state.Open {

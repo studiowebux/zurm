@@ -6,17 +6,7 @@ import (
 	"image/color"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/studiowebux/zurm/terminal"
 )
-
-// SearchState holds the live state of the in-buffer search (Cmd+F).
-type SearchState struct {
-	Open      bool
-	Query     string
-	CursorPos int // rune index of the text cursor within Query
-	Matches   []terminal.SearchMatch
-	Current   int // index of the active (highlighted) match
-}
 
 // drawSearchBar renders the find bar above the status bar when search is open.
 func (r *Renderer) drawSearchBar(state *SearchState) {

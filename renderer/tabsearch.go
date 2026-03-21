@@ -8,14 +8,6 @@ import (
 	"github.com/studiowebux/zurm/tab"
 )
 
-// TabSearchState holds rendering and interaction state for the Cmd+J tab search overlay.
-type TabSearchState struct {
-	Open      bool
-	Query     string
-	CursorPos int // rune index of the text cursor within Query
-	Cursor    int // index into the filtered list
-}
-
 const (
 	tsMaxVisible  = 12 // max visible entries
 	tsPanelWidthP = 60 // panel width as % of screen
