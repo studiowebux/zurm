@@ -73,6 +73,23 @@ var (
 	keyRepeatInterval = 50 * time.Millisecond
 )
 
+// defaultHistoryPath returns the shell history file path based on the configured shell.
+func defaultHistoryPath(shell string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	base := filepath.Base(shell)
+	switch {
+	case strings.Contains(base, "bash"):
+		return filepath.Join(home, ".bash_history")
+	case strings.Contains(base, "fish"):
+		return filepath.Join(home, ".local", "share", "fish", "fish_history")
+	default: // zsh and others
+		return filepath.Join(home, ".zsh_history")
+	}
+}
+
 //go:embed assets/fonts/JetBrainsMono-Regular.ttf
 var jetbrainsMono []byte
 
@@ -488,9 +505,7 @@ func main() {
 	if cfg.Vault.Enabled {
 		histPath := cfg.Vault.HistoryPath
 		if histPath == "" {
-			if home, err := os.UserHomeDir(); err == nil {
-				histPath = filepath.Join(home, ".zsh_history")
-			}
+			histPath = defaultHistoryPath(cfg.Shell.Program)
 		}
 		syncInterval := time.Duration(cfg.Vault.SyncIntervalSecs) * time.Second
 		game.vault = vault.Init(config.ConfigDir(), histPath, cfg.Vault.IgnorePrefix, cfg.Vault.MaxEntries, syncInterval)
