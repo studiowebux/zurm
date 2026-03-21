@@ -4285,11 +4285,10 @@ func (g *Game) handleTabSearchInput() {
 // --- Pane management ---
 
 // splitH splits the focused pane horizontally (Cmd+D).
-func (g *Game) performSplit(splitFn func(*pane.Pane, *config.Config, int, int, string) (*pane.LayoutNode, *pane.Pane, error)) {
+func (g *Game) performSplit(kind pane.NodeKind, createPane func() (*pane.Pane, error)) {
 	g.zoomed = false
 	paneRect := g.contentRect()
-	dir := sanitizeDirectory(g.statusBarState.Cwd)
-	newRoot, newPane, err := splitFn(g.focused, g.cfg, g.font.CellW, g.font.CellH, dir)
+	newRoot, newPane, err := g.layout.Split(g.focused, kind, createPane)
 	if err != nil {
 		return
 	}
@@ -4303,10 +4302,33 @@ func (g *Game) performSplit(splitFn func(*pane.Pane, *config.Config, int, int, s
 	g.setFocus(newPane)
 }
 
-func (g *Game) splitH()       { g.performSplit(g.layout.SplitH) }
-func (g *Game) splitV()       { g.performSplit(g.layout.SplitV) }
-func (g *Game) splitHServer() { g.performSplit(g.layout.SplitHServer) }
-func (g *Game) splitVServer() { g.performSplit(g.layout.SplitVServer) }
+func (g *Game) splitH() {
+	dir := sanitizeDirectory(g.statusBarState.Cwd)
+	g.performSplit(pane.HSplit, func() (*pane.Pane, error) {
+		return pane.New(g.cfg, g.focused.Rect, g.font.CellW, g.font.CellH, dir)
+	})
+}
+
+func (g *Game) splitV() {
+	dir := sanitizeDirectory(g.statusBarState.Cwd)
+	g.performSplit(pane.VSplit, func() (*pane.Pane, error) {
+		return pane.New(g.cfg, g.focused.Rect, g.font.CellW, g.font.CellH, dir)
+	})
+}
+
+func (g *Game) splitHServer() {
+	dir := sanitizeDirectory(g.statusBarState.Cwd)
+	g.performSplit(pane.HSplit, func() (*pane.Pane, error) {
+		return pane.NewServer(g.cfg, g.focused.Rect, g.font.CellW, g.font.CellH, dir, "")
+	})
+}
+
+func (g *Game) splitVServer() {
+	dir := sanitizeDirectory(g.statusBarState.Cwd)
+	g.performSplit(pane.VSplit, func() (*pane.Pane, error) {
+		return pane.NewServer(g.cfg, g.focused.Rect, g.font.CellW, g.font.CellH, dir, "")
+	})
+}
 
 // closePane removes a pane. Focuses the nearest remaining pane.
 func (g *Game) closePane(p *pane.Pane) {

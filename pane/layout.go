@@ -3,8 +3,6 @@ package pane
 import (
 	"image"
 	"math"
-
-	"github.com/studiowebux/zurm/config"
 )
 
 // NodeKind identifies the type of a LayoutNode.
@@ -187,9 +185,10 @@ func (n *LayoutNode) FindParent(p *Pane) (*LayoutNode, bool) {
 	return n.Right.FindParent(p)
 }
 
-// splitWith is the common implementation for all split operations.
-// kind selects HSplit or VSplit; createPane builds the new pane.
-func (n *LayoutNode) splitWith(p *Pane, kind NodeKind, createPane func() (*Pane, error)) (*LayoutNode, *Pane, error) {
+// Split replaces the leaf containing p with a split of the given kind,
+// using createPane to build the new pane. Returns the new tree root and
+// the new pane. The caller provides the creation closure — no config needed.
+func (n *LayoutNode) Split(p *Pane, kind NodeKind, createPane func() (*Pane, error)) (*LayoutNode, *Pane, error) {
 	newPane, err := createPane()
 	if err != nil {
 		return n, nil, err
@@ -200,28 +199,6 @@ func (n *LayoutNode) splitWith(p *Pane, kind NodeKind, createPane func() (*Pane,
 	result := replaceLeaf(n, p, split)
 	result.InvalidateLeaves()
 	return result, newPane, nil
-}
-
-// SplitH splits the pane p horizontally (left | right), creating a new pane
-// as the right child. Returns the new tree root and the new pane.
-func (n *LayoutNode) SplitH(p *Pane, cfg *config.Config, cellW, cellH int, dir string) (*LayoutNode, *Pane, error) {
-	return n.splitWith(p, HSplit, func() (*Pane, error) { return New(cfg, p.Rect, cellW, cellH, dir) })
-}
-
-// SplitV splits the pane p vertically (top / bottom), creating a new pane
-// as the bottom child. Returns the new tree root and the new pane.
-func (n *LayoutNode) SplitV(p *Pane, cfg *config.Config, cellW, cellH int, dir string) (*LayoutNode, *Pane, error) {
-	return n.splitWith(p, VSplit, func() (*Pane, error) { return New(cfg, p.Rect, cellW, cellH, dir) })
-}
-
-// SplitHServer is like SplitH but the new pane is backed by zurm-server (Mode B).
-func (n *LayoutNode) SplitHServer(p *Pane, cfg *config.Config, cellW, cellH int, dir string) (*LayoutNode, *Pane, error) {
-	return n.splitWith(p, HSplit, func() (*Pane, error) { return NewServer(cfg, p.Rect, cellW, cellH, dir, "") })
-}
-
-// SplitVServer is like SplitV but the new pane is backed by zurm-server (Mode B).
-func (n *LayoutNode) SplitVServer(p *Pane, cfg *config.Config, cellW, cellH int, dir string) (*LayoutNode, *Pane, error) {
-	return n.splitWith(p, VSplit, func() (*Pane, error) { return NewServer(cfg, p.Rect, cellW, cellH, dir, "") })
 }
 
 // replaceLeaf returns a new tree with the leaf containing p replaced by replacement.
