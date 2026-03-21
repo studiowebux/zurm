@@ -214,10 +214,8 @@ type Game struct {
 	tabSearchRepeatLast   time.Time
 	tabSearchInputRepeat  TextInputRepeat // backspace/cursor in the search text field
 
-	// Command palette state (Cmd+P).
-	paletteState   renderer.PaletteState
-	paletteEntries []renderer.PaletteEntry
-	paletteActions []func()
+	// Command palette controller (Cmd+P).
+	palette *PaletteController
 
 	// pinMode is true after Cmd+Space, waiting for a home-row slot keypress.
 	pinMode bool
@@ -238,12 +236,6 @@ type Game struct {
 	// Key repeat state for file explorer text inputs (search / rename / new).
 	explorerInputRepeat TextInputRepeat
 
-	// Key repeat state for command palette navigation (arrow keys) and text input.
-	paletteRepeatKey    ebiten.Key
-	paletteRepeatActive bool
-	paletteRepeatStart  time.Time
-	paletteRepeatLast   time.Time
-	paletteInputRepeat  TextInputRepeat // backspace/cursor in the query field
 
 	// Key repeat state for text input overlays.
 	renameRepeat     TextInputRepeat // tab rename
@@ -492,6 +484,7 @@ func main() {
 		tabHoverState:    renderer.TabHoverState{TabIdx: -1},
 		poller:           NewStatusPoller(),
 		search:           NewSearchController(),
+		palette:          NewPaletteController(),
 		clipboardCh:      make(chan string, 1),
 	}
 
@@ -788,7 +781,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	// Hint mode: show tab number badges when Cmd is held and no modal is active.
 	hintMode := ebiten.IsKeyPressed(ebiten.KeyMeta) &&
-		!g.overlayState.Open && !g.paletteState.Open && !g.confirmState.Open &&
+		!g.overlayState.Open && !g.palette.State.Open && !g.confirmState.Open &&
 		!g.mdViewerState.Open && !g.urlInputState.Open && !g.tabSwitcherState.Open &&
 		!g.tabSearchState.Open && !g.search.State.Open &&
 		!g.menuState.Open && !g.fileExplorerState.Open
@@ -804,8 +797,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		Search:         &g.search.State,
 		StatusBar:      &g.statusBarState,
 		TabSwitcher:    &g.tabSwitcherState,
-		Palette:        &g.paletteState,
-		PaletteEntries: g.paletteEntries,
+		Palette:        &g.palette.State,
+		PaletteEntries: g.palette.Entries,
 		FileExplorer:   &g.fileExplorerState,
 		TabSearch:      &g.tabSearchState,
 		Stats:          &g.statsState,
@@ -950,7 +943,7 @@ func (g *Game) handleInput() {
 	}
 
 	// When the command palette is open, route input to palette handling.
-	if g.paletteState.Open {
+	if g.palette.State.Open {
 		g.screenDirty = true
 		g.handlePaletteInput()
 		return
@@ -2117,7 +2110,7 @@ func (g *Game) handleMouse() {
 	}
 
 	// Palette dismisses on any click.
-	if g.paletteState.Open {
+	if g.palette.State.Open {
 		if leftPressed && !leftWas {
 			g.closePalette()
 		}

@@ -369,10 +369,9 @@ func (g *Game) handleOverlayInput() {
 
 // openPalette opens the command palette, closing any conflicting surfaces.
 func (g *Game) openPalette() {
-	g.paletteState = renderer.PaletteState{Open: true}
+	g.palette.Open()
 	g.overlayState = renderer.OverlayState{}
 	g.closeMenu()
-	g.paletteRepeatActive = false
 	g.prevKeys[ebiten.KeyArrowUp] = ebiten.IsKeyPressed(ebiten.KeyArrowUp)
 	g.prevKeys[ebiten.KeyArrowDown] = ebiten.IsKeyPressed(ebiten.KeyArrowDown)
 	g.screenDirty = true
@@ -380,7 +379,7 @@ func (g *Game) openPalette() {
 
 // closePalette closes the command palette.
 func (g *Game) closePalette() {
-	g.paletteState = renderer.PaletteState{}
+	g.palette.Close()
 	g.screenDirty = true
 }
 
@@ -510,8 +509,8 @@ func (g *Game) buildPalette() {
 		actions = append(actions, func() { g.switchTheme(themeName) })
 	}
 
-	g.paletteEntries = entries
-	g.paletteActions = actions
+	g.palette.Entries = entries
+	g.palette.Actions = actions
 }
 
 // handlePaletteInput processes keyboard input while the command palette is open.
@@ -519,25 +518,29 @@ func (g *Game) handlePaletteInput() {
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
 	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 
-	filtered, origIdx := renderer.FilterPalette(g.paletteEntries, g.paletteState.Query)
+	filtered, origIdx := renderer.FilterPalette(g.palette.Entries, g.palette.State.Query)
 
 	now := time.Now()
 
 	// Arrow keys with OS-style repeat (delay then interval).
-	if g.updatePaletteRepeat(ebiten.KeyArrowUp, now) && g.paletteState.Cursor > 0 {
-		g.paletteState.Cursor--
+	upPressed := ebiten.IsKeyPressed(ebiten.KeyArrowUp)
+	downPressed := ebiten.IsKeyPressed(ebiten.KeyArrowDown)
+	if g.palette.UpdateRepeat(ebiten.KeyArrowUp, upPressed, g.prevKeys[ebiten.KeyArrowUp], now) && g.palette.State.Cursor > 0 {
+		g.palette.State.Cursor--
 	}
-	if g.updatePaletteRepeat(ebiten.KeyArrowDown, now) && g.paletteState.Cursor < len(filtered)-1 {
-		g.paletteState.Cursor++
+	if g.palette.UpdateRepeat(ebiten.KeyArrowDown, downPressed, g.prevKeys[ebiten.KeyArrowDown], now) && g.palette.State.Cursor < len(filtered)-1 {
+		g.palette.State.Cursor++
 	}
+	g.prevKeys[ebiten.KeyArrowUp] = upPressed
+	g.prevKeys[ebiten.KeyArrowDown] = downPressed
 
 	// ESC: clear query if non-empty, otherwise close. Uses inpututil to catch
 	// sub-frame taps that polling misses.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		if g.paletteState.Query != "" {
-			g.paletteState.Query = ""
-			g.paletteState.Cursor = 0
-			g.paletteState.CursorPos = 0
+		if g.palette.State.Query != "" {
+			g.palette.State.Query = ""
+			g.palette.State.Cursor = 0
+			g.palette.State.CursorPos = 0
 		} else {
 			g.closePalette()
 		}
@@ -555,11 +558,11 @@ func (g *Game) handlePaletteInput() {
 		}
 		switch {
 		case key == ebiten.KeyEnter:
-			if g.paletteState.Cursor < len(origIdx) {
-				orig := origIdx[g.paletteState.Cursor]
-				if orig < len(g.paletteActions) && g.paletteActions[orig] != nil {
+			if g.palette.State.Cursor < len(origIdx) {
+				orig := origIdx[g.palette.State.Cursor]
+				if orig < len(g.palette.Actions) && g.palette.Actions[orig] != nil {
 					g.closePalette()
-					g.paletteActions[orig]()
+					g.palette.Actions[orig]()
 				}
 			}
 		case key == ebiten.KeyP && meta:
@@ -568,42 +571,14 @@ func (g *Game) handlePaletteInput() {
 	}
 	g.prevKeys[ebiten.KeyMeta] = meta
 
-	prevQuery := g.paletteState.Query
-	ti := &TextInput{Text: g.paletteState.Query, CursorPos: g.paletteState.CursorPos}
-	ti.Update(&g.paletteInputRepeat, meta, alt)
-	g.paletteState.Query = ti.Text
-	g.paletteState.CursorPos = ti.CursorPos
-	if g.paletteState.Query != prevQuery {
-		g.paletteState.Cursor = 0
+	prevQuery := g.palette.State.Query
+	ti := &TextInput{Text: g.palette.State.Query, CursorPos: g.palette.State.CursorPos}
+	ti.Update(&g.palette.inputRepeat, meta, alt)
+	g.palette.State.Query = ti.Text
+	g.palette.State.CursorPos = ti.CursorPos
+	if g.palette.State.Query != prevQuery {
+		g.palette.State.Cursor = 0
 	}
-}
-
-// updatePaletteRepeat implements OS-style key repeat for the command palette arrow keys.
-func (g *Game) updatePaletteRepeat(key ebiten.Key, now time.Time) bool {
-	pressed := ebiten.IsKeyPressed(key)
-	was := g.prevKeys[key]
-	g.prevKeys[key] = pressed
-
-	if !pressed {
-		if g.paletteRepeatActive && g.paletteRepeatKey == key {
-			g.paletteRepeatActive = false
-		}
-		return false
-	}
-	if !was {
-		g.paletteRepeatKey = key
-		g.paletteRepeatActive = true
-		g.paletteRepeatStart = now
-		g.paletteRepeatLast = now
-		return true
-	}
-	if g.paletteRepeatActive && g.paletteRepeatKey == key &&
-		now.Sub(g.paletteRepeatStart) >= keyRepeatDelay &&
-		now.Sub(g.paletteRepeatLast) >= keyRepeatInterval {
-		g.paletteRepeatLast = now
-		return true
-	}
-	return false
 }
 
 // --- Confirm dialog ---

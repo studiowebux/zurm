@@ -1003,14 +1003,14 @@ func (g *Game) attachServerSession() {
 			displayName = si.ID[:8]
 		}
 		attachLabel := fmt.Sprintf("Attach: %s (pid %d, %dx%d, %s)", displayName, si.PID, si.Cols, si.Rows, si.Dir)
-		g.paletteEntries = append(g.paletteEntries, renderer.PaletteEntry{Name: attachLabel})
-		g.paletteActions = append(g.paletteActions, func() {
+		g.palette.Entries = append(g.palette.Entries, renderer.PaletteEntry{Name: attachLabel})
+		g.palette.Actions = append(g.palette.Actions, func() {
 			g.openServerTabForSession(si.ID)
 		})
 
 		killLabel := fmt.Sprintf("Kill: %s (pid %d)", displayName, si.PID)
-		g.paletteEntries = append(g.paletteEntries, renderer.PaletteEntry{Name: killLabel})
-		g.paletteActions = append(g.paletteActions, func() {
+		g.palette.Entries = append(g.palette.Entries, renderer.PaletteEntry{Name: killLabel})
+		g.palette.Actions = append(g.palette.Actions, func() {
 			if err := killSession(addr, si.ID); err != nil {
 				g.flashStatus("Kill failed: " + err.Error())
 			} else {
@@ -1020,8 +1020,8 @@ func (g *Game) attachServerSession() {
 	}
 
 	// Open palette pre-filtered to the injected entries.
-	g.paletteState.Open = true
-	g.paletteState.Query = ""
+	g.palette.State.Open = true
+	g.palette.State.Query = ""
 	g.screenDirty = true
 }
 

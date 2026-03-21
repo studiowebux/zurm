@@ -124,7 +124,7 @@ func (g *Game) updateTabHover(mx, my int) {
 
 	// Dismiss conditions: single tab, overlays open, dragging, cursor outside tab bar.
 	if numTabs <= 1 || g.tabDragging || g.menuState.Open || g.overlayState.Open ||
-		g.confirmState.Open || g.search.State.Open || g.paletteState.Open ||
+		g.confirmState.Open || g.search.State.Open || g.palette.State.Open ||
 		g.fileExplorerState.Open || g.tabSwitcherState.Open || g.tabSearchState.Open {
 		g.dismissTabHover()
 		return
@@ -516,7 +516,7 @@ func (g *Game) handleTabSwitcherInput() {
 func (g *Game) openTabSearch() {
 	g.tabSearchState = renderer.TabSearchState{Open: true}
 	g.tabSwitcherState = renderer.TabSwitcherState{}
-	g.paletteState = renderer.PaletteState{}
+	g.palette.Close()
 	g.overlayState = renderer.OverlayState{}
 	g.closeMenu()
 	g.tabSearchRepeatActive = false
