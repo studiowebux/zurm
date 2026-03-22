@@ -227,7 +227,7 @@ func (g *Game) setFocusNoHistory(p *pane.Pane) {
 	g.lastMouseCol = 0
 	g.lastMouseRow = 0
 	g.statusBarState.ForegroundProc = ""
-	p.Term.RefreshForeground()
+	p.Term.RefreshForeground(g.ctx)
 	if g.search.State.Open {
 		g.closeSearchOverlay()
 	}

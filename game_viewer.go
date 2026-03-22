@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -93,6 +94,10 @@ func (g *Game) handleURLInputInput() {
 	// ESC: close overlay (also cancels any pending fetch).
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.urlInputState = renderer.URLInputState{}
+		if g.llmsFetchCancel != nil {
+			g.llmsFetchCancel()
+			g.llmsFetchCancel = nil
+		}
 		g.llmsFetchCh = nil
 		g.prevKeys[ebiten.KeyEscape] = true
 		return
@@ -148,19 +153,31 @@ func (g *Game) startLLMSFetch(domain string) {
 	domain = strings.TrimSuffix(domain, "/llms.txt")
 	domain = strings.TrimSuffix(domain, "/llms-full.txt")
 
+	// Cancel any in-flight fetch before starting a new one.
+	if g.llmsFetchCancel != nil {
+		g.llmsFetchCancel()
+	}
+	ctx, cancel := context.WithTimeout(g.ctx, llmsFetchTimeout)
+	g.llmsFetchCancel = cancel
+
 	g.urlInputState.Loading = true
 	ch := make(chan llmsFetchResult, 1)
 	g.llmsFetchCh = ch
 
 	go func() {
-		client := &http.Client{Timeout: llmsFetchTimeout}
+		defer cancel()
+		client := &http.Client{}
 		type partial struct {
 			body string
 			ok   bool
 		}
 
 		fetch := func(path string) partial {
-			resp, err := client.Get("https://" + domain + path) // #nosec G107 — user-provided URL, intentional
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+domain+path, nil)
+			if err != nil {
+				return partial{}
+			}
+			resp, err := client.Do(req) // #nosec G107 — user-provided URL, intentional
 			if err != nil {
 				return partial{}
 			}

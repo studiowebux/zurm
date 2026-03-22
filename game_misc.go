@@ -496,6 +496,7 @@ PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }printf '\033]133;D;%s\007' \
 func (g *Game) toggleRecording() {
 	if g.recorder.Active() {
 		g.flashStatus("Saving recording…")
+		ctx := g.ctx
 		go func() {
 			path, err := g.recorder.Stop()
 			var msg string
@@ -504,11 +505,9 @@ func (g *Game) toggleRecording() {
 			} else {
 				msg = "Saved: " + filepath.Base(path)
 			}
-			// Non-blocking send: if a previous message hasn't been drained
-			// yet, this goroutine still exits cleanly (no leak).
 			select {
 			case g.recDone <- msg:
-			default:
+			case <-ctx.Done():
 			}
 		}()
 		return

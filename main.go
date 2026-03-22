@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"flag"
 	"fmt"
@@ -103,6 +104,11 @@ var jetbrainsMono []byte
 // Game implements ebiten.Game.
 // Pattern: game loop — Update handles logic, Draw handles rendering.
 type Game struct {
+	// Root context — cancelled on app exit. Derived contexts scope goroutines
+	// to their parent lifecycle (fetch, search, clipboard, etc.).
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	tabMgr *TabManager
 
 	// Convenience pointers into tabMgr.Tabs[tabMgr.ActiveIdx] — kept in sync via
@@ -253,6 +259,7 @@ type Game struct {
 	// llms.txt URL input overlay state (Cmd+L).
 	urlInputState    renderer.URLInputState
 	llmsFetchCh      chan llmsFetchResult
+	llmsFetchCancel  context.CancelFunc // cancels in-flight LLMS fetch
 	llmsShort        string // cached /llms.txt content
 	llmsFull         string // cached /llms-full.txt content
 	llmsDomain       string // domain of the last fetch
@@ -497,7 +504,10 @@ func main() {
 		initialActive = 0
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	game := &Game{
+		ctx:              ctx,
+		cancel:           cancel,
 		layout:           initialTabs[initialActive].Layout,
 		focused:          initialTabs[initialActive].Focused,
 		renderer:         rend,
@@ -581,6 +591,7 @@ func main() {
 // Update is called at 60 TPS by Ebitengine.
 func (g *Game) Update() error {
 	if len(g.tabMgr.Tabs) == 0 {
+		g.cancel()
 		g.saveSession()
 		return ebiten.Termination
 	}
@@ -591,6 +602,7 @@ func (g *Game) Update() error {
 	wantQuit := (meta || ctrl) && ebiten.IsKeyPressed(ebiten.KeyQ)
 	if (wantQuit || ebiten.IsWindowBeingClosed()) && !g.confirmState.Open {
 		g.showConfirm("Quit zurm? All sessions will be closed.", func() {
+			g.cancel()
 			g.saveSession()
 			for _, t := range g.tabMgr.Tabs {
 				for _, leaf := range t.Layout.Leaves() {
@@ -853,6 +865,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		bounds := screen.Bounds()
 		raw := make([]byte, bounds.Dx()*bounds.Dy()*4)
 		screen.ReadPixels(raw)
+		ctx := g.ctx
 		go func() {
 			var msg string
 			path, err := recorder.SavePNG(raw, bounds)
@@ -863,7 +876,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			}
 			select {
 			case g.screenshotDone <- msg:
-			default:
+			case <-ctx.Done():
 			}
 		}()
 	}

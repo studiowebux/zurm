@@ -333,7 +333,7 @@ func (g *Game) drainShellIntegration() {
 				}
 			case 'C':
 				// Command about to execute — one-shot query for foreground name.
-				go p.Term.QueryForeground()
+				go p.Term.QueryForeground(g.ctx)
 			}
 		default:
 		}
@@ -347,14 +347,14 @@ func (g *Game) pollStatusOnOutput() {
 
 	if g.poller.ShouldPollCwd(seq) {
 		if g.focused != nil {
-			go g.focused.Term.QueryCWD()
+			go g.focused.Term.QueryCWD(g.ctx)
 		}
 	}
 
 	if g.cfg.StatusBar.ShowProcess && g.poller.ShouldPollFg(seq) && g.tabMgr.ActiveIdx < len(g.tabMgr.Tabs) {
 		for _, leaf := range g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Layout.Leaves() {
 			if !leaf.Pane.Term.HasOSC133() {
-				go leaf.Pane.Term.QueryForeground()
+				go leaf.Pane.Term.QueryForeground(g.ctx)
 			}
 		}
 	}
@@ -379,15 +379,16 @@ func sanitizeTitle(s string) string {
 // via pbpaste and sends the result to clipboardCh. Non-blocking: if a previous
 // request is still pending, the new result replaces it.
 func (g *Game) requestClipboard() {
+	ctx := g.ctx
 	go func() {
-		out, err := exec.Command("pbpaste").Output() // #nosec G204 — fixed binary
+		out, err := exec.CommandContext(ctx, "pbpaste").Output() // #nosec G204 — fixed binary
 		if err != nil || len(out) == 0 {
 			return
 		}
 		clip := strings.ToValidUTF8(string(out), "")
 		select {
 		case g.clipboardCh <- clip:
-		default:
+		case <-ctx.Done():
 		}
 	}()
 }

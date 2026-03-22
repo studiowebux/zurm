@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"log"
@@ -386,7 +387,7 @@ func (t *Terminal) HasOSC133() bool { return t.osc133Active.Load() }
 // QueryCWD performs a one-shot CWD query via lsof and sends the result
 // to CwdCh. No-op when the shell already delivers CWD via OSC 7 (osc7Active)
 // or when the terminal is idle-suspended.
-func (t *Terminal) QueryCWD() {
+func (t *Terminal) QueryCWD(ctx context.Context) {
 	if t.paused.Load() || t.osc7Active.Load() {
 		return
 	}
@@ -394,7 +395,7 @@ func (t *Terminal) QueryCWD() {
 	if pid <= 0 {
 		return
 	}
-	out, err := exec.Command("lsof", "-a", "-p", // #nosec G204 — fixed binary, only argument is numeric PID
+	out, err := exec.CommandContext(ctx, "lsof", "-a", "-p", // #nosec G204 — fixed binary, only argument is numeric PID
 		fmt.Sprintf("%d", pid), "-d", "cwd", "-Fn").Output()
 	if err != nil {
 		return
@@ -405,7 +406,7 @@ func (t *Terminal) QueryCWD() {
 			if cwd != "" {
 				select {
 				case t.CwdCh <- cwd:
-				default:
+				case <-ctx.Done():
 				}
 			}
 			break
@@ -415,20 +416,20 @@ func (t *Terminal) QueryCWD() {
 
 // QueryForeground performs a one-shot foreground process query and sends
 // the result to ForegroundProcCh if it changed. Safe to call from a goroutine.
-func (t *Terminal) QueryForeground() {
+func (t *Terminal) QueryForeground(ctx context.Context) {
 	if t.paused.Load() {
 		return
 	}
-	name := t.foregroundProcessName()
+	name := t.foregroundProcessName(ctx)
 	select {
 	case t.ForegroundProcCh <- name:
-	default:
+	case <-ctx.Done():
 	}
 }
 
 // foregroundProcessName returns the basename of the foreground process in the PTY.
 // Returns an empty string when the shell itself is the foreground process or on error.
-func (t *Terminal) foregroundProcessName() string {
+func (t *Terminal) foregroundProcessName(ctx context.Context) string {
 	if t.pty == nil {
 		return ""
 	}
@@ -440,7 +441,7 @@ func (t *Terminal) foregroundProcessName() string {
 	if pgid == t.Pid() {
 		return ""
 	}
-	out, err := exec.Command("ps", "-p", fmt.Sprintf("%d", pgid), "-o", "comm=").Output() // #nosec G204 — fixed binary, only argument is numeric PGID
+	out, err := exec.CommandContext(ctx, "ps", "-p", fmt.Sprintf("%d", pgid), "-o", "comm=").Output() // #nosec G204 — fixed binary, only argument is numeric PGID
 	if err != nil {
 		return ""
 	}
@@ -454,15 +455,15 @@ func (t *Terminal) foregroundProcessName() string {
 // RefreshForeground immediately queries the foreground process and sends the
 // result to ForegroundProcCh. Called on focus switch so the status bar updates
 // right away without waiting for the next 1-second poll tick.
-func (t *Terminal) RefreshForeground() {
+func (t *Terminal) RefreshForeground(ctx context.Context) {
 	if !t.tcfg.ShowProcess {
 		return
 	}
 	go func() {
-		name := t.foregroundProcessName()
+		name := t.foregroundProcessName(ctx)
 		select {
 		case t.ForegroundProcCh <- name:
-		default:
+		case <-ctx.Done():
 		}
 	}()
 }
