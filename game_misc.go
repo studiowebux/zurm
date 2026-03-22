@@ -24,6 +24,12 @@ import (
 	"github.com/studiowebux/zurm/vault"
 )
 
+// screenshotState groups screenshot capture fields.
+type screenshotState struct {
+	Pending bool        // set by Cmd+Shift+S; consumed by Draw()
+	Done    chan string  // background PNG encode completion signal
+}
+
 // urlHoverState groups URL hover detection fields.
 type urlHoverState struct {
 	HoveredURL *terminal.URLMatch // URL under the cursor, nil if none

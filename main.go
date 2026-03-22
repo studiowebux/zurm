@@ -186,9 +186,8 @@ type Game struct {
 	// Initialized from cfg.Blocks.Enabled; toggled via command palette.
 	blocksEnabled bool
 
-	// screenshotPending is set by Cmd+Shift+S; consumed by Draw() to capture a PNG.
-	screenshotPending bool
-	screenshotDone    chan string // receives flash message when background PNG encode completes
+	// Screenshot capture state (Cmd+Shift+S).
+	screenshot screenshotState
 
 	// Screen recording state (FFMPEG pipe → MP4).
 	rec recState
@@ -464,7 +463,7 @@ func main() {
 			Recorder: recorder.New(winW, winH),
 			Done:     make(chan string, 1),
 		},
-		screenshotDone:   make(chan string, 1),
+		screenshot: screenshotState{Done: make(chan string, 1)},
 		tabHoverState:    renderer.TabHoverState{TabIdx: -1},
 		tabMgr:           NewTabManager(),
 		explorer:         NewExplorerController(),
@@ -581,7 +580,7 @@ func (g *Game) Update() error {
 
 	// Drain screenshot-done channel (background PNG encode sends flash message).
 	select {
-	case msg := <-g.screenshotDone:
+	case msg := <-g.screenshot.Done:
 		g.flashStatus(msg)
 	default:
 	}
@@ -802,8 +801,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	// Screenshot capture: one-shot, triggered by Cmd+Shift+S.
 	// ReadPixels must run on the main thread (GPU access); PNG encoding runs in background.
-	if g.screenshotPending {
-		g.screenshotPending = false
+	if g.screenshot.Pending {
+		g.screenshot.Pending = false
 		bounds := screen.Bounds()
 		raw := make([]byte, bounds.Dx()*bounds.Dy()*4)
 		screen.ReadPixels(raw)
@@ -817,7 +816,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 				msg = "Screenshot: " + filepath.Base(path)
 			}
 			select {
-			case g.screenshotDone <- msg:
+			case g.screenshot.Done <- msg:
 			case <-ctx.Done():
 			}
 		}()

@@ -507,7 +507,7 @@ func (g *Game) buildPalette() {
 		g.splitVServer,
 		g.attachServerSession,
 		// Recording
-		func() { g.screenshotPending = true; g.screenDirty = true },
+		func() { g.screenshot.Pending = true; g.screenDirty = true },
 		g.toggleRecording,
 		// Help
 		g.toggleOverlay,

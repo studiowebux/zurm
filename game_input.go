@@ -335,7 +335,7 @@ func (g *Game) handleAppShortcut(key ebiten.Key, ctrl, shift, meta, alt bool) bo
 		}
 
 	case meta && shift && key == ebiten.KeyS:
-		g.screenshotPending = true
+		g.screenshot.Pending = true
 		g.screenDirty = true
 
 	case meta && shift && key == ebiten.KeyPeriod:
