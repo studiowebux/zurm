@@ -19,9 +19,25 @@ import (
 	"github.com/studiowebux/zurm/pane"
 	"github.com/studiowebux/zurm/renderer"
 	"github.com/studiowebux/zurm/session"
+	"github.com/studiowebux/zurm/recorder"
 	"github.com/studiowebux/zurm/terminal"
 	"github.com/studiowebux/zurm/vault"
 )
+
+// urlHoverState groups URL hover detection fields.
+type urlHoverState struct {
+	HoveredURL *terminal.URLMatch // URL under the cursor, nil if none
+	Matches    []terminal.URLMatch // cached URL matches for the focused pane
+}
+
+// recState groups screen recording fields (FFMPEG pipe → MP4).
+type recState struct {
+	Recorder      *recorder.Recorder
+	Done          chan string // background Stop() completion signal
+	Buf           []byte     // reusable pixel buffer (avoids per-frame alloc)
+	LastFrame     time.Time  // throttle frame capture to 30fps
+	LastStatusSec int64      // throttle status bar update (blink + file size)
+}
 
 // vaultState groups command vault fields (encrypted history + ghost text suggestions).
 type vaultState struct {
@@ -501,13 +517,13 @@ PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }printf '\033]133;D;%s\007' \
 
 // toggleRecording starts or stops a screen recording (FFMPEG → MP4).
 // Stop runs in a background goroutine because ffmpeg finalization can block
-// for several seconds. Completion is communicated via g.recDone.
+// for several seconds. Completion is communicated via g.rec.Done.
 func (g *Game) toggleRecording() {
-	if g.recorder.Active() {
+	if g.rec.Recorder.Active() {
 		g.flashStatus("Saving recording…")
 		ctx := g.ctx
 		go func() {
-			path, err := g.recorder.Stop()
+			path, err := g.rec.Recorder.Stop()
 			var msg string
 			if err != nil {
 				msg = "Recording failed: " + err.Error()
@@ -515,7 +531,7 @@ func (g *Game) toggleRecording() {
 				msg = "Saved: " + filepath.Base(path)
 			}
 			select {
-			case g.recDone <- msg:
+			case g.rec.Done <- msg:
 			case <-ctx.Done():
 			}
 		}()
@@ -526,12 +542,12 @@ func (g *Game) toggleRecording() {
 	// cause AddFrame's size check to silently drop every frame.
 	physW := int(float64(g.winW) * g.dpi)
 	physH := int(float64(g.winH) * g.dpi)
-	g.recorder.Resize(physW, physH)
-	if err := g.recorder.Start(); err != nil {
+	g.rec.Recorder.Resize(physW, physH)
+	if err := g.rec.Recorder.Start(); err != nil {
 		g.flashStatus("Record error: " + err.Error())
 		return
 	}
-	g.flashStatus("Recording (" + g.recorder.OutputMode() + ") — Cmd+Shift+. to stop")
+	g.flashStatus("Recording (" + g.rec.Recorder.OutputMode() + ") — Cmd+Shift+. to stop")
 }
 
 // extractSelectedText returns the selected text from the focused pane,
@@ -598,8 +614,8 @@ func (g *Game) updateURLHover(mx, my, pad int) {
 	col := (mx - g.focused.Rect.Min.X - pad) / g.font.CellW
 	row := (my - g.focused.Rect.Min.Y - pad - g.focused.HeaderH) / g.font.CellH
 	if col < 0 || row < 0 || col >= g.focused.Cols || row >= g.focused.Rows {
-		if g.hoveredURL != nil {
-			g.hoveredURL = nil
+		if g.urlHover.HoveredURL != nil {
+			g.urlHover.HoveredURL = nil
 			g.screenDirty = true
 		}
 		return
@@ -607,13 +623,13 @@ func (g *Game) updateURLHover(mx, my, pad int) {
 
 	// Rescan URLs from the buffer.
 	g.focused.Term.Buf.RLock()
-	g.urlMatches = g.focused.Term.Buf.DetectURLs()
+	g.urlHover.Matches = g.focused.Term.Buf.DetectURLs()
 	g.focused.Term.Buf.RUnlock()
 
-	hit := terminal.URLAt(g.urlMatches, row, col)
-	if hit != g.hoveredURL {
+	hit := terminal.URLAt(g.urlHover.Matches, row, col)
+	if hit != g.urlHover.HoveredURL {
 		// Pointer comparison is sufficient — URLAt returns a pointer into urlMatches.
-		g.hoveredURL = hit
+		g.urlHover.HoveredURL = hit
 		g.screenDirty = true
 	}
 }
@@ -661,7 +677,7 @@ func (g *Game) reloadFont(oldFont config.FontConfig, newCfg *config.Config) {
 		newCfg.Font.File != oldFont.File ||
 		newCfg.Font.Fallback != oldFont.Fallback ||
 		!slices.Equal(newCfg.Font.Fallbacks, oldFont.Fallbacks)
-	if !fontChanged || (g.recorder != nil && g.recorder.Active()) {
+	if !fontChanged || (g.rec.Recorder != nil && g.rec.Recorder.Active()) {
 		return
 	}
 	fontBytes := jetbrainsMono
@@ -754,7 +770,7 @@ func (g *Game) switchTheme(name string) {
 // adjustFontSize changes the font size by delta points and reloads the font.
 // Clamped to [6, 72]. Skipped when recording is active.
 func (g *Game) adjustFontSize(delta float64) {
-	if g.recorder != nil && g.recorder.Active() {
+	if g.rec.Recorder != nil && g.rec.Recorder.Active() {
 		g.flashStatus("Cannot resize font while recording")
 		return
 	}

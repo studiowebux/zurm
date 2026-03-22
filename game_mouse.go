@@ -387,8 +387,8 @@ func (g *Game) handleMouseSelection(mx, my int, leftPressed, leftWas bool) {
 
 	// Cmd+click opens the URL under the cursor in the default browser.
 	if leftPressed && !leftWas && ebiten.IsKeyPressed(ebiten.KeyMeta) {
-		if g.hoveredURL != nil {
-			if err := exec.Command("open", g.hoveredURL.Text).Start(); err != nil { // #nosec G204 — opens user-visible URL in default browser
+		if g.urlHover.HoveredURL != nil {
+			if err := exec.Command("open", g.urlHover.HoveredURL.Text).Start(); err != nil { // #nosec G204 — opens user-visible URL in default browser
 				log.Printf("open URL failed: %v", err)
 			}
 			return

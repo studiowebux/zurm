@@ -22,7 +22,7 @@ func (g *Game) handleResize() {
 	physW, physH := g.physSize()
 	g.renderer.SetSize(physW, physH)
 	g.renderer.SetLayoutDirty()
-	g.recorder.Resize(physW, physH)
+	g.rec.Recorder.Resize(physW, physH)
 
 	paneRect := g.contentRect()
 

@@ -154,8 +154,7 @@ type Game struct {
 
 
 	// URL hover state — detected URLs in the focused pane's visible buffer.
-	hoveredURL *terminal.URLMatch // URL under the cursor, nil if none
-	urlMatches []terminal.URLMatch // cached URL matches for the focused pane
+	urlHover urlHoverState
 
 	// PTY mouse motion tracking for modes 1002/1003.
 	lastMouseCol int // last col sent to PTY (1-based)
@@ -233,11 +232,7 @@ type Game struct {
 	screenshotDone    chan string // receives flash message when background PNG encode completes
 
 	// Screen recording state (FFMPEG pipe → MP4).
-	recorder        *recorder.Recorder
-	recDone         chan string // receives flash message when background Stop() completes
-	recBuf          []byte     // reusable pixel buffer for frame capture (avoids per-frame alloc)
-	recLastFrame    time.Time  // last frame capture time (throttle to 30fps)
-	recLastStatusSec int64    // unix second of last status bar update (throttle os.Stat + blink)
+	rec recState
 
 	// Stats overlay state (Cmd+I).
 	statsState     renderer.StatsState
@@ -508,8 +503,10 @@ func main() {
 		prevMouseButtons: make(map[ebiten.MouseButton]bool),
 		mouseHeldBtn:     -1,
 		blocksEnabled:    cfg.Blocks.Enabled,
-		recorder:         recorder.New(winW, winH),
-		recDone:          make(chan string, 1),
+		rec: recState{
+			Recorder: recorder.New(winW, winH),
+			Done:     make(chan string, 1),
+		},
 		screenshotDone:   make(chan string, 1),
 		tabHoverState:    renderer.TabHoverState{TabIdx: -1},
 		tabMgr:           NewTabManager(),
@@ -620,7 +617,7 @@ func (g *Game) Update() error {
 
 	// Drain recording-done channel (background goroutine sends flash message).
 	select {
-	case msg := <-g.recDone:
+	case msg := <-g.rec.Done:
 		g.flashStatus(msg)
 	default:
 	}
@@ -633,14 +630,14 @@ func (g *Game) Update() error {
 	}
 
 	// Update recording status bar fields once per second (blink + file size).
-	if g.recorder.Active() {
+	if g.rec.Recorder.Active() {
 		g.statusBarState.Recording = true
-		g.statusBarState.RecordingMode = g.recorder.OutputMode()
+		g.statusBarState.RecordingMode = g.rec.Recorder.OutputMode()
 		now := time.Now()
-		if now.Unix() != g.recLastStatusSec {
-			g.recLastStatusSec = now.Unix()
-			g.statusBarState.RecordingDuration = now.Sub(g.recorder.StartTime())
-			g.statusBarState.RecordingBytes = g.recorder.OutputSize()
+		if now.Unix() != g.rec.LastStatusSec {
+			g.rec.LastStatusSec = now.Unix()
+			g.statusBarState.RecordingDuration = now.Sub(g.rec.Recorder.StartTime())
+			g.statusBarState.RecordingBytes = g.rec.Recorder.OutputSize()
 			g.screenDirty = true
 		}
 	} else if g.statusBarState.Recording {
@@ -765,18 +762,18 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// still produce duplicate frames at 30fps. The screen retains its content
 	// between frames (SetScreenClearedEveryFrame(false)), so ReadPixels returns
 	// the last painted content even when nothing new was drawn.
-	if g.recorder.Active() {
+	if g.rec.Recorder.Active() {
 		now := time.Now()
-		if now.Sub(g.recLastFrame) >= recorder.FrameDuration {
-			g.recLastFrame = now
+		if now.Sub(g.rec.LastFrame) >= recorder.FrameDuration {
+			g.rec.LastFrame = now
 			needed := screen.Bounds().Dx() * screen.Bounds().Dy() * 4
-			if len(g.recBuf) != needed {
-				g.recBuf = make([]byte, needed)
+			if len(g.rec.Buf) != needed {
+				g.rec.Buf = make([]byte, needed)
 			}
-			screen.ReadPixels(g.recBuf)
+			screen.ReadPixels(g.rec.Buf)
 			frame := make([]byte, needed)
-			copy(frame, g.recBuf)
-			g.recorder.AddFrame(frame)
+			copy(frame, g.rec.Buf)
+			g.rec.Recorder.AddFrame(frame)
 		}
 	}
 
@@ -810,7 +807,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// our snapshot and triggers a redraw on the next frame.
 	g.lastPtySeq = terminal.RenderSeq()
 
-	g.renderer.HoveredURL = g.hoveredURL
+	g.renderer.HoveredURL = g.urlHover.HoveredURL
 	g.renderer.VaultSuggestion = g.vlt.Suggest
 	if g.tabMgr.ActiveIdx >= 0 && g.tabMgr.ActiveIdx < len(g.tabMgr.Tabs) {
 		g.statusBarState.TabNote = g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Note

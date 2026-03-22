@@ -220,8 +220,8 @@ func (g *Game) setFocusNoHistory(p *pane.Pane) {
 	g.focused = p
 	g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Focused = p
 	g.selDrag.Active = false
-	g.hoveredURL = nil
-	g.urlMatches = nil
+	g.urlHover.HoveredURL = nil
+	g.urlHover.Matches = nil
 	g.scrollAccum = 0
 	g.mouseHeldBtn = -1
 	g.lastMouseCol = 0
