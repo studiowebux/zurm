@@ -95,7 +95,6 @@ func (g *Game) drainTitle() {
 }
 
 
-// searchResult delivers async SearchAll results to the game loop.
 // drainCwd reads the latest CWD from the focused pane's OSC 7 channel.
 // When the CWD changes it kicks off an async git status lookup via the poller.
 func (g *Game) drainCwd() {

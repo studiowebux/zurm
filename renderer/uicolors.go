@@ -20,7 +20,7 @@ func inputWithCursor(text string, pos int) string {
 }
 
 // UIColors holds all derived UI chrome colors for overlays, menus, and panels.
-// Computed once from config.Config so draw functions never hard-code color literals.
+// Computed once from RenderConfig so draw functions never hard-code color literals.
 // Pattern: derived value — computed at renderer init, re-derived on config reload.
 type UIColors struct {
 	// PanelBg is the background of floating panels (command palette, menu, help overlay).
@@ -73,12 +73,12 @@ type UIColors struct {
 //   - PanelBg  = background darkened twice (~65% brightness)
 //   - HoverBg  = background brightened (~130% brightness)
 //   - Backdrop = background at ~40% brightness, semi-transparent
-//   - Border   = config.Colors.Border (directly)
-//   - Accent   = config.Colors.Cursor
-//   - CatHdr   = config.Colors.BrightMagenta
-//   - KeyName  = config.Colors.Yellow
-//   - Fg       = config.Colors.Foreground
-//   - Dim      = config.Colors.BrightBlack
+//   - Border   = Colors.Border (directly)
+//   - Accent   = Colors.Cursor
+//   - CatHdr   = Colors.BrightMagenta
+//   - KeyName  = Colors.Yellow
+//   - Fg       = Colors.Foreground
+//   - Dim      = Colors.BrightBlack
 func deriveUIColors(cfg *RenderConfig) UIColors {
 	bg := parseHexColor(cfg.Colors.Background)
 	return UIColors{

@@ -223,7 +223,7 @@ func NewRenderer(font *FontRenderer, cfg *RenderConfig) *Renderer {
 	}
 }
 
-// ReloadColors updates the renderer's color state from a new config.
+// ReloadColors updates the renderer's color state from a new RenderConfig.
 // Re-parses cursor/border colors, re-derives UI colors, clears pane cache,
 // and marks the layout dirty so everything redraws.
 func (r *Renderer) ReloadColors(cfg *RenderConfig) {

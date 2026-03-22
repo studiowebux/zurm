@@ -738,10 +738,6 @@ func (g *Game) sendMouseMotion(btn, col, row int, sgr bool) {
 	}
 }
 
-// --- Tab management ---
-
-// openTabContextMenu shows a small tab-specific context menu (Rename, Close).
-// Actions target the tab under the cursor, not necessarily the active tab.
 
 
 
