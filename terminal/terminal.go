@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -56,6 +57,10 @@ type Terminal struct {
 	// osc7Active is set true on the first OSC 7 CWD notification from the shell.
 	// Once set, QueryCWD skips the lsof fallback — the shell delivers CWD itself.
 	osc7Active atomic.Bool
+
+	// ptyWriteErr tracks whether a PTY write error has been logged.
+	// Once set, further write errors are silently dropped to avoid log spam.
+	ptyWriteErr atomic.Bool
 
 	// osc133Active is set true on the first OSC 133 shell integration event.
 	// Once set, periodic ps-based foreground polling is skipped.
@@ -142,10 +147,18 @@ func (t *Terminal) StartWithBackend(backend PtyBackend) error {
 	return nil
 }
 
+// writePTY writes to the PTY and logs the first error. Subsequent write errors
+// are silently dropped to avoid flooding the log when the shell exits.
+func (t *Terminal) writePTY(b []byte) {
+	if _, err := t.pty.Write(b); err != nil && !t.ptyWriteErr.Swap(true) {
+		log.Printf("terminal: PTY write failed: %v", err)
+	}
+}
+
 // SendBytes writes raw bytes to the PTY stdin.
 func (t *Terminal) SendBytes(b []byte) {
 	if t.pty != nil && len(b) > 0 {
-		t.pty.Write(b)
+		t.writePTY(b)
 	}
 }
 
@@ -163,7 +176,7 @@ func (t *Terminal) SendDA1Response() {
 	t.Buf.PendingDA1 = false
 	t.Buf.Unlock()
 	// VT400-class terminal with ANSI color.
-	t.pty.Write([]byte("\x1B[?62;22c"))
+	t.writePTY([]byte("\x1B[?62;22c"))
 }
 
 // SendDA2Response sends secondary device attributes if one is pending (CSI > c).
@@ -180,7 +193,7 @@ func (t *Terminal) SendDA2Response() {
 	t.Buf.PendingDA2 = false
 	t.Buf.Unlock()
 	// VT terminal, version 10, ROM cartridge 1.
-	t.pty.Write([]byte("\x1B[>0;10;1c"))
+	t.writePTY([]byte("\x1B[>0;10;1c"))
 }
 
 // SendFocusEvent sends a focus-in or focus-out event when mode 1004 is active.
@@ -195,9 +208,9 @@ func (t *Terminal) SendFocusEvent(focused bool) {
 		return
 	}
 	if focused {
-		t.pty.Write([]byte("\x1B[I"))
+		t.writePTY([]byte("\x1B[I"))
 	} else {
-		t.pty.Write([]byte("\x1B[O"))
+		t.writePTY([]byte("\x1B[O"))
 	}
 }
 
@@ -223,10 +236,10 @@ func (t *Terminal) SendPendingResponses() {
 	t.Buf.Unlock()
 
 	for _, resp := range responses {
-		t.pty.Write(resp)
+		t.writePTY(resp)
 	}
 	if kittyQuery {
-		t.pty.Write([]byte(fmt.Sprintf("\x1B[?%du", kittyFlags)))
+		t.writePTY([]byte(fmt.Sprintf("\x1B[?%du", kittyFlags)))
 	}
 }
 
@@ -258,7 +271,7 @@ func (t *Terminal) SendCPRResponse() {
 	col := t.Buf.CursorCol + 1
 	t.Buf.Unlock()
 	resp := fmt.Sprintf("\x1B[%d;%dR", row, col)
-	t.pty.Write([]byte(resp))
+	t.writePTY([]byte(resp))
 }
 
 // SendClipboardResponses drains OSC 52 clipboard write requests and query
@@ -286,7 +299,7 @@ func (t *Terminal) SendClipboardResponses() {
 		if err == nil {
 			encoded := base64.StdEncoding.EncodeToString(out)
 			resp := fmt.Sprintf("\x1B]52;c;%s\x1B\\", encoded)
-			t.pty.Write([]byte(resp))
+			t.writePTY([]byte(resp))
 		}
 	}
 }
@@ -316,7 +329,9 @@ func (t *Terminal) Resize(cols, rows int) {
 	}
 	t.Buf.Unlock()
 	if t.pty != nil {
-		t.pty.Resize(cols, rows)
+		if err := t.pty.Resize(cols, rows); err != nil {
+			log.Printf("terminal: PTY resize failed: %v", err)
+		}
 	}
 }
 
@@ -358,7 +373,9 @@ type sessionRenamer interface {
 // No-op for local PTY sessions. Called when the user renames a server-backed pane.
 func (t *Terminal) RenameSession(name string) {
 	if r, ok := t.pty.(sessionRenamer); ok {
-		r.RenameSession(name) //nolint:errcheck — best-effort; pane CustomName is already applied
+		if err := r.RenameSession(name); err != nil {
+			log.Printf("terminal: rename session failed: %v", err)
+		}
 	}
 }
 

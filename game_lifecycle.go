@@ -146,7 +146,7 @@ func (g *Game) handleDroppedFiles() {
 		} else {
 			paths = append(paths, shellEscape(e.Name()))
 		}
-		f.Close()
+		_ = f.Close()
 	}
 	if len(paths) == 0 {
 		return

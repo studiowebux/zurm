@@ -46,7 +46,9 @@ func (v *Vault) Close() {
 	default:
 		close(v.done)
 	}
-	v.Save()
+	if err := v.Save(); err != nil {
+		log.Printf("vault: flush on close failed: %v", err)
+	}
 }
 
 // Load reads the encrypted vault file. Starts empty if the file is missing.

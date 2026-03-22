@@ -394,9 +394,11 @@ func (g *Game) collectStats() {
 	g.statsState.Goroutines = runtime.NumGoroutine()
 	g.statsState.HeapAlloc = samples[0].Value.Uint64()
 	g.statsState.HeapSys = samples[1].Value.Uint64()
-	g.statsState.NumGC = uint32(gcStats.NumGC) //nolint:gosec // GC count never overflows uint32
-	if len(gcStats.Pause) > 0 {
-		g.statsState.GCPauseNs = uint64(gcStats.Pause[0]) //nolint:gosec // pause duration fits uint64
+	if gcStats.NumGC >= 0 {
+		g.statsState.NumGC = uint32(gcStats.NumGC) // #nosec G115 — NumGC is a monotonic counter, always non-negative
+	}
+	if len(gcStats.Pause) > 0 && gcStats.Pause[0] >= 0 {
+		g.statsState.GCPauseNs = uint64(gcStats.Pause[0]) // #nosec G115 — pause duration is always non-negative
 	}
 	g.statsState.TabCount = len(g.tabMgr.Tabs)
 	paneCount := 0

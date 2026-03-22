@@ -40,7 +40,9 @@ func main() {
 		<-quit
 		log.Println("zurm-server: shutting down")
 		srv.Close()
-		os.Remove(*socket)
+		if err := os.Remove(*socket); err != nil {
+			log.Printf("zurm-server: socket cleanup failed: %v", err)
+		}
 		os.Exit(0)
 	}()
 

@@ -84,7 +84,7 @@ func deriveUIColors(cfg *RenderConfig) UIColors {
 	return UIColors{
 		PanelBg:     darken(darken(bg)),
 		HoverBg:     brighten(bg),
-		Backdrop:    color.RGBA{R: uint8(int(bg.R) * 2 / 5), G: uint8(int(bg.G) * 2 / 5), B: uint8(int(bg.B) * 2 / 5), A: backdropAlpha},
+		Backdrop:    color.RGBA{R: clamp8(int(bg.R) * 2 / 5), G: clamp8(int(bg.G) * 2 / 5), B: clamp8(int(bg.B) * 2 / 5), A: backdropAlpha},
 		Border:      parseHexColor(cfg.Colors.Border),
 		Accent:      parseHexColor(cfg.Colors.Cursor),
 		CatHdr:      parseHexColor(cfg.Colors.BrightMagenta),
@@ -120,6 +120,17 @@ func (r *Renderer) separatorColor() color.RGBA {
 		return parseHexColor(r.cfg.Colors.Separator)
 	}
 	return parseHexColor(r.cfg.Colors.BrightBlack)
+}
+
+// clamp8 clamps an int to the [0, 255] range and returns it as uint8.
+func clamp8(v int) uint8 {
+	if v < 0 {
+		return 0
+	}
+	if v > 255 {
+		return 255
+	}
+	return uint8(v) // #nosec G115 — value is clamped to [0, 255]
 }
 
 // brighten returns a lighter version of c (scales RGB by 130%, clamped at 255).

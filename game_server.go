@@ -106,7 +106,9 @@ func runListSessions() error {
 	for _, s := range sessions {
 		fmt.Fprintf(w, "%s\t%s\t%d\t%dx%d\t%s\n", s.ID, s.Name, s.PID, s.Cols, s.Rows, s.Dir)
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		return fmt.Errorf("flush session list: %w", err)
+	}
 	return nil
 }
 

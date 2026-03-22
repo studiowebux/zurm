@@ -83,8 +83,8 @@ func (sp *StatusPoller) StartGitQuery(cwd string) {
 					rest := header[dotIdx+3:]
 					if brk := strings.Index(rest, " ["); brk >= 0 && strings.HasSuffix(rest, "]") {
 						for _, part := range strings.Split(rest[brk+2:len(rest)-1], ", ") {
-							fmt.Sscanf(part, "ahead %d", &info.Ahead)  //nolint:errcheck
-							fmt.Sscanf(part, "behind %d", &info.Behind) //nolint:errcheck
+							_, _ = fmt.Sscanf(part, "ahead %d", &info.Ahead)
+							_, _ = fmt.Sscanf(part, "behind %d", &info.Behind)
 						}
 					}
 				} else if header == "HEAD (no branch)" {

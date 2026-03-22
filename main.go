@@ -941,7 +941,7 @@ func resolveShellPath() {
 	// Ensure UTF-8 locale for subprocesses (pbcopy, pbpaste, ffmpeg, etc.).
 	lang := os.Getenv("LANG")
 	if lang == "" || !strings.Contains(strings.ToUpper(lang), "UTF-8") {
-		os.Setenv("LANG", "en_US.UTF-8")
+		_ = os.Setenv("LANG", "en_US.UTF-8")
 	}
 
 	shell := os.Getenv("SHELL")
@@ -970,7 +970,7 @@ func resolveShellPath() {
 		}
 	}
 	if len(added) > 0 {
-		os.Setenv("PATH", currentPath+":"+strings.Join(added, ":"))
+		_ = os.Setenv("PATH", currentPath+":"+strings.Join(added, ":"))
 	}
 }
 

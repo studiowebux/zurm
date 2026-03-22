@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -839,11 +840,13 @@ func (g *Game) sendViewerToPane() {
 		return
 	}
 	if _, err := tmpFile.WriteString(buf.String()); err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		g.flashStatus("Failed to write temp file: " + err.Error())
 		return
 	}
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		log.Printf("viewer: temp file close failed: %v", err)
+	}
 
 	// Close the viewer.
 	g.mdViewerState = renderer.MarkdownViewerState{}
@@ -867,10 +870,16 @@ func (g *Game) sendViewerToPane() {
 		ShowProcess:     g.cfg.StatusBar.ShowProcess,
 	})
 	tmpPath := tmpFile.Name()
-	term.StartCmd("less", []string{"-R", tmpPath}, "")
+	if err := term.StartCmd("less", []string{"-R", tmpPath}, ""); err != nil {
+		g.flashStatus("Failed to start less: " + err.Error())
+		_ = os.Remove(tmpPath)
+		return
+	}
 	go func() {
 		<-term.Dead()
-		os.Remove(tmpPath)
+		if err := os.Remove(tmpPath); err != nil {
+			log.Printf("viewer: temp file cleanup failed: %v", err)
+		}
 	}()
 	p := &pane.Pane{
 		Term:       term,
