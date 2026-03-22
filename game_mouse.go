@@ -94,7 +94,7 @@ func (g *Game) handleMouse() {
 				cmd := exec.Command("pbcopy")
 				cmd.Stdin = strings.NewReader(copyText)
 				if err := cmd.Run(); err != nil {
-					log.Printf("pbcopy (block): %v", err)
+					log.Printf("zurm: pbcopy (block): %v", err)
 				}
 				g.flashStatus(label)
 			}
@@ -673,7 +673,7 @@ func (g *Game) copySelection() {
 	cmd := exec.Command("pbcopy")
 	cmd.Stdin = strings.NewReader(result)
 	if err := cmd.Run(); err != nil {
-		log.Printf("pbcopy (selection): %v", err)
+		log.Printf("zurm: pbcopy (selection): %v", err)
 	}
 }
 

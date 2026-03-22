@@ -436,6 +436,9 @@ func (g *Game) buildPalette() {
 		g.startRenamePane,
 		// Scroll
 		func() {
+			if g.focused == nil {
+				return
+			}
 			g.focused.Term.Buf.Lock()
 			vo := g.focused.Term.Buf.ViewOffset - g.focused.Rows/2
 			if vo < 0 {
@@ -445,11 +448,17 @@ func (g *Game) buildPalette() {
 			g.focused.Term.Buf.Unlock()
 		},
 		func() {
+			if g.focused == nil {
+				return
+			}
 			g.focused.Term.Buf.Lock()
 			g.focused.Term.Buf.SetViewOffset(g.focused.Term.Buf.ViewOffset + g.focused.Rows/2)
 			g.focused.Term.Buf.Unlock()
 		},
 		func() {
+			if g.focused == nil {
+				return
+			}
 			g.focused.Term.Buf.Lock()
 			g.focused.Term.Buf.ClearScrollback()
 			g.focused.Term.Buf.Unlock()

@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -48,27 +49,30 @@ func Path() (string, error) {
 func Save(data *SessionData) error {
 	p, err := Path()
 	if err != nil {
-		return err
+		return fmt.Errorf("session: resolve path: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return err
+		return fmt.Errorf("session: create dir: %w", err)
 	}
 	f, err := os.CreateTemp(filepath.Dir(p), "session-*.json")
 	if err != nil {
-		return err
+		return fmt.Errorf("session: create temp: %w", err)
 	}
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(data); err != nil {
 		f.Close()          // #nosec G104 G703 — cleanup on error; path from UserHomeDir
 		os.Remove(f.Name()) // #nosec G104 G703
-		return err
+		return fmt.Errorf("session: encode: %w", err)
 	}
 	if err := f.Close(); err != nil {
 		os.Remove(f.Name()) // #nosec G104 G703 — cleanup on error
-		return err
+		return fmt.Errorf("session: close temp: %w", err)
 	}
-	return os.Rename(f.Name(), p) // #nosec G703 — path from UserHomeDir
+	if err := os.Rename(f.Name(), p); err != nil { // #nosec G703 — path from UserHomeDir
+		return fmt.Errorf("session: rename: %w", err)
+	}
+	return nil
 }
 
 // Load reads and parses the session file. Returns nil, nil when the file does
@@ -76,19 +80,19 @@ func Save(data *SessionData) error {
 func Load() (*SessionData, error) {
 	p, err := Path()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("session: resolve path: %w", err)
 	}
 	f, err := os.Open(p) // #nosec G304 G703 — path from os.UserHomeDir(), not user input
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("session: open: %w", err)
 	}
 	defer f.Close()
 	var data SessionData
 	if err := json.NewDecoder(f).Decode(&data); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("session: decode: %w", err)
 	}
 	return &data, nil
 }

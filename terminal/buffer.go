@@ -685,6 +685,12 @@ func (sb *ScreenBuffer) IsAltActive() bool {
 // Resize resizes the screen buffer, preserving content where possible.
 // Caller must hold write lock.
 func (sb *ScreenBuffer) Resize(rows, cols int) {
+	if rows < 1 {
+		rows = 1
+	}
+	if cols < 1 {
+		cols = 1
+	}
 	if rows == sb.Rows && cols == sb.Cols {
 		return
 	}

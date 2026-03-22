@@ -133,7 +133,7 @@ func spawnServer(binary, socketPath string) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	if err := cmd.Start(); err != nil {
-		return err
+		return fmt.Errorf("zserver/autostart: spawn server: %w", err)
 	}
 
 	log.Printf("zserver/autostart: spawned zurm-server (pid %d) at %s — log: %s",

@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -61,17 +62,17 @@ func (v *Vault) Load() error {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("vault: read: %w", err)
 	}
 
 	key, err := loadOrCreateKey(v.keyPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("vault: load key: %w", err)
 	}
 
 	plain, err := decrypt(data, key)
 	if err != nil {
-		return err
+		return fmt.Errorf("vault: decrypt: %w", err)
 	}
 
 	for _, line := range strings.Split(string(plain), "\n") {
@@ -92,7 +93,7 @@ func (v *Vault) Load() error {
 func (v *Vault) ImportZshHistory(histPath string) error {
 	commands, err := ParseZshHistory(histPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("vault: import zsh history: %w", err)
 	}
 
 	v.mu.Lock()
@@ -124,16 +125,16 @@ func (v *Vault) Save() error {
 
 	key, err := loadOrCreateKey(v.keyPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("vault: load key: %w", err)
 	}
 
 	enc, err := encrypt(data, key)
 	if err != nil {
-		return err
+		return fmt.Errorf("vault: encrypt: %w", err)
 	}
 
 	if err := os.WriteFile(v.vaultPath, enc, 0o600); err != nil {
-		return err
+		return fmt.Errorf("vault: write: %w", err)
 	}
 	v.dirty = false
 	return nil

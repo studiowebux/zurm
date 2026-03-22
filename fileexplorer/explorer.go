@@ -29,7 +29,7 @@ type Clipboard struct {
 func LoadChildren(root string, depth int) ([]Entry, error) {
 	dirEntries, err := os.ReadDir(root)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("explorer: read dir %s: %w", root, err)
 	}
 
 	var dirs, files []Entry
@@ -62,7 +62,7 @@ func LoadChildren(root string, depth int) ([]Entry, error) {
 func BuildTree(root string) ([]Entry, error) {
 	children, err := LoadChildren(root, 0)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("explorer: build tree: %w", err)
 	}
 
 	var specialEntries []Entry
@@ -210,7 +210,7 @@ func CopyPath(src, dstDir string) error {
 
 func copyDir(src, dst string) error {
 	if err := os.MkdirAll(dst, 0o750); err != nil {
-		return err
+		return fmt.Errorf("explorer: mkdir %s: %w", dst, err)
 	}
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -218,7 +218,7 @@ func copyDir(src, dst string) error {
 		}
 		rel, err := filepath.Rel(src, path)
 		if err != nil {
-			return err
+			return fmt.Errorf("explorer: rel path: %w", err)
 		}
 		target := filepath.Join(dst, rel)
 		if info.IsDir() {
@@ -231,35 +231,41 @@ func copyDir(src, dst string) error {
 func copyFile(src, dst string) error {
 	in, err := os.Open(src) // #nosec G304 — file explorer copies user-selected paths by design
 	if err != nil {
-		return err
+		return fmt.Errorf("explorer: open %s: %w", src, err)
 	}
 	defer in.Close()
 
 	out, err := os.Create(dst) // #nosec G304
 	if err != nil {
-		return err
+		return fmt.Errorf("explorer: create %s: %w", dst, err)
 	}
 
 	if _, err = io.Copy(out, in); err != nil {
 		out.Close() // #nosec G104 — cleanup; original error takes priority
-		return err
+		return fmt.Errorf("explorer: copy %s → %s: %w", src, dst, err)
 	}
-	return out.Close() // surface flush/close errors (e.g. filesystem full)
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("explorer: flush %s: %w", dst, err)
+	}
+	return nil
 }
 
 // MovePath moves src into dstDir. Tries os.Rename first; falls back to copy + remove.
 func MovePath(src, dstDir string) error {
 	dst := filepath.Join(dstDir, filepath.Base(src))
 	if _, err := os.Lstat(dst); err == nil {
-		return fmt.Errorf("destination already exists: %s", dst)
+		return fmt.Errorf("explorer: destination already exists: %s", dst)
 	}
 	if err := os.Rename(src, dst); err == nil {
 		return nil
 	}
 	if err := CopyPath(src, dstDir); err != nil {
-		return err
+		return fmt.Errorf("explorer: copy phase of move: %w", err)
 	}
-	return os.RemoveAll(src)
+	if err := os.RemoveAll(src); err != nil {
+		return fmt.Errorf("explorer: remove after move: %w", err)
+	}
+	return nil
 }
 
 // FindIdx returns the index of the entry matching path, or -1 if not found.
