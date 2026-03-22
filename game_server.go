@@ -129,8 +129,10 @@ func (g *Game) attachServerSession() {
 		return
 	}
 
-	// Append per-session palette entries. The base palette is restored on the
-	// next buildPalette call (theme switch, config reload, etc.).
+	// Rebuild palette from scratch to prevent duplicate entries from
+	// previous attach calls, then append per-session entries.
+	g.buildPalette()
+
 	for _, s := range sessions {
 		si := s // capture for closure
 		displayName := si.ID
@@ -156,10 +158,9 @@ func (g *Game) attachServerSession() {
 		})
 	}
 
-	// Open palette pre-filtered to the injected entries.
-	g.palette.State.Open = true
-	g.palette.State.Query = ""
-	g.screenDirty = true
+	// Open palette pre-filtered to show server entries.
+	g.openPalette()
+	g.palette.State.Query = "Attach"
 }
 
 // openServerTabForSession opens a new tab backed by an existing zurm-server
