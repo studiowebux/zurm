@@ -55,10 +55,10 @@ Game.Draw() → Renderer.DrawAll(DrawState)
 
 | Package | Responsibility |
 |---------|---------------|
-| `main.go` | Game loop, input routing, tab/pane orchestration, overlay state machines |
+| `main` (root) | Game struct, Update/Draw/Layout, decomposed into 19 focused files (see below) |
 | `terminal/` | VT500 parser, screen buffer (cells + scrollback), cursor state, PTY backend interface |
-| `renderer/` | GPU rendering via Ebiten — cell grid, tab bar, status bar, overlays, pane cache |
-| `pane/` | Binary tree layout (split/remove/find), pane lifecycle, PTY backend selection |
+| `renderer/` | GPU rendering via Ebiten — decomposed into 17+ files (see below) |
+| `pane/` | Binary tree layout, pane view (`NewPane` DI constructor), factory for terminal creation |
 | `tab/` | Tab management, layout node ownership, activity detection |
 | `config/` | TOML parsing, defaults, hot-reload, theme merge |
 | `session/` | Session save/restore (JSON) — tab CWDs, titles, layout tree |
@@ -68,6 +68,59 @@ Game.Draw() → Renderer.DrawAll(DrawState)
 | `markdown/` | Markdown AST parser — headings, code blocks, tables, bold/italic |
 | `help/` | Keybinding definitions, command palette entries |
 | `recorder/` | Screenshot (PNG) and screen recording |
+
+### Main Package File Structure
+
+The root `main` package was decomposed from a single `main.go` into focused files:
+
+| File | Responsibility |
+|------|---------------|
+| `main.go` | Game struct, Update/Draw/Layout, init, entry point |
+| `game_input.go` | Keyboard routing, overlay priority cascade |
+| `game_mouse.go` | Mouse dispatch, selection, divider drag, URL click |
+| `game_drain.go` | PTY drains, polling, clipboard, paste |
+| `game_lifecycle.go` | Focus, resize, suspend, dropped files |
+| `game_tabs.go` | Tab create/close/switch/pin/search/switcher |
+| `game_panes.go` | Pane splits, focus, resize, zoom |
+| `game_overlays.go` | Menus, palette, confirm, overlay handlers |
+| `game_search.go` | SearchController + search input |
+| `game_explorer.go` | File explorer input handlers |
+| `game_viewer.go` | Markdown viewer, llms.txt, URL input |
+| `game_server.go` | Server session management |
+| `game_misc.go` | Rename, notes, session, config reload, shell hooks |
+| `tab_manager.go` | TabManager — owns tab slice, active index, focus history, drag/pin state |
+| `palette_controller.go` | PaletteController — filter state, selection |
+| `explorer_controller.go` | ExplorerController — tree state, expand/collapse |
+| `mouse_state.go` | SelectionDragger + DividerDragHandler value types |
+| `key_repeat.go` | Shared KeyRepeatHandler for auto-repeat across controllers |
+| `status_poller.go` | Background git status + foreground process polling |
+
+### Renderer Package File Structure
+
+The `renderer/` package was decomposed into focused sub-renderers:
+
+| File | Responsibility |
+|------|---------------|
+| `renderer.go` | Renderer struct, DrawAll orchestration, layer compositing, cache logic |
+| `pane_render.go` | DrawPane, drawPaneTo, drawDividers |
+| `tabbar.go` | drawTabBar |
+| `tabhover.go` | Tab hover thumbnails, cache keys |
+| `tabswitcher.go` | Tab switcher overlay |
+| `tabsearch.go` | Tab search overlay |
+| `statusbar.go` | Status bar rendering |
+| `overlay.go` | Help overlay, markdown viewer overlay |
+| `palette.go` | Command palette rendering |
+| `search.go` | In-buffer search bar |
+| `fileexplorer.go` | File explorer panel |
+| `menu.go` | Context menu rendering |
+| `blocks.go` | OSC 133 command block decorations |
+| `stats.go` | Debug stats overlay |
+| `font.go` | Font renderer, glyph drawing, display width |
+| `renderconfig.go` | RenderConfig — decouples renderer from config package |
+| `state.go` | All 15 UI state types consolidated (DrawState, SearchState, etc.) |
+| `helptypes.go` | OverlayMenuItem, OverlayKeyBinding — decouples from help package |
+| `mdtypes.go` | MdSpanStyle, MdSpan, MdStyledLine — decouples from markdown package |
+| `uicolors.go` | UIColors derivation, color helpers |
 
 ## Key Design Patterns
 
@@ -84,6 +137,8 @@ Game.Draw() → Renderer.DrawAll(DrawState)
 ```
 
 `ComputeRects()` recursively assigns pixel rectangles. `Leaves()` returns all panes in DFS order.
+
+Pane creation uses DI constructors in `pane/factory.go`: `NewLocal()` and `NewServer()` build terminals with the correct backend, while `NewPane()` wraps a terminal into a `Pane` view without importing `config`.
 
 ### Strategy — PTY Backend
 
@@ -202,6 +257,6 @@ Saved on quit (if `session.enabled`), restored on launch (if `restore_on_launch`
 ## Configuration
 
 - `config.Load()` reads `~/.config/zurm/config.toml`, starts from `Defaults`, overlays user values
-- `config.Reload()` re-reads without writing defaults on missing file
+- `config.LoadWithMeta()` re-reads and returns TOML MetaData for theme merge
 - Theme merge: `MergeColorsWithMeta()` uses TOML metadata to determine user-explicit vs. theme-default colors
-- Hot-reload via `Cmd+,` — calls `Reload()`, updates renderer colors, clears pane cache
+- Hot-reload via `Cmd+,` — calls `LoadWithMeta()`, applies theme, updates renderer colors, clears pane cache
