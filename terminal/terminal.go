@@ -67,11 +67,8 @@ type Terminal struct {
 }
 
 // New creates a Terminal from the given config.
-// Call Start() to spawn the shell.
+// Call Start() to spawn the shell. Parser is created lazily on first Start call.
 func New(tc TerminalConfig) *Terminal {
-	titleCh := make(chan string, 4)
-	cwdCh := make(chan string, 4)
-	bellCh := make(chan struct{}, 4)
 	buf := NewScreenBuffer(tc.Rows, tc.Cols, tc.ScrollbackLines, tc.MaxBlocks, tc.FG, tc.BG, tc.Palette)
 
 	cur := NewCursor()
@@ -79,24 +76,31 @@ func New(tc TerminalConfig) *Terminal {
 		cur.EnableBlink()
 	}
 
-	shellIntCh := make(chan byte, 4)
-	t := &Terminal{
+	return &Terminal{
 		Buf:              buf,
 		Cursor:           cur,
 		tcfg:             tc,
-		TitleCh:          titleCh,
-		CwdCh:            cwdCh,
-		BellCh:           bellCh,
+		TitleCh:          make(chan string, 4),
+		CwdCh:            make(chan string, 4),
+		BellCh:           make(chan struct{}, 4),
 		ForegroundProcCh: make(chan string, 4),
-		ShellIntCh:       shellIntCh,
+		ShellIntCh:       make(chan byte, 4),
 	}
-	t.parser = NewParser(buf, titleCh, cwdCh, bellCh, shellIntCh, &t.osc7Active, &t.osc133Active)
-	return t
+}
+
+// ensureParser creates the parser on first call. Idempotent.
+// Separated from New() so Terminal construction does not depend on Parser.
+func (t *Terminal) ensureParser() {
+	if t.parser != nil {
+		return
+	}
+	t.parser = NewParser(t.Buf, t.TitleCh, t.CwdCh, t.BellCh, t.ShellIntCh, &t.osc7Active, &t.osc133Active)
 }
 
 // Start spawns the shell process.
 // dir is the working directory for the shell; empty string inherits the parent process CWD.
 func (t *Terminal) Start(dir string) error {
+	t.ensureParser()
 	shell := t.tcfg.ShellProgram
 	if shell == "" {
 		shell = os.Getenv("SHELL")
@@ -118,6 +122,7 @@ func (t *Terminal) Start(dir string) error {
 
 // StartCmd launches a specific command (instead of the user's shell) in the PTY.
 func (t *Terminal) StartCmd(program string, args []string, dir string) error {
+	t.ensureParser()
 	env := BuildEnv(t.tcfg.Cols, t.tcfg.Rows)
 	pty, err := NewPTYManager(program, args, t.tcfg.Cols, t.tcfg.Rows, env, dir)
 	if err != nil {
@@ -131,6 +136,7 @@ func (t *Terminal) StartCmd(program string, args []string, dir string) error {
 // StartWithBackend attaches a pre-created PtyBackend (e.g. from zserver)
 // and starts its reader. The backend must already have a live session.
 func (t *Terminal) StartWithBackend(backend PtyBackend) error {
+	t.ensureParser()
 	t.pty = backend
 	backend.StartReader(t.parser, t.Buf, &t.paused)
 	return nil
