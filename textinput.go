@@ -2,8 +2,84 @@ package main
 
 import (
 	"strings"
+	"time"
 	"unicode"
+	"unicode/utf8"
+
+	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
 )
+
+// TextInputRepeat holds key-repeat state for a TextInput field.
+// Zero value is ready to use — no initialisation required.
+type TextInputRepeat struct {
+	active bool
+	key    ebiten.Key
+	start  time.Time
+	last   time.Time
+	alt    bool
+}
+
+// Update processes all standard text-input events for one game frame:
+//   - Left / Right / Home / End  — cursor navigation (edge-triggered)
+//   - Backspace                  — delete with key-repeat; Alt+Backspace deletes a word
+//   - Printable chars            — inserted at cursor via AppendInputChars
+//
+// meta suppresses character input and backspace (e.g. Cmd key held).
+// alt enables word-delete on Backspace.
+// Enter, ESC, and Cmd+V paste are caller-specific and are NOT handled here.
+func (t *TextInput) Update(repeat *TextInputRepeat, meta, alt bool) {
+	// Cursor navigation — edge-triggered so holding does not repeat.
+	if inpututil.IsKeyJustPressed(ebiten.KeyArrowLeft) {
+		t.MoveLeft()
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyArrowRight) {
+		t.MoveRight()
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyHome) {
+		t.MoveToStart()
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyEnd) {
+		t.MoveToEnd()
+	}
+
+	// Backspace with key repeat (same delay/interval as PTY key repeat).
+	if !meta {
+		bsPressed := ebiten.IsKeyPressed(ebiten.KeyBackspace)
+		if bsPressed {
+			now := time.Now()
+			if !repeat.active || repeat.key != ebiten.KeyBackspace {
+				repeat.active = true
+				repeat.key = ebiten.KeyBackspace
+				repeat.start = now
+				repeat.last = now
+				repeat.alt = alt
+				if alt {
+					t.DeleteWord()
+				} else {
+					t.DeleteLastChar()
+				}
+			} else if now.Sub(repeat.start) >= keyRepeatDelay &&
+				now.Sub(repeat.last) >= keyRepeatInterval {
+				repeat.last = now
+				if repeat.alt {
+					t.DeleteWord()
+				} else {
+					t.DeleteLastChar()
+				}
+			}
+		} else if repeat.key == ebiten.KeyBackspace {
+			repeat.active = false
+		}
+	}
+
+	// Printable character input.
+	if !meta {
+		for _, r := range ebiten.AppendInputChars(nil) {
+			t.AddChar(r)
+		}
+	}
+}
 
 // TextInput provides reusable text editing functionality with a moveable
 // cursor. CursorPos is a rune index into Text (0 = before first char,
@@ -117,7 +193,7 @@ func (t *TextInput) MoveLeft() {
 // MoveRight moves the cursor one rune to the right.
 func (t *TextInput) MoveRight() {
 	t.clampCursor()
-	if t.CursorPos < len([]rune(t.Text)) {
+	if t.CursorPos < utf8.RuneCountInString(t.Text) {
 		t.CursorPos++
 	}
 }
@@ -129,7 +205,7 @@ func (t *TextInput) MoveToStart() {
 
 // MoveToEnd moves the cursor to the end of the text.
 func (t *TextInput) MoveToEnd() {
-	t.CursorPos = len([]rune(t.Text))
+	t.CursorPos = utf8.RuneCountInString(t.Text)
 }
 
 // WithCursor returns the text with a block cursor character (|) inserted at

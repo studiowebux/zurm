@@ -6,18 +6,7 @@ import (
 	"image/color"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/studiowebux/zurm/config"
-	"github.com/studiowebux/zurm/terminal"
 )
-
-// SearchState holds the live state of the in-buffer search (Cmd+F).
-type SearchState struct {
-	Open      bool
-	Query     string
-	CursorPos int // rune index of the text cursor within Query
-	Matches   []terminal.SearchMatch
-	Current   int // index of the active (highlighted) match
-}
 
 // drawSearchBar renders the find bar above the status bar when search is open.
 func (r *Renderer) drawSearchBar(state *SearchState) {
@@ -26,19 +15,18 @@ func (r *Renderer) drawSearchBar(state *SearchState) {
 	}
 
 	h := r.font.CellH + 8
-	physH := r.offscreen.Bounds().Dy()
-	physW := r.offscreen.Bounds().Dx()
+	physW, physH := r.screenSize()
 	statusH := StatusBarHeight(r.font, r.cfg)
 	barTop := physH - statusH - h
 	barRect := image.Rect(0, barTop, physW, barTop+h)
 
-	barBg := config.ParseHexColor(r.cfg.Colors.Background)
+	barBg := parseHexColor(r.cfg.Colors.Background)
 	r.offscreen.SubImage(barRect).(*ebiten.Image).Fill(barBg)
 	r.offscreen.SubImage(image.Rect(0, barTop, physW, barTop+1)).(*ebiten.Image).Fill(r.borderColor)
 
-	fg := config.ParseHexColor(r.cfg.Colors.Foreground)
-	dimFg := config.ParseHexColor(r.cfg.Colors.BrightBlack)
-	redFg := config.ParseHexColor(r.cfg.Colors.Red)
+	fg := parseHexColor(r.cfg.Colors.Foreground)
+	dimFg := parseHexColor(r.cfg.Colors.BrightBlack)
+	redFg := parseHexColor(r.cfg.Colors.Red)
 	textY := barTop + (h-r.font.CellH)/2
 	x := r.font.CellW
 
@@ -60,7 +48,7 @@ func (r *Renderer) drawSearchBar(state *SearchState) {
 		var countStr string
 		var countColor color.RGBA
 		if len(state.Matches) == 0 {
-			countStr = "no matches"
+			countStr = noMatchesLabel
 			countColor = redFg
 		} else {
 			countStr = fmt.Sprintf("%d / %d", state.Current+1, len(state.Matches))

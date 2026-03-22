@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -80,6 +81,10 @@ func MergeColorsWithMeta(theme, user ColorConfig, meta toml.MetaData) ColorConfi
 			continue
 		}
 		if meta.IsDefined("colors", tag) {
+			// User explicitly set this color — use their value.
+			rv.Field(i).Set(uv.Field(i))
+		} else if rv.Field(i).String() == "" {
+			// Theme doesn't define this color either — keep the default.
 			rv.Field(i).Set(uv.Field(i))
 		}
 	}
@@ -94,6 +99,7 @@ func ApplyTheme(cfg *Config, meta toml.MetaData) {
 	}
 	themeColors, err := LoadTheme(cfg.Theme.Name)
 	if err != nil {
+		log.Printf("config: load theme %q: %v", cfg.Theme.Name, err)
 		return
 	}
 	cfg.Colors = MergeColorsWithMeta(themeColors, cfg.Colors, meta)

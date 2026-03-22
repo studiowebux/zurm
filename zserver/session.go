@@ -10,6 +10,7 @@ import (
 // It persists independently of any connected client.
 type Session struct {
 	ID   string
+	Name string // human-readable label set via MsgRenameSession; empty until named
 	Dir  string
 	Cols int
 	Rows int
@@ -66,6 +67,17 @@ func (s *Session) unsubscribe(ch chan []byte) {
 	close(ch)
 }
 
+// Rename sets the human-readable session name. Thread-safe.
+func (s *Session) Rename(name string) {
+	s.mu.Lock()
+	s.Name = name
+	s.mu.Unlock()
+}
+
+// Kill sends SIGHUP to the shell process and closes the PTY.
+// The cleanup goroutine in Manager.Create will remove the session from the map.
+func (s *Session) Kill() { s.spty.close() }
+
 func (s *Session) write(p []byte) { s.spty.write(p) } // #nosec G104 — best-effort PTY write; process may already be dead
 
 func (s *Session) resize(cols, rows int) {
@@ -83,6 +95,8 @@ func (s *Session) Dead() <-chan struct{} { return s.dead }
 
 func genID() string {
 	b := make([]byte, 8)
-	rand.Read(b) //nolint:errcheck
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
 	return hex.EncodeToString(b)
 }

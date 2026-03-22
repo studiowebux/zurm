@@ -1,21 +1,12 @@
 package renderer
 
 import (
-	"fmt"
 	"image"
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/studiowebux/zurm/tab"
 )
-
-// TabSearchState holds rendering and interaction state for the Cmd+J tab search overlay.
-type TabSearchState struct {
-	Open      bool
-	Query     string
-	CursorPos int // rune index of the text cursor within Query
-	Cursor    int // index into the filtered list
-}
 
 const (
 	tsMaxVisible  = 12 // max visible entries
@@ -49,29 +40,17 @@ func FilterTabSearch(tabs []*tab.Tab, query string) []TabSearchEntry {
 			OrigIdx:      i,
 		})
 	}
-	if query == "" {
-		return entries
-	}
 
-	q := strings.ToLower(query)
-	var rank0, rank1 []TabSearchEntry
-	for _, e := range entries {
-		pos := strings.Index(strings.ToLower(e.DisplayTitle), q)
-		if pos < 0 {
-			// Also search CWD.
-			pos = strings.Index(strings.ToLower(e.Cwd), q)
-		}
-		if pos < 0 {
-			continue
-		}
-		e.matchPos = pos
-		if pos == 0 {
-			rank0 = append(rank0, e)
-		} else {
-			rank1 = append(rank1, e)
-		}
+	results := filterBySubstring(len(entries), query, func(i int) []string {
+		return []string{entries[i].DisplayTitle, entries[i].Cwd}
+	})
+	filtered := make([]TabSearchEntry, len(results))
+	for i, r := range results {
+		e := entries[r.index]
+		e.matchPos = r.matchPos
+		filtered[i] = e
 	}
-	return append(rank0, rank1...)
+	return filtered
 }
 
 // drawTabSearch renders the tab search overlay onto r.modalLayer.
@@ -80,8 +59,7 @@ func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearc
 		return
 	}
 
-	physW := r.modalLayer.Bounds().Dx()
-	physH := r.modalLayer.Bounds().Dy()
+	physW, physH := r.modalSize()
 
 	filtered := FilterTabSearch(tabs, state.Query)
 	visible := len(filtered)
@@ -97,7 +75,7 @@ func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearc
 	rowH := ch + 6
 	panelH := inputH + 2 + visible*rowH + 6
 	if len(filtered) == 0 {
-		panelH = inputH + 2 + rowH + 6 // room for "no matches"
+		panelH = inputH + 2 + rowH + 6 // room for noMatchesLabel
 	}
 	panelW := physW * tsPanelWidthP / 100
 	if panelW < 40*cw {
@@ -116,7 +94,7 @@ func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearc
 	// Panel background.
 	panelRect := image.Rect(panelX, panelY, panelX+panelW, panelY+panelH)
 	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(ui.PanelBg)
-	drawRect(r.modalLayer, panelRect, ui.Border)
+	drawBorder(r.modalLayer, panelRect, ui.Border)
 
 	// Input area.
 	inputRect := image.Rect(panelX+1, panelY+1, panelX+panelW-1, panelY+inputH)
@@ -142,7 +120,7 @@ func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearc
 
 	if len(filtered) == 0 {
 		noMatchY := divY + 2 + (rowH-ch)/2
-		r.font.DrawString(r.modalLayer, "no matches", panelX+tsPad*cw/2, noMatchY, ui.Dim)
+		r.font.DrawString(r.modalLayer, noMatchesLabel, panelX+tsPad*cw/2, noMatchY, ui.Dim)
 		return
 	}
 
@@ -173,12 +151,7 @@ func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearc
 		nameX := panelX + tsPad*cw/2
 
 		// Pin badge.
-		var badge string
-		if entry.PinnedSlot != 0 {
-			badge = fmt.Sprintf("[%c] ", entry.PinnedSlot)
-		} else {
-			badge = "    "
-		}
+		badge := pinnedBadge(entry.PinnedSlot, "   ") + " "
 		badgeColor := ui.KeyName
 		if idx == state.Cursor {
 			badgeColor = ui.Accent
@@ -194,7 +167,7 @@ func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearc
 			titleColor = ui.Accent
 		}
 		maxTitleCols := nameMaxW / cw
-		title := truncatePalette(entry.DisplayTitle, maxTitleCols)
+		title := truncateRunes(entry.DisplayTitle, maxTitleCols)
 		r.font.DrawString(r.modalLayer, title, nameX+badgeW, textY, titleColor)
 
 		// CWD right-aligned (dimmed, truncated).
@@ -211,6 +184,9 @@ func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearc
 
 // shortenCwd truncates a CWD path to fit maxCols, showing the last path segments.
 func shortenCwd(path string, maxCols int) string {
+	if maxCols < 2 {
+		return "…"
+	}
 	if len([]rune(path)) <= maxCols {
 		return path
 	}

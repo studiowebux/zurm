@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"image/color"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -59,8 +60,10 @@ lines = 10000
 wheel_lines_per_tick = 3   # lines scrolled per mouse wheel tick
 
 [performance]
-tps       = 30     # Ebitengine tick rate (Update calls/sec); lower = less idle CPU
-auto_idle = true   # reduce TPS when unfocused to save CPU; false = keep rendering
+tps        = 30     # Ebitengine tick rate (Update calls/sec); lower = less idle CPU
+auto_idle  = true   # reduce TPS when unfocused to save CPU; false = keep rendering
+pprof      = false  # enable net/http/pprof endpoint on localhost for profiling
+pprof_port = 6060   # port for pprof HTTP server (localhost only)
 
 [input]
 double_click_ms = 300   # max ms between clicks to register as double-click
@@ -116,30 +119,34 @@ side      = "left"   # "left" or "right"
 width_pct = 35       # panel width as percent of screen width
 
 [blocks]
-enabled       = false   # render OSC 133 command blocks; toggle at runtime with Cmd+B (requires shell hooks)
-show_duration = true    # show elapsed execution time (time from Enter to prompt return)
-border_width  = 3       # width in pixels of the left accent stripe
+enabled       = false    # render OSC 133 command blocks; toggle at runtime with Cmd+B (requires shell hooks)
+show_duration = true     # show elapsed execution time (time from Enter to prompt return)
+show_border   = true     # draw 4-sided border + bg tint (false = badges + hover buttons only)
+border_width  = 3        # width in pixels of the left accent stripe
 border_color  = "#1C1C2E" # border color when exit status is unknown
 success_color = "#34D399" # border color for exit code 0
 fail_color    = "#F87171" # border color for non-zero exit codes
 bg_color      = ""        # optional hex background tint (empty = none)
-bg_alpha      = 0.0       # opacity of background tint (0.0–1.0)
+bg_alpha      = 0.0       # opacity of background tint (0.0-1.0)
+max_history   = 1000     # max completed blocks retained per pane (0 = unlimited)
 
-[voice]
-enabled  = false   # enable TTS commands (Read Selection Aloud, auto-speak output)
-voice_id = ""      # AVSpeechSynthesisVoice identifier; empty = system default
-rate     = 0.5     # speech rate (0.0–1.0; 0.5 = normal)
-pitch    = 1.0     # pitch multiplier (0.5–2.0; 1.0 = normal)
-volume   = 1.0     # volume (0.0–1.0; 1.0 = full)
-locale     = "en-US" # speech recognition language
-read_lines = 10     # lines to read on bell or Cmd+Shift+U (recent buffer)
+[bell]
+style       = "visual"  # "visual" = orange cell flash; "none" = no visual
+sound       = true       # play NSBeep on bell
+duration_ms = 150        # flash duration in milliseconds
+color       = "#F59E0B"  # flash color (orange by default)
 
 [vault]
 enabled          = false  # enable command vault (encrypted local command history + ghost suggestions)
-history_path     = ""     # path to zsh history file; empty = ~/.zsh_history
+ghost_text       = true   # show inline ghost suggestions from vault history
+history_path     = ""     # path to shell history file; empty = auto-detect (~/.zsh_history, etc.)
 vault_path       = ""     # path to encrypted vault file; empty = ~/.config/zurm/vault.enc
 ignore_prefix    = " "    # commands starting with this prefix are never stored (matches zsh HIST_IGNORE_SPACE)
 suggestion_color = "#555570"  # ghost text color for inline suggestions
+
+[server]
+# address = "http://localhost:7777"  # zurm-server address for persistent PTY sessions
+# binary  = "./zurm-server"          # path to zurm-server binary (auto-launch)
 
 [theme]
 name = ""   # theme file name without .toml (e.g. "dark", "light"); empty = no theme
@@ -168,6 +175,17 @@ bright_blue    = "#A855F7"
 bright_magenta = "#C084FC"
 bright_cyan    = "#67E8F9"
 bright_white   = "#E8E8F0"
+
+# Markdown viewer colors (Cmd+M reader mode)
+md_bold             = "#FFFFFF"   # bold text
+md_heading          = "#FFFFFF"   # heading text (# ## ###)
+md_code             = "#A0D080"   # inline code and code block text
+md_code_border      = "#606060"   # border around code blocks
+md_table_border     = "#505050"   # table grid lines
+md_match_bg         = "#808000"   # search match highlight background
+md_match_current_bg = "#FFCC00"   # current search match highlight
+md_badge_bg         = "#FFCC00"   # badge/label background (e.g. line count)
+md_badge_fg         = "#000000"   # badge/label text color
 `
 
 type FontConfig struct {
@@ -206,6 +224,17 @@ type ColorConfig struct {
 	BrightMagenta string `toml:"bright_magenta"`
 	BrightCyan    string `toml:"bright_cyan"`
 	BrightWhite   string `toml:"bright_white"`
+
+	// Markdown viewer colors (used by the llms.txt / markdown reader overlay).
+	MdBold        string `toml:"md_bold"`
+	MdHeading     string `toml:"md_heading"`
+	MdCode        string `toml:"md_code"`
+	MdCodeBorder  string `toml:"md_code_border"`
+	MdTableBorder string `toml:"md_table_border"`
+	MdMatchBg     string `toml:"md_match_bg"`
+	MdMatchCurBg  string `toml:"md_match_current_bg"`
+	MdBadgeBg     string `toml:"md_badge_bg"`
+	MdBadgeFg     string `toml:"md_badge_fg"`
 }
 
 type ShellConfig struct {
@@ -339,23 +368,6 @@ type BellConfig struct {
 	Color string `toml:"color"`
 }
 
-type VoiceConfig struct {
-	// Enabled controls whether TTS commands are available.
-	Enabled bool `toml:"enabled"`
-	// VoiceID is the AVSpeechSynthesisVoice identifier. Empty = system default.
-	VoiceID string `toml:"voice_id"`
-	// Rate is the speech rate (0.0–1.0; 0.5 = normal).
-	Rate float64 `toml:"rate"`
-	// Pitch is the pitch multiplier (0.5–2.0; 1.0 = normal).
-	Pitch float64 `toml:"pitch"`
-	// Volume is the speech volume (0.0–1.0; 1.0 = full).
-	Volume float64 `toml:"volume"`
-	// Locale is the SFSpeechRecognizer language (e.g. "en-US", "fr-CA").
-	Locale string `toml:"locale"`
-	// ReadLines is the number of recent buffer lines to read on bell or Cmd+Shift+U.
-	ReadLines int `toml:"read_lines"`
-}
-
 type VaultConfig struct {
 	// Enabled controls whether the command vault is active.
 	Enabled bool `toml:"enabled"`
@@ -438,7 +450,6 @@ type Config struct {
 	FileExplorer FileExplorerConfig `toml:"file_explorer"`
 	Blocks       BlocksConfig       `toml:"blocks"`
 	Bell         BellConfig         `toml:"bell"`
-	Voice        VoiceConfig        `toml:"voice"`
 	Theme        ThemeConfig        `toml:"theme"`
 	Vault        VaultConfig        `toml:"vault"`
 	Server       ServerConfig       `toml:"server"`
@@ -471,7 +482,9 @@ func Load() (*Config, error) {
 		// First launch: write a fully documented default config so the user
 		// can discover all available options without reading the source.
 		if mkErr := os.MkdirAll(dir, 0o700); mkErr == nil {
-			_ = os.WriteFile(path, []byte(configTemplate), 0o600)
+			if wErr := os.WriteFile(path, []byte(configTemplate), 0o600); wErr != nil {
+				log.Printf("config: could not write default config to %s: %v", path, wErr)
+			}
 		}
 		return &cfg, nil
 	}
@@ -482,26 +495,7 @@ func Load() (*Config, error) {
 	}
 
 	resolveShell(&cfg)
-	clampVoice(&cfg)
 	ApplyTheme(&cfg, meta)
-	return &cfg, nil
-}
-
-// Reload re-reads config.toml without writing defaults on missing file.
-// Returns nil config if the file does not exist.
-func Reload() (*Config, error) {
-	dir := ConfigDir()
-	if dir == "" {
-		return nil, fmt.Errorf("config reload: cannot resolve home directory")
-	}
-	path := filepath.Join(dir, "config.toml")
-
-	cfg := Defaults
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
-		return nil, fmt.Errorf("config reload: %w", err)
-	}
-	resolveShell(&cfg)
-	clampVoice(&cfg)
 	return &cfg, nil
 }
 
@@ -522,30 +516,7 @@ func LoadWithMeta() (*Config, toml.MetaData, error) {
 		return &cfg, meta, fmt.Errorf("config: %w", err)
 	}
 	resolveShell(&cfg)
-	clampVoice(&cfg)
 	return &cfg, meta, nil
-}
-
-// clampVoice migrates old WPM values and clamps voice parameters to valid ranges.
-func clampVoice(cfg *Config) {
-	if cfg.Voice.Rate > 1.0 {
-		cfg.Voice.Rate = 0.5
-	}
-	if cfg.Voice.Rate < 0.0 {
-		cfg.Voice.Rate = 0.0
-	}
-	if cfg.Voice.Pitch < 0.5 {
-		cfg.Voice.Pitch = 0.5
-	}
-	if cfg.Voice.Pitch > 2.0 {
-		cfg.Voice.Pitch = 2.0
-	}
-	if cfg.Voice.Volume < 0.0 {
-		cfg.Voice.Volume = 0.0
-	}
-	if cfg.Voice.Volume > 1.0 {
-		cfg.Voice.Volume = 1.0
-	}
 }
 
 // resolveShell fills in Shell.Program from $SHELL if not set.
@@ -560,13 +531,19 @@ func resolveShell(cfg *Config) {
 
 // ParseHexColor converts a "#rrggbb" string to color.RGBA.
 func ParseHexColor(s string) color.RGBA {
+	raw := s
 	s = strings.TrimPrefix(s, "#")
 	if len(s) != 6 {
+		log.Printf("config: invalid hex color %q, falling back to white", raw)
 		return color.RGBA{R: 255, G: 255, B: 255, A: 255}
 	}
-	r, _ := strconv.ParseUint(s[0:2], 16, 8)
-	g, _ := strconv.ParseUint(s[2:4], 16, 8)
-	b, _ := strconv.ParseUint(s[4:6], 16, 8)
+	r, rErr := strconv.ParseUint(s[0:2], 16, 8)
+	g, gErr := strconv.ParseUint(s[2:4], 16, 8)
+	b, bErr := strconv.ParseUint(s[4:6], 16, 8)
+	if rErr != nil || gErr != nil || bErr != nil {
+		log.Printf("config: invalid hex color %q, falling back to white", raw)
+		return color.RGBA{R: 255, G: 255, B: 255, A: 255}
+	}
 	return color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: 255}
 }
 

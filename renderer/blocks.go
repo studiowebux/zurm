@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/studiowebux/zurm/config"
 )
 
 
@@ -31,9 +30,9 @@ func (r *Renderer) drawBlocksSnap(snap *blockSnap) {
 	cw := r.font.CellW
 	ch := r.font.CellH
 
-	borderColor := config.ParseHexColor(cfg.BorderColor)
-	successColor := config.ParseHexColor(cfg.SuccessColor)
-	failColor := config.ParseHexColor(cfg.FailColor)
+	borderColor := parseHexColor(cfg.BorderColor)
+	successColor := parseHexColor(cfg.SuccessColor)
+	failColor := parseHexColor(cfg.FailColor)
 
 	stripeW := cfg.BorderWidth
 	if stripeW < 1 {
@@ -47,7 +46,7 @@ func (r *Renderer) drawBlocksSnap(snap *blockSnap) {
 	var hasBg bool
 	var bgImg *ebiten.Image
 	if cfg.BgColor != "" && cfg.BgAlpha > 0 {
-		base := config.ParseHexColor(cfg.BgColor)
+		base := parseHexColor(cfg.BgColor)
 		a := cfg.BgAlpha
 		tint := color.RGBA{
 			R: uint8(float64(base.R) * a),

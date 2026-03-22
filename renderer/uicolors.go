@@ -2,9 +2,9 @@ package renderer
 
 import (
 	"image/color"
-
-	"github.com/studiowebux/zurm/config"
 )
+
+const backdropAlpha = 0xb4 // 180 — translucency for modal overlays
 
 // inputWithCursor returns text with a block cursor character (|) inserted at
 // the given rune index. Used by all input field renderers instead of appending "_".
@@ -20,7 +20,7 @@ func inputWithCursor(text string, pos int) string {
 }
 
 // UIColors holds all derived UI chrome colors for overlays, menus, and panels.
-// Computed once from config.Config so draw functions never hard-code color literals.
+// Computed once from RenderConfig so draw functions never hard-code color literals.
 // Pattern: derived value — computed at renderer init, re-derived on config reload.
 type UIColors struct {
 	// PanelBg is the background of floating panels (command palette, menu, help overlay).
@@ -55,6 +55,17 @@ type UIColors struct {
 
 	// SearchMatch is the highlight color for matching search results.
 	SearchMatch color.RGBA
+
+	// Markdown viewer colors.
+	MdBold        color.RGBA
+	MdHeading     color.RGBA
+	MdCode        color.RGBA
+	MdCodeBorder  color.RGBA
+	MdTableBorder color.RGBA
+	MdMatchBg     color.RGBA
+	MdMatchCurBg  color.RGBA
+	MdBadgeBg     color.RGBA
+	MdBadgeFg     color.RGBA
 }
 
 // deriveUIColors computes UIColors from a Config.
@@ -62,34 +73,64 @@ type UIColors struct {
 //   - PanelBg  = background darkened twice (~65% brightness)
 //   - HoverBg  = background brightened (~130% brightness)
 //   - Backdrop = background at ~40% brightness, semi-transparent
-//   - Border   = config.Colors.Border (directly)
-//   - Accent   = config.Colors.Cursor
-//   - CatHdr   = config.Colors.BrightMagenta
-//   - KeyName  = config.Colors.Yellow
-//   - Fg       = config.Colors.Foreground
-//   - Dim      = config.Colors.BrightBlack
-func deriveUIColors(cfg *config.Config) UIColors {
-	bg := config.ParseHexColor(cfg.Colors.Background)
+//   - Border   = Colors.Border (directly)
+//   - Accent   = Colors.Cursor
+//   - CatHdr   = Colors.BrightMagenta
+//   - KeyName  = Colors.Yellow
+//   - Fg       = Colors.Foreground
+//   - Dim      = Colors.BrightBlack
+func deriveUIColors(cfg *RenderConfig) UIColors {
+	bg := parseHexColor(cfg.Colors.Background)
 	return UIColors{
 		PanelBg:     darken(darken(bg)),
 		HoverBg:     brighten(bg),
-		Backdrop:    color.RGBA{R: bg.R * 2 / 5, G: bg.G * 2 / 5, B: bg.B * 2 / 5, A: 0xb4},
-		Border:      config.ParseHexColor(cfg.Colors.Border),
-		Accent:      config.ParseHexColor(cfg.Colors.Cursor),
-		CatHdr:      config.ParseHexColor(cfg.Colors.BrightMagenta),
-		KeyName:     config.ParseHexColor(cfg.Colors.Yellow),
-		Fg:          config.ParseHexColor(cfg.Colors.Foreground),
-		Dim:         config.ParseHexColor(cfg.Colors.BrightBlack),
-		SearchMatch: config.ParseHexColor(cfg.Colors.Yellow),
+		Backdrop:    color.RGBA{R: clamp8(int(bg.R) * 2 / 5), G: clamp8(int(bg.G) * 2 / 5), B: clamp8(int(bg.B) * 2 / 5), A: backdropAlpha},
+		Border:      parseHexColor(cfg.Colors.Border),
+		Accent:      parseHexColor(cfg.Colors.Cursor),
+		CatHdr:      parseHexColor(cfg.Colors.BrightMagenta),
+		KeyName:     parseHexColor(cfg.Colors.Yellow),
+		Fg:          parseHexColor(cfg.Colors.Foreground),
+		Dim:         parseHexColor(cfg.Colors.BrightBlack),
+		SearchMatch:   parseHexColor(cfg.Colors.Yellow),
+		MdBold:        parseHexColor(cfg.Colors.MdBold),
+		MdHeading:     parseHexColor(cfg.Colors.MdHeading),
+		MdCode:        parseHexColor(cfg.Colors.MdCode),
+		MdCodeBorder:  parseHexColor(cfg.Colors.MdCodeBorder),
+		MdTableBorder: parseHexColor(cfg.Colors.MdTableBorder),
+		MdMatchBg:     withAlpha(parseHexColor(cfg.Colors.MdMatchBg), 0x60),
+		MdMatchCurBg:  withAlpha(parseHexColor(cfg.Colors.MdMatchCurBg), 0x80),
+		MdBadgeBg:     parseHexColor(cfg.Colors.MdBadgeBg),
+		MdBadgeFg:     parseHexColor(cfg.Colors.MdBadgeFg),
 	}
+}
+
+func withAlpha(c color.RGBA, a uint8) color.RGBA {
+	// Premultiply RGB channels — Ebitengine uses premultiplied alpha.
+	f := float64(a) / 255.0
+	c.R = uint8(float64(c.R) * f)
+	c.G = uint8(float64(c.G) * f)
+	c.B = uint8(float64(c.B) * f)
+	c.A = a
+	return c
 }
 
 // separatorColor returns the configured separator color, falling back to BrightBlack.
 func (r *Renderer) separatorColor() color.RGBA {
 	if r.cfg.Colors.Separator != "" {
-		return config.ParseHexColor(r.cfg.Colors.Separator)
+		return parseHexColor(r.cfg.Colors.Separator)
 	}
-	return config.ParseHexColor(r.cfg.Colors.BrightBlack)
+	return parseHexColor(r.cfg.Colors.BrightBlack)
+}
+
+// clamp8 clamps an int to the [0, 255] range and returns it as uint8.
+func clamp8(v int) uint8 {
+	if v < 0 {
+		return 0
+	}
+	if v > 255 {
+		return 255
+	}
+	return uint8(v) // #nosec G115 — value is clamped to [0, 255]
 }
 
 // brighten returns a lighter version of c (scales RGB by 130%, clamped at 255).

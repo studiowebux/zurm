@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"unicode/utf8"
 )
 
@@ -20,9 +21,23 @@ const (
 	stateCSIParam                 // collecting CSI parameters
 	stateCSIInterm                // CSI intermediate byte
 	stateOSC                      // received ESC ]
-	stateDCS                      // received ESC P (device control string — ignored)
+	stateDCS                      // received ESC P (device control string — collected and dispatched)
 	stateIgnore                   // collecting ignored sequence
 )
+
+const (
+	maxDCSBuffer = 4096 // maximum bytes collected in a DCS string
+	maxOSCBuffer = 4096 // maximum bytes collected in an OSC string
+)
+
+// formatOSCColor formats an OSC 10/11 color query response.
+func formatOSCColor(code int, c color.RGBA) []byte {
+	return []byte(fmt.Sprintf("\x1B]%d;rgb:%04x/%04x/%04x\x1B\\",
+		code,
+		uint16(c.R)<<8|uint16(c.R),
+		uint16(c.G)<<8|uint16(c.G),
+		uint16(c.B)<<8|uint16(c.B)))
+}
 
 // Parser processes raw PTY bytes and applies them to a ScreenBuffer.
 // All methods must be called with the ScreenBuffer write lock held.
@@ -34,9 +49,12 @@ type Parser struct {
 	params     []int
 	paramStr   string
 	oscBuf  strings.Builder
-	titleCh chan<- string       // optional: notified on OSC 0/2 title changes
-	cwdCh   chan<- string       // optional: notified on OSC 7 CWD changes
-	bellCh  chan<- struct{}     // optional: notified on BEL (0x07) in ground state
+	titleCh      chan<- string       // optional: notified on OSC 0/2 title changes
+	cwdCh        chan<- string       // optional: notified on OSC 7 CWD changes
+	bellCh       chan<- struct{}     // optional: notified on BEL (0x07) in ground state
+	shellIntCh   chan<- byte         // optional: notified on OSC 133 shell integration (A/B/C/D)
+	osc7Active   *atomic.Bool       // optional: set true on first OSC 7 receipt; disables lsof fallback
+	osc133Active *atomic.Bool       // optional: set true on first OSC 133 receipt; disables ps polling
 
 	// Tab stops (every 8 columns by default).
 	tabStops []bool
@@ -58,13 +76,18 @@ type Parser struct {
 }
 
 // NewParser creates a parser attached to the given buffer.
-func NewParser(sb *ScreenBuffer, titleCh chan<- string, cwdCh chan<- string, bellCh chan<- struct{}) *Parser {
+// osc7Active is optional (may be nil); when non-nil it is set to true on the
+// first OSC 7 receipt, signalling that lsof-based CWD polling can be skipped.
+func NewParser(sb *ScreenBuffer, titleCh chan<- string, cwdCh chan<- string, bellCh chan<- struct{}, shellIntCh chan<- byte, osc7Active, osc133Active *atomic.Bool) *Parser {
 	p := &Parser{
-		sb:      sb,
-		palette: sb.Palette,
-		titleCh: titleCh,
-		cwdCh:   cwdCh,
-		bellCh:  bellCh,
+		sb:           sb,
+		palette:      sb.Palette,
+		titleCh:      titleCh,
+		cwdCh:        cwdCh,
+		bellCh:       bellCh,
+		shellIntCh:   shellIntCh,
+		osc7Active:   osc7Active,
+		osc133Active: osc133Active,
 	}
 	p.resetTabStops()
 	return p
@@ -108,7 +131,7 @@ func (p *Parser) consume(b byte) {
 		} else if b == 0x1B { // ESC — start of ESC \ (7-bit ST); dispatch now, consume '\' next
 			p.dispatchDCS()
 			p.state = stateIgnore
-		} else if p.dcsBuf.Len() < 4096 {
+		} else if p.dcsBuf.Len() < maxDCSBuffer {
 			p.dcsBuf.WriteByte(b)
 		}
 	case stateIgnore:
@@ -351,7 +374,7 @@ func (p *Parser) osc(b byte) {
 		p.dispatchOSC(p.oscBuf.String())
 		p.state = stateIgnore
 	default:
-		if p.oscBuf.Len() < 4096 {
+		if p.oscBuf.Len() < maxOSCBuffer {
 			p.oscBuf.WriteByte(b)
 		}
 	}
@@ -373,8 +396,13 @@ func (p *Parser) dispatchOSC(s string) {
 			}
 		}
 	case "7": // working directory — OSC 7 ; file://hostname/path
-		if p.cwdCh != nil {
-			if path := parseOSC7Path(value); path != "" {
+		// Mark shell as OSC 7-capable even if this particular URI fails to parse —
+		// the shell supports the protocol, so lsof polling is unnecessary.
+		if p.osc7Active != nil {
+			p.osc7Active.Store(true)
+		}
+		if path := parseOSC7Path(value); path != "" {
+			if p.cwdCh != nil {
 				select {
 				case p.cwdCh <- path:
 				default:
@@ -402,21 +430,11 @@ func (p *Parser) dispatchOSC(s string) {
 		}
 	case "10": // foreground color query
 		if value == "?" {
-			fg := p.sb.DefaultFG
-			resp := fmt.Sprintf("\x1B]10;rgb:%04x/%04x/%04x\x1B\\",
-				uint16(fg.R)<<8|uint16(fg.R),
-				uint16(fg.G)<<8|uint16(fg.G),
-				uint16(fg.B)<<8|uint16(fg.B))
-			p.sb.PendingDCSResponses = append(p.sb.PendingDCSResponses, []byte(resp))
+			p.sb.PendingDCSResponses = append(p.sb.PendingDCSResponses, formatOSCColor(10, p.sb.DefaultFG))
 		}
 	case "11": // background color query — nvim uses this to adapt theme colors
 		if value == "?" {
-			bg := p.sb.DefaultBG
-			resp := fmt.Sprintf("\x1B]11;rgb:%04x/%04x/%04x\x1B\\",
-				uint16(bg.R)<<8|uint16(bg.R),
-				uint16(bg.G)<<8|uint16(bg.G),
-				uint16(bg.B)<<8|uint16(bg.B))
-			p.sb.PendingDCSResponses = append(p.sb.PendingDCSResponses, []byte(resp))
+			p.sb.PendingDCSResponses = append(p.sb.PendingDCSResponses, formatOSCColor(11, p.sb.DefaultBG))
 		}
 	case "133": // FinalTerm / iTerm2 shell integration
 		// value is one of: "A" (prompt start), "B" (prompt end),
@@ -434,6 +452,17 @@ func (p *Parser) dispatchOSC(s string) {
 			}
 		}
 		p.sb.applyBlockEvent(kind, exitCode)
+		// Signal shell integration event to the game loop so it can update
+		// the foreground process name without polling.
+		if p.osc133Active != nil {
+			p.osc133Active.Store(true)
+		}
+		if p.shellIntCh != nil && (kind == 'A' || kind == 'C' || kind == 'D') {
+			select {
+			case p.shellIntCh <- byte(kind):
+			default:
+			}
+		}
 	}
 }
 
@@ -470,76 +499,133 @@ func (p *Parser) dispatchDCS() {
 	}
 }
 
+// csiParam returns the i-th CSI parameter, or def if absent or zero.
+func csiParam(params []int, i, def int) int {
+	if i < len(params) && params[i] != 0 {
+		return params[i]
+	}
+	return def
+}
+
 // dispatchCSI routes a complete CSI sequence to the appropriate handler.
 func (p *Parser) dispatchCSI(final byte, private, secondary, kittyPop bool) {
 	sb := p.sb
 	params := p.params
-	param := func(i, def int) int {
-		if i < len(params) && params[i] != 0 {
-			return params[i]
-		}
-		return def
-	}
 
-	// Kitty keyboard protocol: CSI < n u — pop n entries from stack.
 	if kittyPop {
-		if final == 'u' {
-			n := param(0, 1)
-			if n >= len(sb.kittyStack) {
-				sb.kittyStack = sb.kittyStack[:0]
-			} else {
-				sb.kittyStack = sb.kittyStack[:len(sb.kittyStack)-n]
-			}
-		}
+		p.dispatchCSIKittyPop(final, params)
 		return
 	}
-
-	// Secondary prefix: CSI > ...
 	if secondary {
-		switch final {
-		case 'c': // DA2 — secondary device attributes
-			sb.PendingDA2 = true
-		case 'u': // Kitty push: CSI > flags ; mode u
-			flags := param(0, 0)
-			mode := param(1, 1)
-			switch mode {
-			case 1: // set
-				sb.kittyStack = append(sb.kittyStack, flags)
-			case 2: // or
-				if len(sb.kittyStack) > 0 {
-					sb.kittyStack[len(sb.kittyStack)-1] |= flags
-				} else {
-					sb.kittyStack = append(sb.kittyStack, flags)
-				}
-			case 3: // and-not
-				if len(sb.kittyStack) > 0 {
-					sb.kittyStack[len(sb.kittyStack)-1] &^= flags
-				}
-			}
-		}
+		p.dispatchCSISecondary(final, params)
 		return
 	}
-
 	if private {
-		// Private mode sequences: ?<param>h / ?<param>l
-		switch final {
-		case 'h': // set private mode
-			for _, v := range params {
-				p.setPrivateMode(v, true)
-			}
-		case 'l': // reset private mode
-			for _, v := range params {
-				p.setPrivateMode(v, false)
-			}
-		case 'u': // Kitty keyboard query: CSI ? u → respond with current flags
-			sb.PendingKittyQuery = true
-		}
+		p.dispatchCSIPrivate(final, params)
 		return
 	}
 
 	switch final {
+	case 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'f', 'I', 'd':
+		p.dispatchCSICursor(final, params)
+	case 'J', 'K', 'L', 'M', 'P', 'S', 'T', 'X', '@':
+		p.dispatchCSIEdit(final, params)
+	case 'm': // SGR — select graphic rendition
+		p.applySGR(params)
+	case 'b': // REP — repeat last printed character
+		n := csiParam(params, 0, 1)
+		for i := 0; i < n; i++ {
+			p.sb.PutChar(p.lastChar)
+		}
+	case 'c': // DA1 — primary device attributes
+		sb.PendingDA1 = true
+	case 'n': // DSR — device status report
+		if csiParam(params, 0, 0) == 6 {
+			sb.PendingCPR = true
+		}
+	case 'r': // DECSTBM — set scroll region
+		top := csiParam(params, 0, 1)
+		bot := csiParam(params, 1, sb.Rows)
+		sb.SetScrollRegion(top, bot)
+	case 's': // SCP — save cursor position
+		sb.savedCursorRow = sb.CursorRow
+		sb.savedCursorCol = sb.CursorCol
+	case 'u': // RCP — restore cursor position (clamp to current grid after resize)
+		sb.CursorRow = sb.savedCursorRow
+		sb.CursorCol = sb.savedCursorCol
+		if sb.CursorRow >= sb.Rows {
+			sb.CursorRow = sb.Rows - 1
+		}
+		if sb.CursorCol >= sb.Cols {
+			sb.CursorCol = sb.Cols - 1
+		}
+	case 'h': // SM — set mode (public)
+		// e.g. CSI 4 h (insert mode) — mostly ignored for now
+	case 'l': // RM — reset mode (public)
+	}
+}
+
+// dispatchCSIKittyPop handles CSI < n u — pop n entries from the Kitty keyboard stack.
+func (p *Parser) dispatchCSIKittyPop(final byte, params []int) {
+	if final != 'u' {
+		return
+	}
+	n := csiParam(params, 0, 1)
+	if n >= len(p.sb.kittyStack) {
+		p.sb.kittyStack = p.sb.kittyStack[:0]
+	} else {
+		p.sb.kittyStack = p.sb.kittyStack[:len(p.sb.kittyStack)-n]
+	}
+}
+
+// dispatchCSISecondary handles CSI > ... sequences (DA2, Kitty push).
+func (p *Parser) dispatchCSISecondary(final byte, params []int) {
+	sb := p.sb
+	switch final {
+	case 'c': // DA2 — secondary device attributes
+		sb.PendingDA2 = true
+	case 'u': // Kitty push: CSI > flags ; mode u
+		flags := csiParam(params, 0, 0)
+		mode := csiParam(params, 1, 1)
+		switch mode {
+		case 1: // set
+			sb.kittyStack = append(sb.kittyStack, flags)
+		case 2: // or
+			if len(sb.kittyStack) > 0 {
+				sb.kittyStack[len(sb.kittyStack)-1] |= flags
+			} else {
+				sb.kittyStack = append(sb.kittyStack, flags)
+			}
+		case 3: // and-not
+			if len(sb.kittyStack) > 0 {
+				sb.kittyStack[len(sb.kittyStack)-1] &^= flags
+			}
+		}
+	}
+}
+
+// dispatchCSIPrivate handles CSI ? ... sequences (private mode set/reset, Kitty query).
+func (p *Parser) dispatchCSIPrivate(final byte, params []int) {
+	switch final {
+	case 'h': // set private mode
+		for _, v := range params {
+			p.setPrivateMode(v, true)
+		}
+	case 'l': // reset private mode
+		for _, v := range params {
+			p.setPrivateMode(v, false)
+		}
+	case 'u': // Kitty keyboard query: CSI ? u → respond with current flags
+		p.sb.PendingKittyQuery = true
+	}
+}
+
+// dispatchCSICursor handles cursor-positioning CSI sequences (CUU/CUD/CUF/CUB/CNL/CPL/CHA/CUP/HVP/CHT/VPA).
+func (p *Parser) dispatchCSICursor(final byte, params []int) {
+	sb := p.sb
+	switch final {
 	case 'A': // CUU — cursor up (clamp to scroll top when inside region)
-		n := param(0, 1)
+		n := csiParam(params, 0, 1)
 		top := 0
 		if sb.CursorRow >= sb.ScrollTop && sb.CursorRow <= sb.ScrollBottom {
 			top = sb.ScrollTop
@@ -549,7 +635,7 @@ func (p *Parser) dispatchCSI(final byte, private, secondary, kittyPop bool) {
 			sb.CursorRow = top
 		}
 	case 'B': // CUD — cursor down (clamp to scroll bottom when inside region)
-		n := param(0, 1)
+		n := csiParam(params, 0, 1)
 		bot := sb.Rows - 1
 		if sb.CursorRow >= sb.ScrollTop && sb.CursorRow <= sb.ScrollBottom {
 			bot = sb.ScrollBottom
@@ -559,33 +645,33 @@ func (p *Parser) dispatchCSI(final byte, private, secondary, kittyPop bool) {
 			sb.CursorRow = bot
 		}
 	case 'C': // CUF — cursor forward
-		n := param(0, 1)
+		n := csiParam(params, 0, 1)
 		sb.CursorCol += n
 		if sb.CursorCol >= sb.Cols {
 			sb.CursorCol = sb.Cols - 1
 		}
 	case 'D': // CUB — cursor back
-		n := param(0, 1)
+		n := csiParam(params, 0, 1)
 		sb.CursorCol -= n
 		if sb.CursorCol < 0 {
 			sb.CursorCol = 0
 		}
 	case 'E': // CNL — cursor next line
-		n := param(0, 1)
+		n := csiParam(params, 0, 1)
 		sb.CursorRow += n
 		if sb.CursorRow >= sb.Rows {
 			sb.CursorRow = sb.Rows - 1
 		}
 		sb.CursorCol = 0
 	case 'F': // CPL — cursor previous line
-		n := param(0, 1)
+		n := csiParam(params, 0, 1)
 		sb.CursorRow -= n
 		if sb.CursorRow < 0 {
 			sb.CursorRow = 0
 		}
 		sb.CursorCol = 0
 	case 'G': // CHA — cursor horizontal absolute
-		col := param(0, 1) - 1
+		col := csiParam(params, 0, 1) - 1
 		if col < 0 {
 			col = 0
 		}
@@ -594,8 +680,8 @@ func (p *Parser) dispatchCSI(final byte, private, secondary, kittyPop bool) {
 		}
 		sb.CursorCol = col
 	case 'H', 'f': // CUP / HVP — cursor position
-		row := param(0, 1) - 1
-		col := param(1, 1) - 1
+		row := csiParam(params, 0, 1) - 1
+		col := csiParam(params, 1, 1) - 1
 		if row < 0 {
 			row = 0
 		}
@@ -618,26 +704,42 @@ func (p *Parser) dispatchCSI(final byte, private, secondary, kittyPop bool) {
 		sb.CursorRow = row
 		sb.CursorCol = col
 	case 'I': // CHT — cursor horizontal tab
-		n := param(0, 1)
+		n := csiParam(params, 0, 1)
 		for i := 0; i < n; i++ {
 			p.advanceTab()
 		}
+	case 'd': // VPA — vertical line position absolute
+		row := csiParam(params, 0, 1) - 1
+		if row < 0 {
+			row = 0
+		}
+		if row >= sb.Rows {
+			row = sb.Rows - 1
+		}
+		sb.CursorRow = row
+	}
+}
+
+// dispatchCSIEdit handles editing CSI sequences (ED/EL/IL/DL/DCH/SU/SD/ECH/ICH).
+func (p *Parser) dispatchCSIEdit(final byte, params []int) {
+	sb := p.sb
+	switch final {
 	case 'J': // ED — erase in display
-		sb.EraseInDisplay(param(0, 0))
+		sb.EraseInDisplay(csiParam(params, 0, 0))
 	case 'K': // EL — erase in line
-		sb.EraseInLine(param(0, 0))
+		sb.EraseInLine(csiParam(params, 0, 0))
 	case 'L': // IL — insert lines
-		sb.InsertLines(param(0, 1))
+		sb.InsertLines(csiParam(params, 0, 1))
 	case 'M': // DL — delete lines
-		sb.DeleteLines(param(0, 1))
+		sb.DeleteLines(csiParam(params, 0, 1))
 	case 'P': // DCH — delete characters
-		sb.DeleteChars(param(0, 1))
+		sb.DeleteChars(csiParam(params, 0, 1))
 	case 'S': // SU — scroll up
-		sb.ScrollUp(param(0, 1))
+		sb.ScrollUp(csiParam(params, 0, 1))
 	case 'T': // SD — scroll down
-		sb.ScrollDown(param(0, 1))
+		sb.ScrollDown(csiParam(params, 0, 1))
 	case 'X': // ECH — erase characters
-		n := param(0, 1)
+		n := csiParam(params, 0, 1)
 		for i := 0; i < n; i++ {
 			col := sb.CursorCol + i
 			if col >= sb.Cols {
@@ -650,48 +752,7 @@ func (p *Parser) dispatchCSI(final byte, private, secondary, kittyPop bool) {
 		}
 		sb.dirty[sb.CursorRow] = true
 	case '@': // ICH — insert characters
-		sb.InsertChars(param(0, 1))
-	case 'd': // VPA — vertical line position absolute
-		row := param(0, 1) - 1
-		if row < 0 {
-			row = 0
-		}
-		if row >= sb.Rows {
-			row = sb.Rows - 1
-		}
-		sb.CursorRow = row
-	case 'm': // SGR — select graphic rendition
-		p.applySGR(params)
-	case 'b': // REP — repeat last printed character
-		n := param(0, 1)
-		for i := 0; i < n; i++ {
-			p.sb.PutChar(p.lastChar)
-		}
-	case 'c': // DA1 — primary device attributes
-		sb.PendingDA1 = true
-	case 'n': // DSR — device status report
-		if param(0, 0) == 6 {
-			p.sb.PendingCPR = true
-		}
-	case 'r': // DECSTBM — set scroll region
-		top := param(0, 1)
-		bot := param(1, sb.Rows)
-		sb.SetScrollRegion(top, bot)
-	case 's': // SCP — save cursor position
-		sb.savedCursorRow = sb.CursorRow
-		sb.savedCursorCol = sb.CursorCol
-	case 'u': // RCP — restore cursor position (clamp to current grid after resize)
-		sb.CursorRow = sb.savedCursorRow
-		sb.CursorCol = sb.savedCursorCol
-		if sb.CursorRow >= sb.Rows {
-			sb.CursorRow = sb.Rows - 1
-		}
-		if sb.CursorCol >= sb.Cols {
-			sb.CursorCol = sb.Cols - 1
-		}
-	case 'h': // SM — set mode (public)
-		// e.g. CSI 4 h (insert mode) — mostly ignored for now
-	case 'l': // RM — reset mode (public)
+		sb.InsertChars(csiParam(params, 0, 1))
 	}
 }
 

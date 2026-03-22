@@ -2,27 +2,9 @@ package renderer
 
 import (
 	"image"
-	"image/color"
-	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
-
-// PaletteEntry is a single command shown in the palette.
-// Actions are not stored here — main.go holds a parallel []func() slice.
-type PaletteEntry struct {
-	Name     string
-	Shortcut string
-}
-
-// PaletteState is the rendering + interaction state for the command palette.
-type PaletteState struct {
-	Open      bool
-	Query     string
-	CursorPos int // rune index of the text cursor within Query
-	Cursor    int // index into the filtered list
-}
-
 
 const (
 	palMaxVisible  = 12 // max visible entries at once
@@ -34,40 +16,16 @@ const (
 // substring match) sorted by match position (earlier = higher rank).
 // Returns the filtered entries and a mapping from filtered index → original index.
 func FilterPalette(entries []PaletteEntry, query string) ([]PaletteEntry, []int) {
-	if query == "" {
-		idx := make([]int, len(entries))
-		for i := range idx {
-			idx[i] = i
-		}
-		return entries, idx
+	results := filterBySubstring(len(entries), query, func(i int) []string {
+		return []string{entries[i].Name}
+	})
+	out := make([]PaletteEntry, len(results))
+	idx := make([]int, len(results))
+	for i, r := range results {
+		out[i] = entries[r.index]
+		idx[i] = r.index
 	}
-	q := strings.ToLower(query)
-	type ranked struct {
-		entry    PaletteEntry
-		orig     int
-		matchPos int
-	}
-	var ranked1, ranked2 []ranked // rank 0: match at start; rank 1: match elsewhere
-	for i, e := range entries {
-		pos := strings.Index(strings.ToLower(e.Name), q)
-		if pos < 0 {
-			continue
-		}
-		r := ranked{entry: e, orig: i, matchPos: pos}
-		if pos == 0 {
-			ranked1 = append(ranked1, r)
-		} else {
-			ranked2 = append(ranked2, r)
-		}
-	}
-	all := append(ranked1, ranked2...)
-	out := make([]PaletteEntry, len(all))
-	origIdx := make([]int, len(all))
-	for i, r := range all {
-		out[i] = r.entry
-		origIdx[i] = r.orig
-	}
-	return out, origIdx
+	return out, idx
 }
 
 // drawPalette renders the command palette overlay.
@@ -77,8 +35,7 @@ func (r *Renderer) drawPalette(allEntries []PaletteEntry, state *PaletteState) {
 		return
 	}
 
-	physW := r.modalLayer.Bounds().Dx()
-	physH := r.modalLayer.Bounds().Dy()
+	physW, physH := r.modalSize()
 
 	filtered, _ := FilterPalette(allEntries, state.Query)
 	visible := len(filtered)
@@ -110,7 +67,7 @@ func (r *Renderer) drawPalette(allEntries []PaletteEntry, state *PaletteState) {
 	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(ui.PanelBg)
 
 	// Panel border.
-	drawRect(r.modalLayer, panelRect, ui.Border)
+	drawBorder(r.modalLayer, panelRect, ui.Border)
 
 	// Input area background.
 	inputRect := image.Rect(panelX+1, panelY+1, panelX+panelW-1, panelY+inputH)
@@ -137,7 +94,7 @@ func (r *Renderer) drawPalette(allEntries []PaletteEntry, state *PaletteState) {
 
 	if len(filtered) == 0 {
 		noMatchY := divY + 2 + (rowH-r.font.CellH)/2
-		r.font.DrawString(r.modalLayer, "no matches", panelX+palPad*r.font.CellW/2, noMatchY, ui.Dim)
+		r.font.DrawString(r.modalLayer, noMatchesLabel, panelX+palPad*r.font.CellW/2, noMatchY, ui.Dim)
 		return
 	}
 
@@ -167,7 +124,7 @@ func (r *Renderer) drawPalette(allEntries []PaletteEntry, state *PaletteState) {
 		nameX := panelX + palPad*r.font.CellW/2
 
 		// Truncate name if needed.
-		name := truncatePalette(entry.Name, nameMaxW/r.font.CellW)
+		name := truncateRunes(entry.Name, nameMaxW/r.font.CellW)
 		fg := ui.Fg
 		if idx == state.Cursor {
 			fg = ui.Accent
@@ -186,14 +143,8 @@ func (r *Renderer) drawPalette(allEntries []PaletteEntry, state *PaletteState) {
 }
 
 // drawRect draws a 1px border around rect.
-func drawRect(img *ebiten.Image, r image.Rectangle, c color.RGBA) {
-	img.SubImage(image.Rect(r.Min.X, r.Min.Y, r.Max.X, r.Min.Y+1)).(*ebiten.Image).Fill(c)
-	img.SubImage(image.Rect(r.Min.X, r.Max.Y-1, r.Max.X, r.Max.Y)).(*ebiten.Image).Fill(c)
-	img.SubImage(image.Rect(r.Min.X, r.Min.Y, r.Min.X+1, r.Max.Y)).(*ebiten.Image).Fill(c)
-	img.SubImage(image.Rect(r.Max.X-1, r.Min.Y, r.Max.X, r.Max.Y)).(*ebiten.Image).Fill(c)
-}
-
-func truncatePalette(s string, maxCols int) string {
+// truncateRunes truncates s to maxCols runes, appending "…" if truncated.
+func truncateRunes(s string, maxCols int) string {
 	r := []rune(s)
 	if len(r) <= maxCols {
 		return s

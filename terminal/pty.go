@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"runtime"
@@ -73,9 +74,12 @@ func (m *PTYManager) StartReader(parser *Parser, buf *ScreenBuffer, paused *atom
 			// Reap the child process to prevent zombie accumulation.
 			// Signal the UI first (dead channel) so pane removal is immediate,
 			// then block briefly for the kernel to clean up the process entry.
-			m.cmd.Wait() //nolint:errcheck // exit status is irrelevant; we just need to reap
+			if err := m.cmd.Wait(); err != nil {
+				log.Printf("terminal: shell exited: %v", err)
+			}
 		}()
-		scratch := make([]byte, 4096)
+		const ptyReadBufSize = 4096
+		scratch := make([]byte, ptyReadBufSize)
 		for {
 			n, err := m.ptmx.Read(scratch)
 			if n > 0 {
@@ -144,7 +148,11 @@ func (m *PTYManager) Dead() <-chan struct{} {
 // Close terminates the child process and closes the PTY.
 func (m *PTYManager) Close() {
 	if m.cmd.Process != nil {
-		m.cmd.Process.Signal(syscall.SIGHUP)
+		if err := m.cmd.Process.Signal(syscall.SIGHUP); err != nil {
+			log.Printf("terminal: SIGHUP failed (pid %d): %v", m.cmd.Process.Pid, err)
+		}
 	}
-	m.ptmx.Close()
+	if err := m.ptmx.Close(); err != nil {
+		log.Printf("terminal: PTY close failed: %v", err)
+	}
 }

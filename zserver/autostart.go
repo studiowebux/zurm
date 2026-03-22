@@ -11,6 +11,12 @@ import (
 	"time"
 )
 
+const (
+	serverStartupTimeout = 2 * time.Second       // max wait for server to become ready
+	serverPollInterval   = 50 * time.Millisecond  // poll frequency while waiting for server
+	socketProbeTimeout   = 200 * time.Millisecond // dial timeout for reachability check
+)
+
 // EnsureServer checks if zurm-server is running at the given socket path.
 // If not, it spawns the server binary as a detached background process.
 // Returns the resolved socket address to connect to, or an error.
@@ -38,17 +44,17 @@ func EnsureServer(socketPath, serverBinary string) (string, error) {
 		return "", fmt.Errorf("spawn zurm-server: %w", err)
 	}
 
-	// Wait up to 2 s for the socket to appear and accept connections.
-	deadline := time.Now().Add(2 * time.Second)
+	// Wait for the socket to appear and accept connections.
+	deadline := time.Now().Add(serverStartupTimeout)
 	for time.Now().Before(deadline) {
 		if isReachable(addr) {
 			log.Printf("zserver/autostart: server ready at %s", addr)
 			return addr, nil
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(serverPollInterval)
 	}
 
-	return "", fmt.Errorf("zurm-server did not become ready at %s within 2s", addr)
+	return "", fmt.Errorf("zurm-server did not become ready at %s within %s", addr, serverStartupTimeout)
 }
 
 // ResolveSocket returns the canonical socket path, applying the default when
@@ -66,7 +72,7 @@ func ResolveSocket(socketPath string) string {
 
 // isReachable dials the Unix socket and returns true when the server answers.
 func isReachable(addr string) bool {
-	conn, err := net.DialTimeout("unix", addr, 200*time.Millisecond)
+	conn, err := net.DialTimeout("unix", addr, socketProbeTimeout)
 	if err != nil {
 		return false
 	}
@@ -127,7 +133,7 @@ func spawnServer(binary, socketPath string) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	if err := cmd.Start(); err != nil {
-		return err
+		return fmt.Errorf("zserver/autostart: spawn server: %w", err)
 	}
 
 	log.Printf("zserver/autostart: spawned zurm-server (pid %d) at %s — log: %s",

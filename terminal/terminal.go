@@ -2,15 +2,33 @@ package terminal
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
 	"sync/atomic"
 
-	"github.com/studiowebux/zurm/config"
+	"image/color"
 )
+
+// TerminalConfig holds the settings needed to construct and run a Terminal.
+// Passed at creation time instead of the full application config.
+type TerminalConfig struct {
+	Rows           int
+	Cols           int
+	ScrollbackLines int
+	MaxBlocks      int
+	FG             color.RGBA
+	BG             color.RGBA
+	Palette        [16]color.RGBA
+	CursorBlink    bool
+	ShellProgram   string
+	ShellArgs      []string
+	ShowProcess    bool // whether foreground process polling is enabled
+}
 
 // Terminal ties together the screen buffer, PTY, parser, cursor, and input.
 // It is the central coordinator consumed by the renderer and game loop.
@@ -19,7 +37,7 @@ type Terminal struct {
 	Cursor           *Cursor
 	pty              PtyBackend
 	parser           *Parser
-	cfg              *config.Config
+	tcfg             TerminalConfig
 	TitleCh          chan string
 	CwdCh            chan string
 	BellCh           chan struct{}
@@ -36,42 +54,60 @@ type Terminal struct {
 	// paused is set when the window is idle/unfocused. Polling goroutines
 	// (pollCWD, pollForeground) skip work while this is true.
 	paused atomic.Bool
+
+	// osc7Active is set true on the first OSC 7 CWD notification from the shell.
+	// Once set, QueryCWD skips the lsof fallback — the shell delivers CWD itself.
+	osc7Active atomic.Bool
+
+	// ptyWriteErr tracks whether a PTY write error has been logged.
+	// Once set, further write errors are silently dropped to avoid log spam.
+	ptyWriteErr atomic.Bool
+
+	// osc133Active is set true on the first OSC 133 shell integration event.
+	// Once set, periodic ps-based foreground polling is skipped.
+	osc133Active atomic.Bool
+
+	// ShellIntCh receives OSC 133 event codes (A/C/D) from the parser.
+	// Drained by the game loop to update the foreground process name.
+	ShellIntCh chan byte
 }
 
 // New creates a Terminal from the given config.
-// Call Start() to spawn the shell.
-func New(cfg *config.Config) *Terminal {
-	palette := cfg.Palette()
-	fg := config.ParseHexColor(cfg.Colors.Foreground)
-	bg := config.ParseHexColor(cfg.Colors.Background)
-
-	titleCh := make(chan string, 4)
-	cwdCh := make(chan string, 4)
-	bellCh := make(chan struct{}, 4)
-	buf := NewScreenBuffer(cfg.Window.Rows, cfg.Window.Columns, cfg.Scrollback.Lines, cfg.Blocks.MaxHistory, fg, bg, palette)
-	parser := NewParser(buf, titleCh, cwdCh, bellCh)
+// Call Start() to spawn the shell. Parser is created lazily on first Start call.
+func New(tc TerminalConfig) *Terminal {
+	buf := NewScreenBuffer(tc.Rows, tc.Cols, tc.ScrollbackLines, tc.MaxBlocks, tc.FG, tc.BG, tc.Palette)
 
 	cur := NewCursor()
-	if cfg.Input.CursorBlink {
+	if tc.CursorBlink {
 		cur.EnableBlink()
 	}
 
 	return &Terminal{
 		Buf:              buf,
 		Cursor:           cur,
-		parser:           parser,
-		cfg:              cfg,
-		TitleCh:          titleCh,
-		CwdCh:            cwdCh,
-		BellCh:           bellCh,
+		tcfg:             tc,
+		TitleCh:          make(chan string, 4),
+		CwdCh:            make(chan string, 4),
+		BellCh:           make(chan struct{}, 4),
 		ForegroundProcCh: make(chan string, 4),
+		ShellIntCh:       make(chan byte, 4),
 	}
+}
+
+// ensureParser creates the parser on first call. Idempotent.
+// Separated from New() so Terminal construction does not depend on Parser.
+func (t *Terminal) ensureParser() {
+	if t.parser != nil {
+		return
+	}
+	t.parser = NewParser(t.Buf, t.TitleCh, t.CwdCh, t.BellCh, t.ShellIntCh, &t.osc7Active, &t.osc133Active)
 }
 
 // Start spawns the shell process.
 // dir is the working directory for the shell; empty string inherits the parent process CWD.
 func (t *Terminal) Start(dir string) error {
-	shell := t.cfg.Shell.Program
+	t.ensureParser()
+	shell := t.tcfg.ShellProgram
 	if shell == "" {
 		shell = os.Getenv("SHELL")
 		if shell == "" {
@@ -79,9 +115,9 @@ func (t *Terminal) Start(dir string) error {
 		}
 	}
 
-	env := BuildEnv(t.cfg.Window.Columns, t.cfg.Window.Rows)
+	env := BuildEnv(t.tcfg.Cols, t.tcfg.Rows)
 
-	pty, err := NewPTYManager(shell, t.cfg.Shell.Args, t.cfg.Window.Columns, t.cfg.Window.Rows, env, dir)
+	pty, err := NewPTYManager(shell, t.tcfg.ShellArgs, t.tcfg.Cols, t.tcfg.Rows, env, dir)
 	if err != nil {
 		return fmt.Errorf("terminal start: %w", err)
 	}
@@ -92,8 +128,9 @@ func (t *Terminal) Start(dir string) error {
 
 // StartCmd launches a specific command (instead of the user's shell) in the PTY.
 func (t *Terminal) StartCmd(program string, args []string, dir string) error {
-	env := BuildEnv(t.cfg.Window.Columns, t.cfg.Window.Rows)
-	pty, err := NewPTYManager(program, args, t.cfg.Window.Columns, t.cfg.Window.Rows, env, dir)
+	t.ensureParser()
+	env := BuildEnv(t.tcfg.Cols, t.tcfg.Rows)
+	pty, err := NewPTYManager(program, args, t.tcfg.Cols, t.tcfg.Rows, env, dir)
 	if err != nil {
 		return fmt.Errorf("terminal start cmd: %w", err)
 	}
@@ -105,15 +142,24 @@ func (t *Terminal) StartCmd(program string, args []string, dir string) error {
 // StartWithBackend attaches a pre-created PtyBackend (e.g. from zserver)
 // and starts its reader. The backend must already have a live session.
 func (t *Terminal) StartWithBackend(backend PtyBackend) error {
+	t.ensureParser()
 	t.pty = backend
 	backend.StartReader(t.parser, t.Buf, &t.paused)
 	return nil
 }
 
+// writePTY writes to the PTY and logs the first error. Subsequent write errors
+// are silently dropped to avoid flooding the log when the shell exits.
+func (t *Terminal) writePTY(b []byte) {
+	if _, err := t.pty.Write(b); err != nil && !t.ptyWriteErr.Swap(true) {
+		log.Printf("terminal: PTY write failed: %v", err)
+	}
+}
+
 // SendBytes writes raw bytes to the PTY stdin.
 func (t *Terminal) SendBytes(b []byte) {
 	if t.pty != nil && len(b) > 0 {
-		t.pty.Write(b)
+		t.writePTY(b)
 	}
 }
 
@@ -131,7 +177,7 @@ func (t *Terminal) SendDA1Response() {
 	t.Buf.PendingDA1 = false
 	t.Buf.Unlock()
 	// VT400-class terminal with ANSI color.
-	t.pty.Write([]byte("\x1B[?62;22c"))
+	t.writePTY([]byte("\x1B[?62;22c"))
 }
 
 // SendDA2Response sends secondary device attributes if one is pending (CSI > c).
@@ -148,7 +194,7 @@ func (t *Terminal) SendDA2Response() {
 	t.Buf.PendingDA2 = false
 	t.Buf.Unlock()
 	// VT terminal, version 10, ROM cartridge 1.
-	t.pty.Write([]byte("\x1B[>0;10;1c"))
+	t.writePTY([]byte("\x1B[>0;10;1c"))
 }
 
 // SendFocusEvent sends a focus-in or focus-out event when mode 1004 is active.
@@ -163,9 +209,9 @@ func (t *Terminal) SendFocusEvent(focused bool) {
 		return
 	}
 	if focused {
-		t.pty.Write([]byte("\x1B[I"))
+		t.writePTY([]byte("\x1B[I"))
 	} else {
-		t.pty.Write([]byte("\x1B[O"))
+		t.writePTY([]byte("\x1B[O"))
 	}
 }
 
@@ -191,10 +237,10 @@ func (t *Terminal) SendPendingResponses() {
 	t.Buf.Unlock()
 
 	for _, resp := range responses {
-		t.pty.Write(resp)
+		t.writePTY(resp)
 	}
 	if kittyQuery {
-		t.pty.Write([]byte(fmt.Sprintf("\x1B[?%du", kittyFlags)))
+		t.writePTY([]byte(fmt.Sprintf("\x1B[?%du", kittyFlags)))
 	}
 }
 
@@ -226,7 +272,7 @@ func (t *Terminal) SendCPRResponse() {
 	col := t.Buf.CursorCol + 1
 	t.Buf.Unlock()
 	resp := fmt.Sprintf("\x1B[%d;%dR", row, col)
-	t.pty.Write([]byte(resp))
+	t.writePTY([]byte(resp))
 }
 
 // SendClipboardResponses drains OSC 52 clipboard write requests and query
@@ -254,20 +300,24 @@ func (t *Terminal) SendClipboardResponses() {
 		if err == nil {
 			encoded := base64.StdEncoding.EncodeToString(out)
 			resp := fmt.Sprintf("\x1B]52;c;%s\x1B\\", encoded)
-			t.pty.Write([]byte(resp))
+			t.writePTY([]byte(resp))
 		}
 	}
 }
 
+// SetShowProcess updates the ShowProcess flag (used by RefreshForeground).
+func (t *Terminal) SetShowProcess(show bool) {
+	t.tcfg.ShowProcess = show
+}
+
 // UpdateColors propagates new color settings to the buffer and parser.
 // Called during config hot-reload.
-func (t *Terminal) UpdateColors(cfg *config.Config) {
-	fg := config.ParseHexColor(cfg.Colors.Foreground)
-	bg := config.ParseHexColor(cfg.Colors.Background)
-	palette := cfg.Palette()
+func (t *Terminal) UpdateColors(fg, bg color.RGBA, palette [16]color.RGBA) {
 	t.Buf.Lock()
 	t.Buf.UpdateColors(fg, bg, palette)
-	t.parser.SetPalette(palette)
+	if t.parser != nil {
+		t.parser.SetPalette(palette)
+	}
 	t.Buf.Unlock()
 }
 
@@ -275,10 +325,14 @@ func (t *Terminal) UpdateColors(cfg *config.Config) {
 func (t *Terminal) Resize(cols, rows int) {
 	t.Buf.Lock()
 	t.Buf.Resize(rows, cols)
-	t.parser.resetTabStops() // rebuild tab stops for new column count
+	if t.parser != nil {
+		t.parser.resetTabStops() // rebuild tab stops for new column count
+	}
 	t.Buf.Unlock()
 	if t.pty != nil {
-		t.pty.Resize(cols, rows)
+		if err := t.pty.Resize(cols, rows); err != nil {
+			log.Printf("terminal: PTY resize failed: %v", err)
+		}
 	}
 }
 
@@ -311,18 +365,37 @@ func (t *Terminal) Pid() int {
 // Called by the game loop when the window becomes idle or regains focus.
 func (t *Terminal) SetPaused(p bool) { t.paused.Store(p) }
 
+// sessionRenamer is implemented by backends that support session naming (ServerBackend).
+type sessionRenamer interface {
+	RenameSession(name string) error
+}
+
+// RenameSession sends a human-readable name to the backing server session.
+// No-op for local PTY sessions. Called when the user renames a server-backed pane.
+func (t *Terminal) RenameSession(name string) {
+	if r, ok := t.pty.(sessionRenamer); ok {
+		if err := r.RenameSession(name); err != nil {
+			log.Printf("terminal: rename session failed: %v", err)
+		}
+	}
+}
+
+// HasOSC133 reports whether the shell has emitted at least one OSC 133 event.
+// When true, the game loop skips periodic ps-based foreground polling for this terminal.
+func (t *Terminal) HasOSC133() bool { return t.osc133Active.Load() }
+
 // QueryCWD performs a one-shot CWD query via lsof and sends the result
-// to CwdCh. Safe to call from a goroutine. This is the fallback for shells
-// that do not send OSC 7.
-func (t *Terminal) QueryCWD() {
-	if t.paused.Load() {
+// to CwdCh. No-op when the shell already delivers CWD via OSC 7 (osc7Active)
+// or when the terminal is idle-suspended.
+func (t *Terminal) QueryCWD(ctx context.Context) {
+	if t.paused.Load() || t.osc7Active.Load() {
 		return
 	}
 	pid := t.Pid()
 	if pid <= 0 {
 		return
 	}
-	out, err := exec.Command("lsof", "-a", "-p", // #nosec G204 — fixed binary, only argument is numeric PID
+	out, err := exec.CommandContext(ctx, "lsof", "-a", "-p", // #nosec G204 — fixed binary, only argument is numeric PID
 		fmt.Sprintf("%d", pid), "-d", "cwd", "-Fn").Output()
 	if err != nil {
 		return
@@ -333,7 +406,7 @@ func (t *Terminal) QueryCWD() {
 			if cwd != "" {
 				select {
 				case t.CwdCh <- cwd:
-				default:
+				case <-ctx.Done():
 				}
 			}
 			break
@@ -343,20 +416,20 @@ func (t *Terminal) QueryCWD() {
 
 // QueryForeground performs a one-shot foreground process query and sends
 // the result to ForegroundProcCh if it changed. Safe to call from a goroutine.
-func (t *Terminal) QueryForeground() {
+func (t *Terminal) QueryForeground(ctx context.Context) {
 	if t.paused.Load() {
 		return
 	}
-	name := t.foregroundProcessName()
+	name := t.foregroundProcessName(ctx)
 	select {
 	case t.ForegroundProcCh <- name:
-	default:
+	case <-ctx.Done():
 	}
 }
 
 // foregroundProcessName returns the basename of the foreground process in the PTY.
 // Returns an empty string when the shell itself is the foreground process or on error.
-func (t *Terminal) foregroundProcessName() string {
+func (t *Terminal) foregroundProcessName(ctx context.Context) string {
 	if t.pty == nil {
 		return ""
 	}
@@ -368,7 +441,7 @@ func (t *Terminal) foregroundProcessName() string {
 	if pgid == t.Pid() {
 		return ""
 	}
-	out, err := exec.Command("ps", "-p", fmt.Sprintf("%d", pgid), "-o", "comm=").Output() // #nosec G204 — fixed binary, only argument is numeric PGID
+	out, err := exec.CommandContext(ctx, "ps", "-p", fmt.Sprintf("%d", pgid), "-o", "comm=").Output() // #nosec G204 — fixed binary, only argument is numeric PGID
 	if err != nil {
 		return ""
 	}
@@ -382,15 +455,15 @@ func (t *Terminal) foregroundProcessName() string {
 // RefreshForeground immediately queries the foreground process and sends the
 // result to ForegroundProcCh. Called on focus switch so the status bar updates
 // right away without waiting for the next 1-second poll tick.
-func (t *Terminal) RefreshForeground() {
-	if !t.cfg.StatusBar.ShowProcess {
+func (t *Terminal) RefreshForeground(ctx context.Context) {
+	if !t.tcfg.ShowProcess {
 		return
 	}
 	go func() {
-		name := t.foregroundProcessName()
+		name := t.foregroundProcessName(ctx)
 		select {
 		case t.ForegroundProcCh <- name:
-		default:
+		case <-ctx.Done():
 		}
 	}()
 }

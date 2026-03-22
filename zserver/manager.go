@@ -55,11 +55,15 @@ func (m *Manager) List() []SessionInfo {
 	defer m.mu.RUnlock()
 	out := make([]SessionInfo, 0, len(m.sessions))
 	for _, s := range m.sessions {
+		s.mu.Lock()
+		name, cols, rows := s.Name, s.Cols, s.Rows
+		s.mu.Unlock()
 		out = append(out, SessionInfo{
 			ID:   s.ID,
+			Name: name,
 			PID:  s.pid(),
-			Cols: s.Cols,
-			Rows: s.Rows,
+			Cols: cols,
+			Rows: rows,
 			Dir:  s.Dir,
 		})
 	}

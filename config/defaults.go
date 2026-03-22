@@ -34,6 +34,16 @@ var Defaults = Config{
 		BrightMagenta: "#C084FC",
 		BrightCyan:    "#67E8F9",
 		BrightWhite:   "#E8E8F0",
+		// Markdown viewer
+		MdBold:        "#FFFFFF",
+		MdHeading:     "#FFFFFF",
+		MdCode:        "#A0D080",
+		MdCodeBorder:  "#606060",
+		MdTableBorder: "#505050",
+		MdMatchBg:     "#808000",
+		MdMatchCurBg:  "#FFCC00",
+		MdBadgeBg:     "#FFCC00",
+		MdBadgeFg:     "#000000",
 	},
 	Shell: ShellConfig{
 		Program: "",
@@ -106,15 +116,6 @@ var Defaults = Config{
 		Sound:      true,
 		DurationMs: 150,
 		Color:      "#F59E0B",
-	},
-	Voice: VoiceConfig{
-		Enabled:   false,
-		VoiceID:   "",
-		Rate:      0.5,
-		Pitch:     1.0,
-		Volume:    1.0,
-		Locale:    "en-US",
-		ReadLines: 10,
 	},
 	Blocks: BlocksConfig{
 		Enabled:      false,

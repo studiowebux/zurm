@@ -54,9 +54,6 @@ landing:
       - emoji: "~"
         title: "llms.txt Browser"
         description: "Fetch and browse llms.txt from any domain. Hint-mode links and send-to-pane."
-      - emoji: "~"
-        title: "Speech"
-        description: "Text-to-speech via macOS AVSpeechSynthesizer and speech-to-text via SFSpeechRecognizer."
   links:
     title: "Resources"
     items:

@@ -9,39 +9,11 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/studiowebux/zurm/config"
 )
-
-// StatusBarState holds the data the renderer needs to draw one frame of the bar.
-type StatusBarState struct {
-	Cwd             string
-	GitBranch       string
-	GitCommit       string // short commit hash (7 chars)
-	GitDirty        int    // modified file count
-	GitStaged       int    // staged file count
-	GitAhead        int    // commits ahead of upstream
-	GitBehind       int    // commits behind upstream
-	ForegroundProc  string          // foreground process name, "" when shell is foreground
-	ScrollOffset    int             // buf.ViewOffset of the focused pane; 0 = live output
-	Zoomed          bool            // true when a pane is fullscreened via Cmd+Z
-	PinMode         bool            // true while waiting for a pin slot keypress
-	HelpBtnRect     image.Rectangle // set during draw; used by main.go for click detection
-	FlashMessage    string          // transient message shown in place of cwd; cleared by Game.Update
-	BlocksEnabled   bool            // show block indicator when true
-	BlockCount      int             // number of completed blocks in focused pane
-	Recording         bool          // true while a screen recording is in progress
-	RecordingDuration time.Duration // elapsed recording time
-	RecordingBytes    int64         // output MP4 file size on disk
-	RecordingMode     string        // "MP4"
-	Listening         bool          // true while STT dictation is active
-	Version           string        // app version, e.g. "v0.4.1"
-	TabNote           string        // active tab's annotation, shown as a middle segment
-	ServerSession     bool          // true when the focused pane is backed by zurm-server
-}
 
 // StatusBarHeight returns the physical pixel height of the status bar,
 // or 0 when the bar is disabled.
-func StatusBarHeight(font *FontRenderer, cfg *config.Config) int {
+func StatusBarHeight(font *FontRenderer, cfg *RenderConfig) int {
 	if !cfg.StatusBar.Enabled {
 		return 0
 	}
@@ -57,11 +29,10 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 	}
 
 	h := StatusBarHeight(r.font, r.cfg)
-	physH := r.offscreen.Bounds().Dy()
-	physW := r.offscreen.Bounds().Dx()
+	physW, physH := r.screenSize()
 	barRect := image.Rect(0, physH-h, physW, physH)
 
-	barBg := darken(config.ParseHexColor(r.cfg.Colors.Background))
+	barBg := darken(parseHexColor(r.cfg.Colors.Background))
 	r.offscreen.SubImage(barRect).(*ebiten.Image).Fill(barBg)
 
 	// Separator line at the top of the bar.
@@ -71,8 +42,8 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 		r.offscreen.SubImage(image.Rect(0, physH-h, physW, physH-h+sepH)).(*ebiten.Image).Fill(sepColor)
 	}
 
-	fg := config.ParseHexColor(r.cfg.Colors.BrightBlack)
-	accentFg := config.ParseHexColor(r.cfg.Colors.Foreground)
+	fg := parseHexColor(r.cfg.Colors.BrightBlack)
+	accentFg := parseHexColor(r.cfg.Colors.Foreground)
 	padding := r.cfg.StatusBar.PaddingPx
 	textY := physH - h + sepH + padding + (h-sepH-padding-r.font.CellH)/2
 
@@ -99,7 +70,10 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 		rightSegs = append(rightSegs, seg{fmt.Sprintf("↑ %d", state.ScrollOffset), accentFg})
 	}
 	if state.ServerSession {
-		rightSegs = append(rightSegs, seg{"[SERVER]", config.ParseHexColor(r.cfg.Colors.Cyan)})
+		rightSegs = append(rightSegs, seg{"[SERVER]", parseHexColor(r.cfg.Colors.Cyan)})
+	}
+	if state.ServerSessionCount > 0 {
+		rightSegs = append(rightSegs, seg{fmt.Sprintf("S%d", state.ServerSessionCount), parseHexColor(r.cfg.Colors.Cyan)})
 	}
 	if state.Zoomed {
 		rightSegs = append(rightSegs, seg{"[ZOOM]", accentFg})
@@ -121,14 +95,7 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 		if state.RecordingBytes > 0 {
 			recText += " " + fmtFileSize(state.RecordingBytes)
 		}
-		rightSegs = append(rightSegs, seg{recText, config.ParseHexColor(r.cfg.Colors.Red)})
-	}
-	if state.Listening {
-		dot := "●"
-		if time.Now().Second()%2 == 0 {
-			dot = "○"
-		}
-		rightSegs = append(rightSegs, seg{dot + " MIC", config.ParseHexColor(r.cfg.Colors.Green)})
+		rightSegs = append(rightSegs, seg{recText, parseHexColor(r.cfg.Colors.Red)})
 	}
 	if state.Version != "" {
 		rightSegs = append(rightSegs, seg{state.Version, fg})

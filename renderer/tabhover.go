@@ -2,27 +2,10 @@ package renderer
 
 import (
 	"image"
-	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/studiowebux/zurm/config"
 	"github.com/studiowebux/zurm/tab"
 )
-
-// TabHoverState tracks the popover state for tab hover minimap preview.
-type TabHoverState struct {
-	Active     bool
-	TabIdx     int       // hovered tab index (-1 = none)
-	HoverStart time.Time // when cursor entered this tab
-
-	PopoverX int // physical pixel position
-	PopoverY int
-	PopoverW int // physical pixel size (after DPI scaling)
-	PopoverH int
-
-	Thumbnail *ebiten.Image // cached scaled snapshot
-	CacheKey  uint64        // sum of RenderGen for invalidation
-}
 
 // RenderTabThumbnail renders a full-resolution snapshot of the given tab's layout
 // into a temporary image. The caller is responsible for scaling it down when drawing.
@@ -39,7 +22,7 @@ func (r *Renderer) RenderTabThumbnail(t *tab.Tab, contentRect image.Rectangle) *
 	}
 
 	tmp := ebiten.NewImage(w, h)
-	tmp.Fill(config.ParseHexColor(r.cfg.Colors.Background))
+	tmp.Fill(parseHexColor(r.cfg.Colors.Background))
 
 	offsetX := -contentRect.Min.X
 	offsetY := -contentRect.Min.Y
@@ -62,6 +45,9 @@ func (r *Renderer) RenderTabThumbnail(t *tab.Tab, contentRect image.Rectangle) *
 
 // TabHoverCacheKey computes a cache key from the aggregate RenderGen of all panes in a tab.
 func TabHoverCacheKey(t *tab.Tab) uint64 {
+	if t == nil || t.Layout == nil {
+		return 0
+	}
 	var sum uint64
 	for _, leaf := range t.Layout.Leaves() {
 		sum += leaf.Pane.Term.Buf.RenderGen()
@@ -135,6 +121,9 @@ func (r *Renderer) ComputeContentRect(t *tab.Tab) image.Rectangle {
 
 // DismissTabHover disposes the thumbnail and resets the hover state.
 func DismissTabHover(state *TabHoverState) {
+	if state == nil {
+		return
+	}
 	if state.Thumbnail != nil {
 		state.Thumbnail.Deallocate()
 		state.Thumbnail = nil

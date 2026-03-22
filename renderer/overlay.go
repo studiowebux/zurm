@@ -3,100 +3,18 @@ package renderer
 import (
 	"fmt"
 	"image"
-	"image/color"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/studiowebux/zurm/help"
-	"github.com/studiowebux/zurm/markdown"
 )
-
-
-// OverlayState holds the rendering state for the keybinding overlay.
-type OverlayState struct {
-	Open            bool
-	SearchQuery     string
-	SearchCursorPos int // rune index of the text cursor within SearchQuery
-	ScrollOffset    int
-	MaxScroll       int // written by renderer each frame
-	RowH            int // written by renderer each frame
-}
-
-// ConfirmState holds the rendering state for the close-confirmation dialog.
-type ConfirmState struct {
-	Open    bool
-	Message string // e.g. "Close pane?" or "Close tab?"
-}
-
-// DictationState holds the rendering state for the speech-to-text overlay.
-type DictationState struct {
-	Open       bool
-	Status     string // "Listening…", "Requesting permission…", error messages
-	Transcript string // latest interim or final transcript text
-}
-
-// URLInputState holds the rendering state for the llms.txt URL input overlay.
-type URLInputState struct {
-	Open      bool
-	Query     string
-	CursorPos int // rune index of the text cursor within Query
-	Loading   bool
-}
-
-// SearchMatch stores the position of a search hit within a styled line.
-type SearchMatch struct {
-	LineIdx int // which StyledLine
-	Col     int // rune offset within the concatenated line text
-	Len     int // rune length of the match
-}
-
-// LinkHint is a follow-mode badge mapping a letter to a link span.
-type LinkHint struct {
-	LineIdx int
-	SpanIdx int
-	URL     string
-	Label   rune
-}
-
-// MarkdownViewerState holds the rendering state for the markdown reader overlay.
-type MarkdownViewerState struct {
-	Open         bool
-	Title        string
-	Lines        []markdown.StyledLine
-	ScrollOffset int
-	MaxScroll    int // written by renderer each frame
-	RowH         int // written by renderer each frame
-
-	// Search state (Cmd+F / /).
-	SearchOpen      bool
-	SearchQuery     string
-	SearchCursorPos int // rune index of the text cursor within SearchQuery
-	SearchMatches   []SearchMatch // matches with position info
-	SearchIdx       int           // current match index (-1 = none)
-
-	// HasAlt is true when an alternate view is available (e.g. llms.txt ↔ llms-full.txt).
-	// When set, the hint bar shows "Tab switch".
-	HasAlt bool
-
-	// Follow-link mode (f key).
-	FollowMode bool
-	LinkHints  []LinkHint
-
-	// IsLLMS marks this viewer as browsing llms.txt content (enables history nav).
-	IsLLMS bool
-
-	// HistoryLen / ForwardLen control hint bar display of back/forward availability.
-	HistoryLen int
-	ForwardLen int
-}
 
 // categoryGroup groups bindings under one category for rendering.
 type categoryGroup struct {
 	Category string
-	Bindings []help.KeyBinding
+	Bindings []OverlayKeyBinding
 }
 
 // groupByCategory converts a flat binding list into ordered categoryGroups.
-func groupByCategory(bindings []help.KeyBinding) []categoryGroup {
+func groupByCategory(bindings []OverlayKeyBinding) []categoryGroup {
 	var groups []categoryGroup
 	idx := make(map[string]int)
 	for _, b := range bindings {
@@ -104,15 +22,15 @@ func groupByCategory(bindings []help.KeyBinding) []categoryGroup {
 			groups[i].Bindings = append(groups[i].Bindings, b)
 		} else {
 			idx[b.Category] = len(groups)
-			groups = append(groups, categoryGroup{Category: b.Category, Bindings: []help.KeyBinding{b}})
+			groups = append(groups, categoryGroup{Category: b.Category, Bindings: []OverlayKeyBinding{b}})
 		}
 	}
 	return groups
 }
 
 // columnHeight returns the total pixel height for the given category names.
-func (r *Renderer) columnHeight(categories []string, rowH, headerH int) int {
-	all := groupByCategory(help.AllBindings())
+func (r *Renderer) columnHeight(allBindings []OverlayKeyBinding, categories []string, rowH, headerH int) int {
+	all := groupByCategory(allBindings)
 	catMap := make(map[string]int)
 	for _, g := range all {
 		catMap[g.Category] = len(g.Bindings)
@@ -130,17 +48,9 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 		return
 	}
 
-	physW := r.modalLayer.Bounds().Dx()
-	physH := r.modalLayer.Bounds().Dy()
+	physW, physH := r.modalSize()
 
-	// Semi-transparent backdrop: scale a 1×1 image to full screen.
-	if r.overlayBg == nil {
-		r.overlayBg = ebiten.NewImage(1, 1)
-	}
-	r.overlayBg.Fill(r.ui.Backdrop)
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Scale(float64(physW), float64(physH))
-	r.modalLayer.DrawImage(r.overlayBg, op)
+	r.drawBackdrop(physW, physH)
 
 	cw := r.font.CellW
 	ch := r.font.CellH
@@ -151,8 +61,8 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 	leftCats := []string{"Navigation", "Panes", "File Explorer"}
 	rightCats := []string{"Pins", "Scroll", "Copy / Paste", "Search", "Blocks", "Recording", "Help", "App"}
 
-	leftH := r.columnHeight(leftCats, rowH, headerH)
-	rightH := r.columnHeight(rightCats, rowH, headerH)
+	leftH := r.columnHeight(state.AllBindings, leftCats, rowH, headerH)
+	rightH := r.columnHeight(state.AllBindings, rightCats, rowH, headerH)
 	totalContentH := leftH
 	if rightH > totalContentH {
 		totalContentH = rightH
@@ -175,8 +85,7 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 
 	// When searching, total content is the flat filtered list height.
 	if state.SearchQuery != "" {
-		filtered := help.FilterBindings(state.SearchQuery)
-		n := len(filtered)
+		n := len(state.FilteredBindings)
 		if n == 0 {
 			n = 1 // "No matches" line
 		}
@@ -203,15 +112,7 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 	// Update scroll metrics so input handler can clamp and step.
 	state.RowH = rowH
 	state.MaxScroll = totalContentH - visibleContentH
-	if state.MaxScroll < 0 {
-		state.MaxScroll = 0
-	}
-	if state.ScrollOffset < 0 {
-		state.ScrollOffset = 0
-	}
-	if state.ScrollOffset > state.MaxScroll {
-		state.ScrollOffset = state.MaxScroll
-	}
+	state.ScrollOffset, state.MaxScroll = clampScroll(state.ScrollOffset, state.MaxScroll)
 
 	// Clamp panel width to screen.
 	if panelW > physW {
@@ -224,7 +125,7 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 
 	// Panel background and border.
 	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(r.ui.PanelBg)
-	r.drawOverlayBorder(panelRect)
+	drawBorder(r.modalLayer, panelRect, r.ui.Border)
 
 	// Title row.
 	titleY := panelY + topPad + 3
@@ -243,7 +144,7 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 	searchY := panelY + topPad + titleH
 	searchBoxRect := image.Rect(panelX+panelPad, searchY, panelX+panelW-panelPad, searchY+searchH-2)
 	r.modalLayer.SubImage(searchBoxRect).(*ebiten.Image).Fill(r.ui.HoverBg)
-	r.drawOverlayBorder(searchBoxRect)
+	drawBorder(r.modalLayer, searchBoxRect, r.ui.Border)
 	searchText := "Search: " + inputWithCursor(state.SearchQuery, state.SearchCursorPos)
 	r.font.DrawString(r.modalLayer, searchText, panelX+panelPad+cw/2, searchY+3, r.ui.Fg)
 
@@ -258,13 +159,12 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 	drawY := contentTop - state.ScrollOffset
 
 	if state.SearchQuery != "" {
-		filtered := help.FilterBindings(state.SearchQuery)
-		r.drawFlatBindings(contentImg, filtered, panelX+panelPad, drawY, panelW-2*panelPad, keyColW, rowH)
+		r.drawFlatBindings(contentImg, state.FilteredBindings, panelX+panelPad, drawY, panelW-2*panelPad, keyColW, rowH)
 	} else {
 		leftX := panelX + panelPad
 		rightX := leftX + colW + colGap
-		r.drawColumnGroups(contentImg, leftCats, leftX, drawY, keyColW, descColW, rowH, headerH)
-		r.drawColumnGroups(contentImg, rightCats, rightX, drawY, keyColW, descColW, rowH, headerH)
+		r.drawColumnGroups(contentImg, state.AllBindings, leftCats, leftX, drawY, keyColW, descColW, rowH, headerH)
+		r.drawColumnGroups(contentImg, state.AllBindings, rightCats, rightX, drawY, keyColW, descColW, rowH, headerH)
 	}
 
 	// Scrollbar — only when content overflows.
@@ -283,9 +183,9 @@ func (r *Renderer) drawOverlay(state *OverlayState) {
 
 // drawColumnGroups renders category headers and binding rows for the given
 // categories into img (a clipped sub-image) starting at absolute coords (x, y).
-func (r *Renderer) drawColumnGroups(img *ebiten.Image, categories []string, x, y, keyW, descW, rowH, headerH int) {
-	all := groupByCategory(help.AllBindings())
-	catMap := make(map[string][]help.KeyBinding)
+func (r *Renderer) drawColumnGroups(img *ebiten.Image, allBindings []OverlayKeyBinding, categories []string, x, y, keyW, descW, rowH, headerH int) {
+	all := groupByCategory(allBindings)
+	catMap := make(map[string][]OverlayKeyBinding)
 	for _, g := range all {
 		catMap[g.Category] = g.Bindings
 	}
@@ -321,7 +221,7 @@ func (r *Renderer) drawColumnGroups(img *ebiten.Image, categories []string, x, y
 
 // drawFlatBindings renders a filtered flat list of bindings into img (a clipped
 // sub-image) starting at absolute coords (x, y).
-func (r *Renderer) drawFlatBindings(img *ebiten.Image, bindings []help.KeyBinding, x, y, width, keyW, rowH int) {
+func (r *Renderer) drawFlatBindings(img *ebiten.Image, bindings []OverlayKeyBinding, x, y, width, keyW, rowH int) {
 	if len(bindings) == 0 {
 		r.font.DrawString(img, "No matches", x, y+1, r.ui.Dim)
 		return
@@ -349,17 +249,9 @@ func (r *Renderer) drawConfirm(state *ConfirmState) {
 		return
 	}
 
-	physW := r.modalLayer.Bounds().Dx()
-	physH := r.modalLayer.Bounds().Dy()
+	physW, physH := r.modalSize()
 
-	// Semi-transparent backdrop.
-	if r.overlayBg == nil {
-		r.overlayBg = ebiten.NewImage(1, 1)
-		r.overlayBg.Fill(r.ui.Backdrop)
-	}
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Scale(float64(physW), float64(physH))
-	r.modalLayer.DrawImage(r.overlayBg, op)
+	r.drawBackdrop(physW, physH)
 
 	cw := r.font.CellW
 	ch := r.font.CellH
@@ -380,7 +272,7 @@ func (r *Renderer) drawConfirm(state *ConfirmState) {
 	panelRect := image.Rect(panelX, panelY, panelX+panelW, panelY+panelH)
 
 	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(r.ui.PanelBg)
-	r.drawOverlayBorder(panelRect)
+	drawBorder(r.modalLayer, panelRect, r.ui.Border)
 
 	msgX := panelX + (panelW-msgLen*cw)/2
 	r.font.DrawString(r.modalLayer, state.Message, msgX, panelY+panelPad, r.ui.Accent)
@@ -389,96 +281,15 @@ func (r *Renderer) drawConfirm(state *ConfirmState) {
 	r.font.DrawString(r.modalLayer, hint, hintX, panelY+panelPad+ch*2, r.ui.Dim)
 }
 
-// drawDictation renders a centered speech-to-text overlay with status and transcript.
-func (r *Renderer) drawDictation(state *DictationState) {
-	if state == nil || !state.Open {
-		return
-	}
-
-	physW := r.modalLayer.Bounds().Dx()
-	physH := r.modalLayer.Bounds().Dy()
-
-	// Semi-transparent backdrop.
-	if r.overlayBg == nil {
-		r.overlayBg = ebiten.NewImage(1, 1)
-		r.overlayBg.Fill(r.ui.Backdrop)
-	}
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Scale(float64(physW), float64(physH))
-	r.modalLayer.DrawImage(r.overlayBg, op)
-
-	cw := r.font.CellW
-	ch := r.font.CellH
-
-	// Layout: title, blank, status, blank, transcript (up to 60 chars), blank, hint.
-	title := "Speech to Text"
-	hint := "[Esc] stop and close"
-	status := state.Status
-	transcript := state.Transcript
-	if transcript == "" {
-		transcript = "(waiting for speech…)"
-	}
-
-	// Clamp transcript display width.
-	maxW := 60
-	if tr := []rune(transcript); len(tr) > maxW {
-		transcript = string(tr[:maxW]) + "…"
-	}
-
-	// Panel width = widest line.
-	innerW := len([]rune(title))
-	if l := len([]rune(hint)); l > innerW {
-		innerW = l
-	}
-	if l := len([]rune(status)); l > innerW {
-		innerW = l
-	}
-	if l := len([]rune(transcript)); l > innerW {
-		innerW = l
-	}
-
-	panelPad := cw
-	panelW := innerW*cw + panelPad*2
-	panelH := ch*7 + panelPad*2
-	panelX := (physW - panelW) / 2
-	panelY := (physH - panelH) / 2
-	panelRect := image.Rect(panelX, panelY, panelX+panelW, panelY+panelH)
-
-	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(r.ui.PanelBg)
-	r.drawOverlayBorder(panelRect)
-
-	// Title (centered, accent color).
-	titleX := panelX + (panelW-len([]rune(title))*cw)/2
-	r.font.DrawString(r.modalLayer, title, titleX, panelY+panelPad, r.ui.Accent)
-
-	// Status line.
-	r.font.DrawString(r.modalLayer, status, panelX+panelPad, panelY+panelPad+ch*2, r.ui.Fg)
-
-	// Transcript line.
-	r.font.DrawString(r.modalLayer, transcript, panelX+panelPad, panelY+panelPad+ch*4, r.ui.Accent)
-
-	// Hint line (dim).
-	hintX := panelX + (panelW-len([]rune(hint))*cw)/2
-	r.font.DrawString(r.modalLayer, hint, hintX, panelY+panelPad+ch*6, r.ui.Dim)
-}
-
 // drawMarkdownViewer renders a full-screen markdown reader overlay onto r.modalLayer.
 func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	if state == nil || !state.Open {
 		return
 	}
 
-	physW := r.modalLayer.Bounds().Dx()
-	physH := r.modalLayer.Bounds().Dy()
+	physW, physH := r.modalSize()
 
-	// Semi-transparent backdrop.
-	if r.overlayBg == nil {
-		r.overlayBg = ebiten.NewImage(1, 1)
-	}
-	r.overlayBg.Fill(r.ui.Backdrop)
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Scale(float64(physW), float64(physH))
-	r.modalLayer.DrawImage(r.overlayBg, op)
+	r.drawBackdrop(physW, physH)
 
 	cw := r.font.CellW
 	ch := r.font.CellH
@@ -517,15 +328,7 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	// Update scroll metrics for input handler.
 	state.RowH = rowH
 	state.MaxScroll = totalContentH - visibleContentH
-	if state.MaxScroll < 0 {
-		state.MaxScroll = 0
-	}
-	if state.ScrollOffset < 0 {
-		state.ScrollOffset = 0
-	}
-	if state.ScrollOffset > state.MaxScroll {
-		state.ScrollOffset = state.MaxScroll
-	}
+	state.ScrollOffset, state.MaxScroll = clampScroll(state.ScrollOffset, state.MaxScroll)
 
 	panelX := (physW - panelW) / 2
 	panelY := (physH - panelH) / 2
@@ -533,7 +336,7 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 
 	// Panel background and border.
 	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(r.ui.PanelBg)
-	r.drawOverlayBorder(panelRect)
+	drawBorder(r.modalLayer, panelRect, r.ui.Border)
 
 	// Title row.
 	titleY := panelY + topPad + 3
@@ -586,24 +389,43 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	contentClipRect := image.Rect(panelX, contentTop, panelX+panelW, contentTop+visibleContentH)
 	contentImg := r.modalLayer.SubImage(contentClipRect).(*ebiten.Image)
 
-	// Draw styled lines.
-	drawY := contentTop - state.ScrollOffset
+	// Content area.
 	contentLeft := panelX + panelPad
 	contentRight := panelX + panelW - panelPad
+	drawY := contentTop - state.ScrollOffset
 
-	// Heading and emphasis colors.
-	boldColor := color.RGBA{0xFF, 0xFF, 0xFF, 0xFF}
-	h1Color := color.RGBA{0xFF, 0xFF, 0xFF, 0xFF}   // bright white
-	h2Color := r.ui.Accent                            // theme accent
-	h3Color := r.ui.Dim                               // subdued
-	codeFg := color.RGBA{0xA0, 0xD0, 0x80, 0xFF}     // soft green for code
-	codeBorder := color.RGBA{0x60, 0x60, 0x60, 0xFF}  // dim border for code blocks
-	tableBorder := color.RGBA{0x50, 0x50, 0x50, 0xFF} // dim border for table grid
+	r.drawMdContent(contentImg, state, contentLeft, contentRight, drawY, cw, rowH)
+	r.drawMdFollowBadges(state, contentLeft, contentTop, visibleContentH, cw, rowH)
+
+	// Scrollbar.
+	if state.MaxScroll > 0 {
+		sbX := panelRect.Max.X - 4
+		sbTrackH := visibleContentH
+		thumbH := sbTrackH * visibleContentH / totalContentH
+		if thumbH < 8 {
+			thumbH = 8
+		}
+		thumbY := contentTop + (sbTrackH-thumbH)*state.ScrollOffset/state.MaxScroll
+		r.modalLayer.SubImage(image.Rect(sbX, thumbY, sbX+3, thumbY+thumbH)).(*ebiten.Image).Fill(r.ui.Dim)
+	}
+
+	r.drawMdSearchBar(state, panelX, panelW, panelRect, panelPad, cw, ch)
+}
+
+// drawMdContent renders styled markdown lines with backgrounds, search highlights, and span styling.
+func (r *Renderer) drawMdContent(contentImg *ebiten.Image, state *MarkdownViewerState, contentLeft, contentRight, drawY, cw, rowH int) {
+	boldColor := r.ui.MdBold
+	h1Color := r.ui.MdHeading
+	h2Color := r.ui.Accent
+	h3Color := r.ui.Dim
+	codeFg := r.ui.MdCode
+	codeBorder := r.ui.MdCodeBorder
+	tableBorder := r.ui.MdTableBorder
+	matchBg := r.ui.MdMatchBg
+	currentBg := r.ui.MdMatchCurBg
 
 	// Index search matches by line for the per-line drawing loop.
-	matchBg := color.RGBA{0x80, 0x80, 0x00, 0x60}
-	currentBg := color.RGBA{0xFF, 0xCC, 0x00, 0x80}
-	matchesByLine := map[int][]int{} // lineIdx -> match indices
+	matchesByLine := map[int][]int{}
 	for i, m := range state.SearchMatches {
 		matchesByLine[m.LineIdx] = append(matchesByLine[m.LineIdx], i)
 	}
@@ -611,7 +433,7 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	lineIdx := 0
 	for _, line := range state.Lines {
 		// HRule or table separator: draw a horizontal line.
-		if len(line.Spans) == 1 && (line.Spans[0].Style == markdown.StyleHRule || line.Spans[0].Style == markdown.StyleTableSeparator) {
+		if len(line.Spans) == 1 && (line.Spans[0].Style == MdStyleHRule || line.Spans[0].Style == MdStyleTableSeparator) {
 			lineY := drawY + rowH/2
 			contentImg.SubImage(image.Rect(contentLeft, lineY, contentRight, lineY+1)).(*ebiten.Image).Fill(r.ui.Border)
 			drawY += rowH
@@ -622,7 +444,7 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 		x := contentLeft + line.Indent*cw
 
 		// Code block lines get full-width background + left border stripe.
-		isCodeLine := len(line.Spans) > 0 && line.Spans[0].Style == markdown.StyleCodeBlock
+		isCodeLine := len(line.Spans) > 0 && line.Spans[0].Style == MdStyleCodeBlock
 		if isCodeLine {
 			bgRect := image.Rect(contentLeft, drawY, contentRight, drawY+rowH)
 			contentImg.SubImage(bgRect).(*ebiten.Image).Fill(r.ui.HoverBg)
@@ -630,15 +452,14 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 		}
 
 		// Table row lines get a subtle bottom border.
-		isTableLine := len(line.Spans) > 0 && (line.Spans[0].Style == markdown.StyleTableHeader || line.Spans[0].Style == markdown.StyleTableCell)
+		isTableLine := len(line.Spans) > 0 && (line.Spans[0].Style == MdStyleTableHeader || line.Spans[0].Style == MdStyleTableCell)
 		if isTableLine {
 			contentImg.SubImage(image.Rect(contentLeft, drawY+rowH-1, contentRight, drawY+rowH)).(*ebiten.Image).Fill(tableBorder)
 		}
 
 		// Blockquote accent stripe.
-		if len(line.Spans) > 0 && line.Spans[0].Style == markdown.StyleBlockquote {
-			stripeX := contentLeft
-			contentImg.SubImage(image.Rect(stripeX, drawY, stripeX+2, drawY+rowH)).(*ebiten.Image).Fill(r.ui.Accent)
+		if len(line.Spans) > 0 && line.Spans[0].Style == MdStyleBlockquote {
+			contentImg.SubImage(image.Rect(contentLeft, drawY, contentLeft+2, drawY+rowH)).(*ebiten.Image).Fill(r.ui.Accent)
 		}
 
 		// Search highlights — after backgrounds, before text.
@@ -664,39 +485,39 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 			textW := len([]rune(span.Text)) * cw
 
 			switch span.Style {
-			case markdown.StyleHeading1:
+			case MdStyleHeading1:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, h1Color)
-			case markdown.StyleHeading2:
+			case MdStyleHeading2:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, h2Color)
-			case markdown.StyleHeading3:
+			case MdStyleHeading3:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, h3Color)
-			case markdown.StyleBold:
+			case MdStyleBold:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, boldColor)
-			case markdown.StyleItalic:
+			case MdStyleItalic:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Dim)
-			case markdown.StyleInlineCode:
+			case MdStyleInlineCode:
 				bgRect := image.Rect(x-1, drawY, x+textW+1, drawY+rowH)
 				contentImg.SubImage(bgRect).(*ebiten.Image).Fill(r.ui.HoverBg)
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.KeyName)
-			case markdown.StyleCodeBlock:
+			case MdStyleCodeBlock:
 				r.font.DrawString(contentImg, span.Text, x+cw, drawY+1, codeFg)
-			case markdown.StyleLink:
+			case MdStyleLink:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
-			case markdown.StyleBlockquote:
+			case MdStyleBlockquote:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Dim)
-			case markdown.StyleListItem:
+			case MdStyleListItem:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
-			case markdown.StyleTableHeader:
+			case MdStyleTableHeader:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, boldColor)
-			case markdown.StyleTableCell:
+			case MdStyleTableCell:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Fg)
-			case markdown.StyleStrikethrough:
+			case MdStyleStrikethrough:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Dim)
-			case markdown.StyleImage:
+			case MdStyleImage:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
-			case markdown.StyleCheckboxChecked:
+			case MdStyleCheckboxChecked:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Accent)
-			case markdown.StyleCheckboxUnchecked:
+			case MdStyleCheckboxUnchecked:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Dim)
 			default:
 				r.font.DrawString(contentImg, span.Text, x, drawY+1, r.ui.Fg)
@@ -708,10 +529,10 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 		// Heading underlines after the line is drawn.
 		if len(line.Spans) > 0 {
 			switch line.Spans[0].Style {
-			case markdown.StyleHeading1:
+			case MdStyleHeading1:
 				ulY := drawY + rowH - 2
 				contentImg.SubImage(image.Rect(contentLeft, ulY, contentRight, ulY+1)).(*ebiten.Image).Fill(h1Color)
-			case markdown.StyleHeading2:
+			case MdStyleHeading2:
 				ulY := drawY + rowH - 2
 				contentImg.SubImage(image.Rect(contentLeft, ulY, x, ulY+1)).(*ebiten.Image).Fill(h2Color)
 			}
@@ -720,76 +541,67 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 		drawY += rowH
 		lineIdx++
 	}
+}
 
-	// Follow-mode link badges: draw letter labels over link spans.
-	if state.FollowMode && len(state.LinkHints) > 0 {
-		badgeBg := color.RGBA{0xFF, 0xCC, 0x00, 0xFF}  // bright yellow badge
-		badgeFg := color.RGBA{0x00, 0x00, 0x00, 0xFF}  // black text on badge
-		for _, hint := range state.LinkHints {
-			if hint.LineIdx >= len(state.Lines) {
-				continue
-			}
-			lineY := hint.LineIdx*rowH - state.ScrollOffset + contentTop
-			if lineY+rowH < contentTop || lineY > contentTop+visibleContentH {
-				continue // off-screen
-			}
-			// Calculate X position of the link span.
-			line := state.Lines[hint.LineIdx]
-			sx := contentLeft + line.Indent*cw
-			for si := 0; si < hint.SpanIdx && si < len(line.Spans); si++ {
-				sx += len([]rune(line.Spans[si].Text)) * cw
-			}
-			// Draw badge: [letter] before the link text.
-			badgeStr := string(hint.Label)
-			bx := sx - 2*cw
-			if bx < contentLeft {
-				bx = sx // fallback: draw at span start
-			}
-			badgeRect := image.Rect(bx, lineY, bx+cw+2, lineY+rowH)
-			r.modalLayer.SubImage(badgeRect).(*ebiten.Image).Fill(badgeBg)
-			r.font.DrawString(r.modalLayer, badgeStr, bx+1, lineY+1, badgeFg)
-		}
+// drawMdFollowBadges renders letter labels over link spans in follow-mode.
+func (r *Renderer) drawMdFollowBadges(state *MarkdownViewerState, contentLeft, contentTop, visibleContentH, cw, rowH int) {
+	if !state.FollowMode || len(state.LinkHints) == 0 {
+		return
 	}
-
-	// Scrollbar.
-	if state.MaxScroll > 0 {
-		sbX := panelRect.Max.X - 4
-		sbTrackY := contentTop
-		sbTrackH := visibleContentH
-		thumbH := sbTrackH * visibleContentH / totalContentH
-		if thumbH < 8 {
-			thumbH = 8
+	badgeBg := r.ui.MdBadgeBg
+	badgeFg := r.ui.MdBadgeFg
+	for _, hint := range state.LinkHints {
+		if hint.LineIdx >= len(state.Lines) {
+			continue
 		}
-		thumbY := sbTrackY + (sbTrackH-thumbH)*state.ScrollOffset/state.MaxScroll
-		r.modalLayer.SubImage(image.Rect(sbX, thumbY, sbX+3, thumbY+thumbH)).(*ebiten.Image).Fill(r.ui.Dim)
+		lineY := hint.LineIdx*rowH - state.ScrollOffset + contentTop
+		if lineY+rowH < contentTop || lineY > contentTop+visibleContentH {
+			continue // off-screen
+		}
+		// Calculate X position of the link span.
+		line := state.Lines[hint.LineIdx]
+		sx := contentLeft + line.Indent*cw
+		for si := 0; si < hint.SpanIdx && si < len(line.Spans); si++ {
+			sx += len([]rune(line.Spans[si].Text)) * cw
+		}
+		// Draw badge: [letter] before the link text.
+		badgeStr := string(hint.Label)
+		bx := sx - 2*cw
+		if bx < contentLeft {
+			bx = sx // fallback: draw at span start
+		}
+		badgeRect := image.Rect(bx, lineY, bx+cw+2, lineY+rowH)
+		r.modalLayer.SubImage(badgeRect).(*ebiten.Image).Fill(badgeBg)
+		r.font.DrawString(r.modalLayer, badgeStr, bx+1, lineY+1, badgeFg)
 	}
+}
 
-	// Search bar at bottom of panel.
-	if state.SearchOpen {
-		barH := ch + 8
-		barY := panelRect.Max.Y - barH
-		barRect := image.Rect(panelX, barY, panelX+panelW, panelRect.Max.Y)
-		r.modalLayer.SubImage(barRect).(*ebiten.Image).Fill(r.ui.PanelBg)
-		// Top border.
-		r.modalLayer.SubImage(image.Rect(panelX, barY, panelX+panelW, barY+1)).(*ebiten.Image).Fill(r.ui.Border)
+// drawMdSearchBar renders the bottom search bar in the markdown viewer.
+func (r *Renderer) drawMdSearchBar(state *MarkdownViewerState, panelX, panelW int, panelRect image.Rectangle, panelPad, cw, ch int) {
+	if !state.SearchOpen {
+		return
+	}
+	barH := ch + 8
+	barY := panelRect.Max.Y - barH
+	barRect := image.Rect(panelX, barY, panelX+panelW, panelRect.Max.Y)
+	r.modalLayer.SubImage(barRect).(*ebiten.Image).Fill(r.ui.PanelBg)
+	// Top border.
+	r.modalLayer.SubImage(image.Rect(panelX, barY, panelX+panelW, barY+1)).(*ebiten.Image).Fill(r.ui.Border)
 
-		// Search label and query.
-		label := "/"
-		r.font.DrawString(r.modalLayer, label, panelX+panelPad, barY+4, r.ui.Dim)
-		queryX := panelX + panelPad + cw*2
-		query := inputWithCursor(state.SearchQuery, state.SearchCursorPos)
-		r.font.DrawString(r.modalLayer, query, queryX, barY+4, r.ui.Fg)
+	// Search label and query.
+	r.font.DrawString(r.modalLayer, "/", panelX+panelPad, barY+4, r.ui.Dim)
+	queryX := panelX + panelPad + cw*2
+	query := inputWithCursor(state.SearchQuery, state.SearchCursorPos)
+	r.font.DrawString(r.modalLayer, query, queryX, barY+4, r.ui.Fg)
 
-		// Match count.
-		if len(state.SearchMatches) > 0 {
-			countStr := fmt.Sprintf("%d/%d", state.SearchIdx+1, len(state.SearchMatches))
-			countX := panelRect.Max.X - panelPad - len([]rune(countStr))*cw
-			r.font.DrawString(r.modalLayer, countStr, countX, barY+4, r.ui.Dim)
-		} else if state.SearchQuery != "" {
-			noMatch := "no matches"
-			nmX := panelRect.Max.X - panelPad - len([]rune(noMatch))*cw
-			r.font.DrawString(r.modalLayer, noMatch, nmX, barY+4, r.ui.Dim)
-		}
+	// Match count.
+	if len(state.SearchMatches) > 0 {
+		countStr := fmt.Sprintf("%d/%d", state.SearchIdx+1, len(state.SearchMatches))
+		countX := panelRect.Max.X - panelPad - len([]rune(countStr))*cw
+		r.font.DrawString(r.modalLayer, countStr, countX, barY+4, r.ui.Dim)
+	} else if state.SearchQuery != "" {
+		nmX := panelRect.Max.X - panelPad - len([]rune(noMatchesLabel))*cw
+		r.font.DrawString(r.modalLayer, noMatchesLabel, nmX, barY+4, r.ui.Dim)
 	}
 }
 
@@ -799,17 +611,9 @@ func (r *Renderer) drawURLInput(state *URLInputState) {
 		return
 	}
 
-	physW := r.modalLayer.Bounds().Dx()
-	physH := r.modalLayer.Bounds().Dy()
+	physW, physH := r.modalSize()
 
-	// Semi-transparent backdrop.
-	if r.overlayBg == nil {
-		r.overlayBg = ebiten.NewImage(1, 1)
-	}
-	r.overlayBg.Fill(r.ui.Backdrop)
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Scale(float64(physW), float64(physH))
-	r.modalLayer.DrawImage(r.overlayBg, op)
+	r.drawBackdrop(physW, physH)
 
 	cw := r.font.CellW
 	ch := r.font.CellH
@@ -842,7 +646,7 @@ func (r *Renderer) drawURLInput(state *URLInputState) {
 	panelRect := image.Rect(panelX, panelY, panelX+panelW, panelY+panelH)
 
 	r.modalLayer.SubImage(panelRect).(*ebiten.Image).Fill(r.ui.PanelBg)
-	r.drawOverlayBorder(panelRect)
+	drawBorder(r.modalLayer, panelRect, r.ui.Border)
 
 	// Title (centered, accent color).
 	titleX := panelX + (panelW-len([]rune(title))*cw)/2
@@ -852,7 +656,7 @@ func (r *Renderer) drawURLInput(state *URLInputState) {
 	inputY := panelY + panelPad + ch*2
 	inputRect := image.Rect(panelX+panelPad, inputY, panelX+panelW-panelPad, inputY+ch+6)
 	r.modalLayer.SubImage(inputRect).(*ebiten.Image).Fill(r.ui.HoverBg)
-	r.drawOverlayBorder(inputRect)
+	drawBorder(r.modalLayer, inputRect, r.ui.Border)
 	r.font.DrawString(r.modalLayer, inputText, panelX+panelPad+cw/2, inputY+3, r.ui.Fg)
 
 	// Hint line (dim).
@@ -860,13 +664,4 @@ func (r *Renderer) drawURLInput(state *URLInputState) {
 	hintY := panelY + panelPad + ch*4
 	hintX := panelX + (panelW-len([]rune(hint))*cw)/2
 	r.font.DrawString(r.modalLayer, hint, hintX, hintY, hintColor)
-}
-
-// drawOverlayBorder draws a 1px border around rect.
-func (r *Renderer) drawOverlayBorder(rect image.Rectangle) {
-	img := r.modalLayer
-	img.SubImage(image.Rect(rect.Min.X, rect.Min.Y, rect.Max.X, rect.Min.Y+1)).(*ebiten.Image).Fill(r.ui.Border)
-	img.SubImage(image.Rect(rect.Min.X, rect.Max.Y-1, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(r.ui.Border)
-	img.SubImage(image.Rect(rect.Min.X, rect.Min.Y, rect.Min.X+1, rect.Max.Y)).(*ebiten.Image).Fill(r.ui.Border)
-	img.SubImage(image.Rect(rect.Max.X-1, rect.Min.Y, rect.Max.X, rect.Max.Y)).(*ebiten.Image).Fill(r.ui.Border)
 }

@@ -94,8 +94,6 @@ Discord: https://discord.gg/BG5Erm9fNv
 | **Recording** | Screenshot | Cmd+Shift+S — PNG capture to ~/Pictures/zurm-screenshots/ |
 | | Screen recording | Cmd+Shift+. — FFMPEG MP4 at 30fps to ~/Movies/zurm-recordings/ |
 | | Status indicator | Elapsed time and file size shown in status bar while recording |
-| **Speech** | Text-to-speech | Cmd+Shift+U — read selection aloud via macOS `say`; auto-speak mode |
-| | Speech-to-text | Cmd+Shift+Space — dictation via SFSpeechRecognizer; text sent to PTY |
 | **Config** | TOML | `~/.config/zurm/config.toml` — auto-generated with defaults on first launch |
 | | Hot-reload | Cmd+, — reload config without restarting |
 | | Theme system | External TOML themes in `~/.config/zurm/themes/` |

@@ -54,8 +54,27 @@ func (srv *Server) handleConn(conn net.Conn) {
 	switch msg.Type {
 	case MsgListSessions:
 		list := srv.manager.List()
-		data, _ := json.Marshal(list)
+		data, err := json.Marshal(list)
+		if err != nil {
+			log.Printf("zserver: marshal session list: %v", err)
+			return
+		}
 		WriteMessage(conn, MsgSessionList, data) // #nosec G104 — fire-and-forget response; client may have disconnected
+		return
+
+	case MsgKillSession:
+		var req KillSessionRequest
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			WriteMessage(conn, MsgError, []byte("invalid kill request: "+err.Error())) // #nosec G104
+			return
+		}
+		s, ok := srv.manager.Get(req.ID)
+		if !ok {
+			WriteMessage(conn, MsgError, []byte("session not found: "+req.ID)) // #nosec G104
+			return
+		}
+		log.Printf("zserver: killing session %s (pid %d)", s.ID, s.pid())
+		s.Kill()
 		return
 
 	case MsgCreateSession:
@@ -71,8 +90,14 @@ func (srv *Server) handleConn(conn net.Conn) {
 			return
 		}
 		log.Printf("zserver: created session %s (pid %d, %dx%d, dir=%s)", s.ID, s.pid(), req.Cols, req.Rows, req.Dir)
+		s.mu.Lock()
 		info := SessionInfo{ID: s.ID, PID: s.pid(), Cols: s.Cols, Rows: s.Rows, Dir: s.Dir}
-		data, _ := json.Marshal(info)
+		s.mu.Unlock()
+		data, err := json.Marshal(info)
+		if err != nil {
+			log.Printf("zserver: marshal session info: %v", err)
+			return
+		}
 		WriteMessage(conn, MsgSessionInfo, data) // #nosec G104 — fire-and-forget; if write fails serveSession will detect the broken connection
 		srv.serveSession(conn, s)
 
@@ -89,8 +114,14 @@ func (srv *Server) handleConn(conn net.Conn) {
 			return
 		}
 		log.Printf("zserver: client attached to session %s (pid %d)", s.ID, s.pid())
+		s.mu.Lock()
 		info := SessionInfo{ID: s.ID, PID: s.pid(), Cols: s.Cols, Rows: s.Rows, Dir: s.Dir}
-		data, _ := json.Marshal(info)
+		s.mu.Unlock()
+		data, err := json.Marshal(info)
+		if err != nil {
+			log.Printf("zserver: marshal session info: %v", err)
+			return
+		}
 		WriteMessage(conn, MsgSessionInfo, data) // #nosec G104 — fire-and-forget; if write fails serveSession will detect the broken connection
 		srv.serveSession(conn, s)
 
@@ -144,8 +175,13 @@ func (srv *Server) serveSession(conn net.Conn, s *Session) {
 				rows := int(binary.LittleEndian.Uint16(msg.Payload[2:4]))
 				s.resize(cols, rows)
 			}
+		case MsgRenameSession:
+			var req RenameSessionRequest
+			if err := json.Unmarshal(msg.Payload, &req); err == nil {
+				s.Rename(req.Name)
+				log.Printf("zserver: session %s renamed to %q", s.ID, req.Name)
+			}
 		case MsgDetachSession:
-			conn.Close() // #nosec G104 — intentional teardown; error is unactionable
 			return
 		}
 	}

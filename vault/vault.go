@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -21,17 +22,33 @@ type Vault struct {
 	keyPath    string
 	ignorePfx  string
 	maxEntries int // 0 = unlimited
+
+	done chan struct{} // closed by Close() to stop the background sync goroutine
 }
 
 // New creates a Vault configured for the given config directory.
 // Call Load() then ImportZshHistory() to populate.
 func New(configDir, ignorePfx string, maxEntries int) *Vault {
 	return &Vault{
+		done:       make(chan struct{}),
 		vaultPath:  filepath.Join(configDir, "vault.enc"),
 		keyPath:    filepath.Join(configDir, "vault.key"),
 		ignorePfx:  ignorePfx,
 		maxEntries: maxEntries,
 		index:      make(map[string]struct{}),
+	}
+}
+
+// Close flushes dirty data and stops the background sync goroutine. Safe to call multiple times.
+func (v *Vault) Close() {
+	select {
+	case <-v.done:
+		return
+	default:
+		close(v.done)
+	}
+	if err := v.Save(); err != nil {
+		log.Printf("vault: flush on close failed: %v", err)
 	}
 }
 
@@ -45,17 +62,17 @@ func (v *Vault) Load() error {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("vault: read: %w", err)
 	}
 
 	key, err := loadOrCreateKey(v.keyPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("vault: load key: %w", err)
 	}
 
 	plain, err := decrypt(data, key)
 	if err != nil {
-		return err
+		return fmt.Errorf("vault: decrypt: %w", err)
 	}
 
 	for _, line := range strings.Split(string(plain), "\n") {
@@ -76,7 +93,7 @@ func (v *Vault) Load() error {
 func (v *Vault) ImportZshHistory(histPath string) error {
 	commands, err := ParseZshHistory(histPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("vault: import zsh history: %w", err)
 	}
 
 	v.mu.Lock()
@@ -108,16 +125,16 @@ func (v *Vault) Save() error {
 
 	key, err := loadOrCreateKey(v.keyPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("vault: load key: %w", err)
 	}
 
 	enc, err := encrypt(data, key)
 	if err != nil {
-		return err
+		return fmt.Errorf("vault: encrypt: %w", err)
 	}
 
 	if err := os.WriteFile(v.vaultPath, enc, 0o600); err != nil {
-		return err
+		return fmt.Errorf("vault: write: %w", err)
 	}
 	v.dirty = false
 	return nil
@@ -181,9 +198,9 @@ func (v *Vault) Add(cmd string) {
 	defer v.mu.Unlock()
 
 	if _, exists := v.index[cmd]; exists {
-		// Move to end (most recent).
-		for i, c := range v.commands {
-			if c == cmd {
+		// Remove existing entry — search from end since duplicates are typically recent.
+		for i := len(v.commands) - 1; i >= 0; i-- {
+			if v.commands[i] == cmd {
 				v.commands = append(v.commands[:i], v.commands[i+1:]...)
 				break
 			}
@@ -242,8 +259,13 @@ func Init(configDir, historyPath, ignorePfx string, maxEntries int, syncInterval
 		}
 		ticker := time.NewTicker(syncInterval)
 		defer ticker.Stop()
-		for range ticker.C {
-			syncHistory()
+		for {
+			select {
+			case <-ticker.C:
+				syncHistory()
+			case <-v.done:
+				return
+			}
 		}
 	}()
 

@@ -1,6 +1,7 @@
 package fileexplorer
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -26,29 +27,24 @@ type Clipboard struct {
 // LoadChildren reads the directory at root and returns sorted entries at the given depth.
 // Directories appear before files; each group is sorted alphabetically.
 func LoadChildren(root string, depth int) ([]Entry, error) {
-	f, err := os.Open(root) // #nosec G304 — file explorer opens user-selected filesystem paths by design
+	dirEntries, err := os.ReadDir(root)
 	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	infos, err := f.Readdir(-1)
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("explorer: read dir %s: %w", root, err)
 	}
 
 	var dirs, files []Entry
-	for _, info := range infos {
-		if info.Name()[0] == '.' {
+	for _, de := range dirEntries {
+		name := de.Name()
+		if len(name) == 0 || name[0] == '.' {
 			continue // skip hidden entries
 		}
 		e := Entry{
-			Path:  filepath.Join(root, info.Name()),
-			Name:  info.Name(),
-			IsDir: info.IsDir(),
+			Path:  filepath.Join(root, name),
+			Name:  name,
+			IsDir: de.IsDir(),
 			Depth: depth,
 		}
-		if info.IsDir() {
+		if de.IsDir() {
 			dirs = append(dirs, e)
 		} else {
 			files = append(files, e)
@@ -66,7 +62,7 @@ func LoadChildren(root string, depth int) ([]Entry, error) {
 func BuildTree(root string) ([]Entry, error) {
 	children, err := LoadChildren(root, 0)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("explorer: build tree: %w", err)
 	}
 
 	var specialEntries []Entry
@@ -151,12 +147,22 @@ func CurrentDir(entries []Entry, cursor int) string {
 
 // DeletePath removes the file or directory at path (recursive).
 func DeletePath(path string) error {
-	return os.RemoveAll(path)
+	cleaned := filepath.Clean(path)
+	if cleaned == "" || cleaned == "/" || cleaned == "." {
+		return fmt.Errorf("refusing to delete unsafe path: %q", path)
+	}
+	return os.RemoveAll(cleaned)
 }
 
 // RenamePath renames oldPath to a new name within the same directory.
 // Returns the new full path.
 func RenamePath(oldPath, newName string) (string, error) {
+	if strings.Contains(newName, "/") || strings.Contains(newName, string(filepath.Separator)) {
+		return "", fmt.Errorf("new name must not contain path separators: %q", newName)
+	}
+	if newName == ".." || newName == "." {
+		return "", fmt.Errorf("invalid name: %q", newName)
+	}
 	newPath := filepath.Join(filepath.Dir(oldPath), newName)
 	if err := os.Rename(oldPath, newPath); err != nil {
 		return "", err
@@ -193,6 +199,9 @@ func CopyPath(src, dstDir string) error {
 		return err
 	}
 	dst := filepath.Join(dstDir, filepath.Base(src))
+	if _, err := os.Lstat(dst); err == nil {
+		return fmt.Errorf("destination already exists: %s", dst)
+	}
 	if info.IsDir() {
 		return copyDir(src, dst)
 	}
@@ -201,7 +210,7 @@ func CopyPath(src, dstDir string) error {
 
 func copyDir(src, dst string) error {
 	if err := os.MkdirAll(dst, 0o750); err != nil {
-		return err
+		return fmt.Errorf("explorer: mkdir %s: %w", dst, err)
 	}
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -209,7 +218,7 @@ func copyDir(src, dst string) error {
 		}
 		rel, err := filepath.Rel(src, path)
 		if err != nil {
-			return err
+			return fmt.Errorf("explorer: rel path: %w", err)
 		}
 		target := filepath.Join(dst, rel)
 		if info.IsDir() {
@@ -222,30 +231,41 @@ func copyDir(src, dst string) error {
 func copyFile(src, dst string) error {
 	in, err := os.Open(src) // #nosec G304 — file explorer copies user-selected paths by design
 	if err != nil {
-		return err
+		return fmt.Errorf("explorer: open %s: %w", src, err)
 	}
 	defer in.Close()
 
 	out, err := os.Create(dst) // #nosec G304
 	if err != nil {
-		return err
+		return fmt.Errorf("explorer: create %s: %w", dst, err)
 	}
-	defer out.Close()
 
-	_, err = io.Copy(out, in)
-	return err
+	if _, err = io.Copy(out, in); err != nil {
+		out.Close() // #nosec G104 — cleanup; original error takes priority
+		return fmt.Errorf("explorer: copy %s → %s: %w", src, dst, err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("explorer: flush %s: %w", dst, err)
+	}
+	return nil
 }
 
 // MovePath moves src into dstDir. Tries os.Rename first; falls back to copy + remove.
 func MovePath(src, dstDir string) error {
 	dst := filepath.Join(dstDir, filepath.Base(src))
+	if _, err := os.Lstat(dst); err == nil {
+		return fmt.Errorf("explorer: destination already exists: %s", dst)
+	}
 	if err := os.Rename(src, dst); err == nil {
 		return nil
 	}
 	if err := CopyPath(src, dstDir); err != nil {
-		return err
+		return fmt.Errorf("explorer: copy phase of move: %w", err)
 	}
-	return os.RemoveAll(src)
+	if err := os.RemoveAll(src); err != nil {
+		return fmt.Errorf("explorer: remove after move: %w", err)
+	}
+	return nil
 }
 
 // FindIdx returns the index of the entry matching path, or -1 if not found.
