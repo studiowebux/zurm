@@ -158,7 +158,7 @@ func (g *Game) startLLMSFetch(domain string) {
 			if resp.StatusCode != http.StatusOK {
 				return partial{}
 			}
-			body, err := io.ReadAll(resp.Body)
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 10 MB cap
 			if err != nil {
 				return partial{}
 			}
@@ -777,7 +777,9 @@ func (g *Game) llmsFollowLink(url string) {
 		return
 	}
 	// Non-HTTP URL or relative path — open in system browser.
-	exec.Command("open", url).Start() // #nosec G204 — user-initiated URL open
+	if err := exec.Command("open", url).Start(); err != nil { // #nosec G204 — user-initiated URL open
+		g.flashStatus("Failed to open URL: " + err.Error())
+	}
 }
 
 // sendViewerToPane writes the current viewer content to a temp file and opens
@@ -864,7 +866,12 @@ func (g *Game) sendViewerToPane() {
 		ShellArgs:       g.cfg.Shell.Args,
 		ShowProcess:     g.cfg.StatusBar.ShowProcess,
 	})
-	term.StartCmd("less", []string{"-R", tmpFile.Name()}, "")
+	tmpPath := tmpFile.Name()
+	term.StartCmd("less", []string{"-R", tmpPath}, "")
+	go func() {
+		<-term.Dead()
+		os.Remove(tmpPath)
+	}()
 	p := &pane.Pane{
 		Term:       term,
 		Rect:       paneRect,

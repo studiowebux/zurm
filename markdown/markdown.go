@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"bytes"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -197,7 +198,14 @@ func (w *walker) walkBlock(n ast.Node) {
 			if !hasCheckbox {
 				// Determine marker: ordered or unordered.
 				if list, ok := node.Parent().(*ast.List); ok && list.IsOrdered() {
-					w.spans = append(w.spans, Span{Text: "1. ", Style: StyleListItem})
+					idx := 1
+					if list.Start > 0 {
+						idx = list.Start
+					}
+					for sib := node.Parent().FirstChild(); sib != nil && sib != node; sib = sib.NextSibling() {
+						idx++
+					}
+					w.spans = append(w.spans, Span{Text: strconv.Itoa(idx) + ". ", Style: StyleListItem})
 				} else {
 					w.spans = append(w.spans, Span{Text: "- ", Style: StyleListItem})
 				}

@@ -28,7 +28,11 @@ func (dh *DividerDragHandler) Update(mx, my int) bool {
 	}
 	switch dh.Split.Kind {
 	case pane.HSplit:
-		newRatio := float64(mx-dh.Split.Rect.Min.X) / float64(dh.Split.Rect.Dx())
+		dx := dh.Split.Rect.Dx()
+		if dx == 0 {
+			return false
+		}
+		newRatio := float64(mx-dh.Split.Rect.Min.X) / float64(dx)
 		if newRatio < 0.1 {
 			newRatio = 0.1
 		} else if newRatio > 0.9 {
@@ -36,7 +40,11 @@ func (dh *DividerDragHandler) Update(mx, my int) bool {
 		}
 		dh.Split.Ratio = newRatio
 	case pane.VSplit:
-		newRatio := float64(my-dh.Split.Rect.Min.Y) / float64(dh.Split.Rect.Dy())
+		dy := dh.Split.Rect.Dy()
+		if dy == 0 {
+			return false
+		}
+		newRatio := float64(my-dh.Split.Rect.Min.Y) / float64(dy)
 		if newRatio < 0.1 {
 			newRatio = 0.1
 		} else if newRatio > 0.9 {

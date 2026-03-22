@@ -167,8 +167,9 @@ func (r *Renderer) drawPaneTo(dst *ebiten.Image, buf *terminal.ScreenBuffer, cur
 					if ghostX >= rect.Max.X-pad {
 						break // clip at pane edge
 					}
-					r.font.DrawGlyph(dst, gr, ghostX, y, ghostColor, bg, false, false, 1)
-					ghostX += cellW
+					w := RuneDisplayWidth(gr)
+					r.font.DrawGlyph(dst, gr, ghostX, y, ghostColor, bg, false, false, w)
+					ghostX += w * cellW
 				}
 			}
 		}

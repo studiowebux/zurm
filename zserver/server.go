@@ -90,7 +90,9 @@ func (srv *Server) handleConn(conn net.Conn) {
 			return
 		}
 		log.Printf("zserver: created session %s (pid %d, %dx%d, dir=%s)", s.ID, s.pid(), req.Cols, req.Rows, req.Dir)
+		s.mu.Lock()
 		info := SessionInfo{ID: s.ID, PID: s.pid(), Cols: s.Cols, Rows: s.Rows, Dir: s.Dir}
+		s.mu.Unlock()
 		data, err := json.Marshal(info)
 		if err != nil {
 			log.Printf("zserver: marshal session info: %v", err)
@@ -112,7 +114,9 @@ func (srv *Server) handleConn(conn net.Conn) {
 			return
 		}
 		log.Printf("zserver: client attached to session %s (pid %d)", s.ID, s.pid())
+		s.mu.Lock()
 		info := SessionInfo{ID: s.ID, PID: s.pid(), Cols: s.Cols, Rows: s.Rows, Dir: s.Dir}
+		s.mu.Unlock()
 		data, err := json.Marshal(info)
 		if err != nil {
 			log.Printf("zserver: marshal session info: %v", err)
@@ -178,7 +182,6 @@ func (srv *Server) serveSession(conn net.Conn, s *Session) {
 				log.Printf("zserver: session %s renamed to %q", s.ID, req.Name)
 			}
 		case MsgDetachSession:
-			conn.Close() // #nosec G104 — intentional teardown; error is unactionable
 			return
 		}
 	}

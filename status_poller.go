@@ -158,9 +158,6 @@ func (sp *StatusPoller) ShouldPollCwd(renderSeq uint64) bool {
 // ShouldPollFg returns true if enough time has passed since the last
 // foreground process poll. Updates internal timestamp.
 func (sp *StatusPoller) ShouldPollFg(renderSeq uint64) bool {
-	if renderSeq == sp.lastPollSeq {
-		// Already checked by ShouldPollCwd — update seq.
-	}
 	sp.lastPollSeq = renderSeq
 	now := time.Now()
 	if now.Sub(sp.lastFgPoll) < fgPollInterval {

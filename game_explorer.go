@@ -72,6 +72,17 @@ func (g *Game) handleFileExplorerInput() {
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
 	shift := ebiten.IsKeyPressed(ebiten.KeyShift)
 
+	// Confirm dialog has highest priority — ESC dismisses the confirm, not the explorer.
+	if st.ConfirmOpen {
+		if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+			st.ConfirmOpen = false
+			g.prevKeys[ebiten.KeyEscape] = true
+			return
+		}
+		g.handleExplorerConfirmInput()
+		return
+	}
+
 	// ESC handling
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		// In search mode, ESC clears search or exits search mode
@@ -103,12 +114,6 @@ func (g *Game) handleFileExplorerInput() {
 			g.closeFileExplorer()
 			return
 		}
-	}
-
-	// Confirm dialog: only Enter / Y continue; ESC already handled above.
-	if st.ConfirmOpen {
-		g.handleExplorerConfirmInput()
-		return
 	}
 
 	// Search mode handling

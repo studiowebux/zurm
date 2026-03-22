@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"log"
+	"math"
 	"os/exec"
 	"strings"
 	"time"
@@ -118,7 +119,8 @@ func (g *Game) handleMouse() {
 		panelRect := image.Rect(panelX, tabBarH, panelX+panelW, int(float64(g.winH)*g.dpi))
 
 		if scrollY != 0 && g.explorer.State.RowH > 0 {
-			step := int(-scrollY*float64(g.explorer.State.RowH)*3 + 0.5)
+			raw := -scrollY * float64(g.explorer.State.RowH) * 3
+		step := int(math.Round(raw))
 			g.explorer.State.ScrollOffset += step
 			if g.explorer.State.ScrollOffset < 0 {
 				g.explorer.State.ScrollOffset = 0
@@ -305,6 +307,10 @@ func (g *Game) handleMouse() {
 		}
 		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
 		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
+		return
+	}
+
+	if g.focused == nil {
 		return
 	}
 
@@ -737,16 +743,3 @@ func (g *Game) sendMouseMotion(btn, col, row int, sgr bool) {
 		g.focused.Term.SendBytes([]byte{0x1B, '[', 'M', byte(btn), byte(col + mouseX10Offset), byte(row + mouseX10Offset)}) // #nosec G115 — col/row guarded above
 	}
 }
-
-
-
-
-
-
-
-
-
-
-
-
-

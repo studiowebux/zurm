@@ -1,6 +1,7 @@
 package fileexplorer
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -146,12 +147,22 @@ func CurrentDir(entries []Entry, cursor int) string {
 
 // DeletePath removes the file or directory at path (recursive).
 func DeletePath(path string) error {
-	return os.RemoveAll(path)
+	cleaned := filepath.Clean(path)
+	if cleaned == "" || cleaned == "/" || cleaned == "." {
+		return fmt.Errorf("refusing to delete unsafe path: %q", path)
+	}
+	return os.RemoveAll(cleaned)
 }
 
 // RenamePath renames oldPath to a new name within the same directory.
 // Returns the new full path.
 func RenamePath(oldPath, newName string) (string, error) {
+	if strings.Contains(newName, "/") || strings.Contains(newName, string(filepath.Separator)) {
+		return "", fmt.Errorf("new name must not contain path separators: %q", newName)
+	}
+	if newName == ".." || newName == "." {
+		return "", fmt.Errorf("invalid name: %q", newName)
+	}
 	newPath := filepath.Join(filepath.Dir(oldPath), newName)
 	if err := os.Rename(oldPath, newPath); err != nil {
 		return "", err
@@ -188,6 +199,9 @@ func CopyPath(src, dstDir string) error {
 		return err
 	}
 	dst := filepath.Join(dstDir, filepath.Base(src))
+	if _, err := os.Lstat(dst); err == nil {
+		return fmt.Errorf("destination already exists: %s", dst)
+	}
 	if info.IsDir() {
 		return copyDir(src, dst)
 	}
@@ -236,6 +250,9 @@ func copyFile(src, dst string) error {
 // MovePath moves src into dstDir. Tries os.Rename first; falls back to copy + remove.
 func MovePath(src, dstDir string) error {
 	dst := filepath.Join(dstDir, filepath.Base(src))
+	if _, err := os.Lstat(dst); err == nil {
+		return fmt.Errorf("destination already exists: %s", dst)
+	}
 	if err := os.Rename(src, dst); err == nil {
 		return nil
 	}

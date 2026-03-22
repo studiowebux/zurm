@@ -115,6 +115,10 @@ func (g *Game) handleInput() {
 		return
 	}
 
+	if g.focused == nil {
+		return
+	}
+
 	ctrl := ebiten.IsKeyPressed(ebiten.KeyControl)
 	shift := ebiten.IsKeyPressed(ebiten.KeyShift)
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)

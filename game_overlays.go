@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"image"
 	"os"
 	"time"
@@ -509,6 +510,10 @@ func (g *Game) buildPalette() {
 		g.reloadConfig,
 		// App
 		func() { os.Exit(0) },
+	}
+
+	if len(entries) != len(actions) {
+		panic(fmt.Sprintf("palette: entries (%d) and actions (%d) count mismatch", len(entries), len(actions)))
 	}
 
 	// Append dynamic theme entries from discovered theme files.

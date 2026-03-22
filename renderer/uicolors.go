@@ -84,7 +84,7 @@ func deriveUIColors(cfg *RenderConfig) UIColors {
 	return UIColors{
 		PanelBg:     darken(darken(bg)),
 		HoverBg:     brighten(bg),
-		Backdrop:    color.RGBA{R: bg.R * 2 / 5, G: bg.G * 2 / 5, B: bg.B * 2 / 5, A: backdropAlpha},
+		Backdrop:    color.RGBA{R: uint8(int(bg.R) * 2 / 5), G: uint8(int(bg.G) * 2 / 5), B: uint8(int(bg.B) * 2 / 5), A: backdropAlpha},
 		Border:      parseHexColor(cfg.Colors.Border),
 		Accent:      parseHexColor(cfg.Colors.Cursor),
 		CatHdr:      parseHexColor(cfg.Colors.BrightMagenta),
@@ -105,6 +105,11 @@ func deriveUIColors(cfg *RenderConfig) UIColors {
 }
 
 func withAlpha(c color.RGBA, a uint8) color.RGBA {
+	// Premultiply RGB channels — Ebitengine uses premultiplied alpha.
+	f := float64(a) / 255.0
+	c.R = uint8(float64(c.R) * f)
+	c.G = uint8(float64(c.G) * f)
+	c.B = uint8(float64(c.B) * f)
 	c.A = a
 	return c
 }

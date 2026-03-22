@@ -45,6 +45,9 @@ func (r *Renderer) RenderTabThumbnail(t *tab.Tab, contentRect image.Rectangle) *
 
 // TabHoverCacheKey computes a cache key from the aggregate RenderGen of all panes in a tab.
 func TabHoverCacheKey(t *tab.Tab) uint64 {
+	if t == nil || t.Layout == nil {
+		return 0
+	}
 	var sum uint64
 	for _, leaf := range t.Layout.Leaves() {
 		sum += leaf.Pane.Term.Buf.RenderGen()
@@ -118,6 +121,9 @@ func (r *Renderer) ComputeContentRect(t *tab.Tab) image.Rectangle {
 
 // DismissTabHover disposes the thumbnail and resets the hover state.
 func DismissTabHover(state *TabHoverState) {
+	if state == nil {
+		return
+	}
 	if state.Thumbnail != nil {
 		state.Thumbnail.Deallocate()
 		state.Thumbnail = nil

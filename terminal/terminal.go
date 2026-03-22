@@ -301,7 +301,9 @@ func (t *Terminal) SetShowProcess(show bool) {
 func (t *Terminal) UpdateColors(fg, bg color.RGBA, palette [16]color.RGBA) {
 	t.Buf.Lock()
 	t.Buf.UpdateColors(fg, bg, palette)
-	t.parser.SetPalette(palette)
+	if t.parser != nil {
+		t.parser.SetPalette(palette)
+	}
 	t.Buf.Unlock()
 }
 
@@ -309,7 +311,9 @@ func (t *Terminal) UpdateColors(fg, bg color.RGBA, palette [16]color.RGBA) {
 func (t *Terminal) Resize(cols, rows int) {
 	t.Buf.Lock()
 	t.Buf.Resize(rows, cols)
-	t.parser.resetTabStops() // rebuild tab stops for new column count
+	if t.parser != nil {
+		t.parser.resetTabStops() // rebuild tab stops for new column count
+	}
 	t.Buf.Unlock()
 	if t.pty != nil {
 		t.pty.Resize(cols, rows)

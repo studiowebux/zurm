@@ -11,7 +11,6 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-// StatusBarState holds the data the renderer needs to draw one frame of the bar.
 // StatusBarHeight returns the physical pixel height of the status bar,
 // or 0 when the bar is disabled.
 func StatusBarHeight(font *FontRenderer, cfg *RenderConfig) int {

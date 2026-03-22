@@ -38,13 +38,15 @@ func New(configDir, ignorePfx string, maxEntries int) *Vault {
 	}
 }
 
-// Close stops the background sync goroutine. Safe to call multiple times.
+// Close flushes dirty data and stops the background sync goroutine. Safe to call multiple times.
 func (v *Vault) Close() {
 	select {
 	case <-v.done:
+		return
 	default:
 		close(v.done)
 	}
+	v.Save()
 }
 
 // Load reads the encrypted vault file. Starts empty if the file is missing.

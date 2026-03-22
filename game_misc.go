@@ -527,6 +527,9 @@ func (g *Game) toggleRecording() {
 // extractSelectedText returns the selected text from the focused pane,
 // or empty string if no selection is active.
 func (g *Game) extractSelectedText() string {
+	if g.focused == nil {
+		return ""
+	}
 	g.focused.Term.Buf.RLock()
 	sel := g.focused.Term.Buf.Selection
 	cols := g.focused.Term.Buf.Cols

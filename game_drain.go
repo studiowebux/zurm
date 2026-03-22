@@ -428,5 +428,3 @@ func (g *Game) drainTerminalPaste() bool {
 		return false
 	}
 }
-
-// handleMouse dispatches mouse events.

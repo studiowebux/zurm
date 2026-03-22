@@ -655,5 +655,3 @@ func (r *Renderer) drawURLInput(state *URLInputState) {
 	hintX := panelX + (panelW-len([]rune(hint))*cw)/2
 	r.font.DrawString(r.modalLayer, hint, hintX, hintY, hintColor)
 }
-
-// drawOverlayBorder draws a 1px border around rect.

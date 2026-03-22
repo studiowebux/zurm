@@ -107,6 +107,9 @@ func (tm *TabManager) PinnedTab(slot rune) int {
 // previous occupant. Calling again with the same slot while already pinned
 // there unpins (toggle off). Returns true if state changed.
 func (tm *TabManager) PinActive(slot rune) {
+	if len(tm.Tabs) == 0 {
+		return
+	}
 	active := tm.Tabs[tm.ActiveIdx]
 	if active.PinnedSlot == slot {
 		active.PinnedSlot = 0 // toggle off
@@ -123,11 +126,17 @@ func (tm *TabManager) PinActive(slot rune) {
 
 // NextIdx returns the index of the next tab, wrapping around.
 func (tm *TabManager) NextIdx() int {
+	if len(tm.Tabs) == 0 {
+		return 0
+	}
 	return (tm.ActiveIdx + 1) % len(tm.Tabs)
 }
 
 // PrevIdx returns the index of the previous tab, wrapping around.
 func (tm *TabManager) PrevIdx() int {
+	if len(tm.Tabs) == 0 {
+		return 0
+	}
 	return (tm.ActiveIdx - 1 + len(tm.Tabs)) % len(tm.Tabs)
 }
 
