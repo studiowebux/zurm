@@ -17,7 +17,6 @@ import (
 
 func (g *Game) handleMouse() {
 	mx, my := ebiten.CursorPosition()
-	pad := g.cfg.Window.Padding
 	tabBarH := g.renderer.TabBarHeight()
 
 	leftPressed := ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft)
@@ -37,14 +36,13 @@ func (g *Game) handleMouse() {
 	}
 
 	// When blocks are enabled, cursor movement may change hover state.
-	// Signal a redraw so the blocks layer is updated this frame.
 	if g.blocksEnabled && (mx != g.prevMX || my != g.prevMY) {
 		g.screenDirty = true
 	}
 
 	// URL hover detection — update when cursor moves over the focused pane.
 	if mx != g.prevMX || my != g.prevMY {
-		g.updateURLHover(mx, my, pad)
+		g.updateURLHover(mx, my, g.cfg.Window.Padding)
 	}
 
 	g.prevMX = mx
@@ -58,6 +56,86 @@ func (g *Game) handleMouse() {
 		g.screenDirty = true
 	}
 
+	// Overlays and UI chrome consume events before terminal interaction.
+	if g.handleMouseOverlays(mx, my, leftPressed, leftWas, rightPressed, rightWas, scrollY, tabBarH) {
+		return
+	}
+
+	// Tab bar: clicks, drag-reorder, double-click rename.
+	if (leftPressed && !leftWas) || (rightPressed && !rightWas) {
+		g.dismissTabHover()
+	}
+	if my < tabBarH && !g.selDrag.Active {
+		g.handleMouseTabBar(mx, my, leftPressed, leftWas, rightPressed, rightWas)
+		return
+	}
+
+	if g.focused == nil {
+		return
+	}
+
+	g.focused.Term.Buf.RLock()
+	mouseMode := g.focused.Term.Buf.MouseMode
+	sgrMouse := g.focused.Term.Buf.SgrMouse
+	g.focused.Term.Buf.RUnlock()
+
+	// Right-click opens context menu regardless of PTY mouse mode.
+	if rightPressed && !rightWas && g.cfg.Help.ContextMenu {
+		g.openContextMenu(mx, my)
+		return
+	}
+
+	// Divider drag — resize pane splits by dragging the divider.
+	if g.divDrag.Active {
+		if leftPressed {
+			if g.divDrag.Update(mx, my) {
+				g.recomputeLayout()
+				g.screenDirty = true
+			}
+		} else {
+			g.divDrag.End()
+		}
+		return
+	}
+
+	// Start divider drag on click — 4px hit margin around the 1px divider.
+	if leftPressed && !leftWas && !g.zoomed {
+		if split := g.layout.SplitAt(mx, my, 4); split != nil {
+			g.divDrag.Start(split)
+			return
+		}
+	}
+
+	// Click on an inactive pane always switches focus, regardless of PTY mouse mode.
+	if leftPressed && !leftWas && !g.zoomed {
+		if clicked := g.layout.PaneAt(mx, my); clicked != nil && clicked != g.focused {
+			g.setFocus(clicked)
+			return
+		}
+	}
+
+	// Double-click on pane header area → rename pane.
+	if leftPressed && !leftWas && g.focused.HeaderH > 0 &&
+		my >= g.focused.Rect.Min.Y && my < g.focused.Rect.Min.Y+g.focused.HeaderH {
+		now := time.Now()
+		if now.Sub(g.lastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
+			g.startRenamePane()
+			return
+		}
+		g.lastClickTime = now
+		return
+	}
+
+	if mouseMode == 0 {
+		g.handleMouseSelection(mx, my, leftPressed, leftWas)
+	} else {
+		g.handleMousePTY(mx, my, mouseMode, sgrMouse)
+	}
+}
+
+// handleMouseOverlays processes mouse events for overlays and UI chrome.
+// Returns true if the event was consumed (caller should return).
+func (g *Game) handleMouseOverlays(mx, my int, leftPressed, leftWas, rightPressed, rightWas bool, scrollY float64, tabBarH int) bool {
 	// Block copy buttons — left click while blocks are enabled.
 	if g.blocksEnabled && !leftWas && leftPressed {
 		if h := g.renderer.BlockHover; h.Active && h.CopyTarget != renderer.CopyNone {
@@ -65,9 +143,6 @@ func (g *Game) handleMouse() {
 			h.Buf.RLock()
 			switch h.CopyTarget {
 			case renderer.CopyCmdText:
-				// Extract only the user-typed command, excluding the prompt.
-				// CmdCol (from OSC 133;B) gives the exact column where user input starts.
-				// Fall back to StripPrompt pattern matching when B was not received.
 				raw := h.Buf.TextRange(h.AbsStart, h.AbsStart)
 				if h.CmdCol >= 0 {
 					runes := []rune(raw)
@@ -80,7 +155,6 @@ func (g *Game) handleMouse() {
 				}
 				label = "Command copied"
 			case renderer.CopyOutput:
-				// AbsCmdRow is the first output row (cursor position when C fires).
 				if h.AbsCmdRow >= 0 && h.AbsEnd >= h.AbsCmdRow {
 					copyText = h.Buf.TextRange(h.AbsCmdRow, h.AbsEnd)
 					label = "Output copied"
@@ -98,7 +172,7 @@ func (g *Game) handleMouse() {
 				}
 				g.flashStatus(label)
 			}
-			return
+			return true
 		}
 	}
 
@@ -107,7 +181,7 @@ func (g *Game) handleMouse() {
 		if leftPressed && !leftWas {
 			g.closePalette()
 		}
-		return
+		return true
 	}
 
 	// File explorer: wheel scrolls content, left-click outside panel closes it.
@@ -138,7 +212,7 @@ func (g *Game) handleMouse() {
 				g.closeFileExplorer()
 			}
 		}
-		return
+		return true
 	}
 
 	// Overlay: wheel scrolls, click dismisses.
@@ -156,13 +230,13 @@ func (g *Game) handleMouse() {
 		if leftPressed && !leftWas {
 			g.overlayState = renderer.OverlayState{}
 		}
-		return
+		return true
 	}
 
 	// ? button in status bar toggles the keybinding overlay.
 	if leftPressed && !leftWas && image.Pt(mx, my).In(g.statusBarState.HelpBtnRect) {
 		g.toggleOverlay()
-		return
+		return true
 	}
 
 	// Tab switcher dismisses on any click.
@@ -171,7 +245,7 @@ func (g *Game) handleMouse() {
 			g.tabSwitcherState.Open = false
 			g.screenDirty = true
 		}
-		return
+		return true
 	}
 
 	// Tab search dismisses on any click.
@@ -179,7 +253,7 @@ func (g *Game) handleMouse() {
 		if leftPressed && !leftWas {
 			g.closeTabSearch()
 		}
-		return
+		return true
 	}
 
 	// Context menu takes priority: route all mouse events to menu handling.
@@ -211,285 +285,218 @@ func (g *Game) handleMouse() {
 		}
 
 		if rightPressed && !rightWas {
-			// Right-click while menu is open: reposition to new cursor location.
 			g.openContextMenu(mx, my)
 		}
 
+		return true
+	}
+
+	return false
+}
+
+// handleMouseTabBar processes mouse events in the tab bar area.
+func (g *Game) handleMouseTabBar(mx, my int, leftPressed, leftWas, rightPressed, rightWas bool) {
+	physW := int(float64(g.winW) * g.dpi)
+	numTabs := len(g.tabMgr.Tabs)
+	maxTabW := g.cfg.Tabs.MaxWidthChars * g.font.CellW
+	tabW := 0
+	if numTabs > 0 {
+		tabW = physW / numTabs
+		if tabW > maxTabW {
+			tabW = maxTabW
+		}
+	}
+
+	// Continue tab drag.
+	if g.tabMgr.Dragging && leftPressed {
+		if tabW > 0 {
+			overIdx := mx / tabW
+			if overIdx < 0 {
+				overIdx = 0
+			} else if overIdx >= numTabs {
+				overIdx = numTabs - 1
+			}
+			if overIdx != g.tabMgr.ActiveIdx {
+				g.reorderTab(g.tabMgr.ActiveIdx, overIdx)
+				g.tabMgr.DragFromIdx = overIdx
+			}
+		}
+		g.screenDirty = true
 		return
 	}
 
-	// Click in tab bar — switch tab, rename on double-click, or drag to reorder.
-	// During selection drag, skip the tab bar handler so auto-scroll can run.
-	// tabW must match the renderer's cap (24 * CellW) so click regions align with drawn tabs.
-	// Dismiss tab hover popover on any click.
-	if (leftPressed && !leftWas) || (rightPressed && !rightWas) {
-		g.dismissTabHover()
-	}
-	if my < tabBarH && !g.selDrag.Active {
-		physW := int(float64(g.winW) * g.dpi)
-		numTabs := len(g.tabMgr.Tabs)
-		maxTabW := g.cfg.Tabs.MaxWidthChars * g.font.CellW
-		tabW := 0
-		if numTabs > 0 {
-			tabW = physW / numTabs
-			if tabW > maxTabW {
-				tabW = maxTabW
-			}
-		}
-
-		// Continue tab drag.
-		if g.tabMgr.Dragging && leftPressed {
-			if tabW > 0 {
-				overIdx := mx / tabW
-				if overIdx < 0 {
-					overIdx = 0
-				} else if overIdx >= numTabs {
-					overIdx = numTabs - 1
-				}
-				if overIdx != g.tabMgr.ActiveIdx {
-					g.reorderTab(g.tabMgr.ActiveIdx, overIdx)
-					g.tabMgr.DragFromIdx = overIdx
-				}
-			}
-			g.screenDirty = true
-			return
-		}
-
-		// End tab drag on release.
-		if g.tabMgr.Dragging && !leftPressed {
-			g.tabMgr.Dragging = false
-			return
-		}
-
-		if leftPressed && !leftWas {
-			if numTabs > 0 && tabW > 0 {
-				clicked := mx / tabW
-				if clicked >= 0 && clicked < numTabs {
-					now := time.Now()
-					if clicked == g.tabMgr.ActiveIdx && now.Sub(g.lastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
-						// Double-click on the active tab → rename.
-						g.startRenameTab(clicked)
-					} else {
-						g.switchTab(clicked)
-						// Record drag start position.
-						g.tabMgr.DragFromIdx = clicked
-						g.tabMgr.DragStartX = mx
-					}
-					g.lastClickTime = now
-				}
-			}
-		} else if leftPressed && leftWas && !g.tabMgr.Dragging {
-			// Initiate drag after 8px threshold.
-			dx := mx - g.tabMgr.DragStartX
-			if dx < 0 {
-				dx = -dx
-			}
-			if dx >= 8 {
-				g.tabMgr.Dragging = true
-			}
-		} else if rightPressed && !rightWas {
-			// Right-click in tab bar → show tab context menu.
-			g.openTabContextMenu(mx, my)
-		}
+	// End tab drag on release.
+	if g.tabMgr.Dragging && !leftPressed {
+		g.tabMgr.Dragging = false
 		return
 	}
 
-	if g.focused == nil {
-		return
+	if leftPressed && !leftWas {
+		if numTabs > 0 && tabW > 0 {
+			clicked := mx / tabW
+			if clicked >= 0 && clicked < numTabs {
+				now := time.Now()
+				if clicked == g.tabMgr.ActiveIdx && now.Sub(g.lastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
+					g.startRenameTab(clicked)
+				} else {
+					g.switchTab(clicked)
+					g.tabMgr.DragFromIdx = clicked
+					g.tabMgr.DragStartX = mx
+				}
+				g.lastClickTime = now
+			}
+		}
+	} else if leftPressed && leftWas && !g.tabMgr.Dragging {
+		// Initiate drag after 8px threshold.
+		dx := mx - g.tabMgr.DragStartX
+		if dx < 0 {
+			dx = -dx
+		}
+		if dx >= 8 {
+			g.tabMgr.Dragging = true
+		}
+	} else if rightPressed && !rightWas {
+		g.openTabContextMenu(mx, my)
 	}
+}
+
+// handleMouseSelection handles text selection when no PTY mouse mode is active.
+func (g *Game) handleMouseSelection(mx, my int, leftPressed, leftWas bool) {
+	pad := g.cfg.Window.Padding
+	col := (mx - g.focused.Rect.Min.X - pad) / g.font.CellW
+	row := (my - g.focused.Rect.Min.Y - pad - g.focused.HeaderH) / g.font.CellH
 
 	g.focused.Term.Buf.RLock()
-	mouseMode := g.focused.Term.Buf.MouseMode
-	sgrMouse := g.focused.Term.Buf.SgrMouse
+	maxRow := g.focused.Term.Buf.Rows - 1
+	maxCol := g.focused.Term.Buf.Cols - 1
 	g.focused.Term.Buf.RUnlock()
 
-	// Terminal-level events always take priority over PTY mouse passthrough.
+	// Save unclamped row for auto-scroll during selection drag.
+	rawRow := row
 
-	// Right-click opens context menu regardless of PTY mouse mode.
-	if rightPressed && !rightWas && g.cfg.Help.ContextMenu {
-		g.openContextMenu(mx, my)
-		return
+	if col < 0 {
+		col = 0
+	} else if col > maxCol {
+		col = maxCol
+	}
+	if row < 0 {
+		row = 0
+	} else if row > maxRow {
+		row = maxRow
 	}
 
-	// Divider drag — resize pane splits by dragging the divider.
-	if g.divDrag.Active {
-		if leftPressed {
-			if g.divDrag.Update(mx, my) {
-				g.recomputeLayout()
-				g.screenDirty = true
-			}
-		} else {
-			g.divDrag.End()
-		}
-		return
-	}
-
-	// Start divider drag on click — 4px hit margin around the 1px divider.
-	if leftPressed && !leftWas && !g.zoomed {
-		if split := g.layout.SplitAt(mx, my, 4); split != nil {
-			g.divDrag.Start(split)
-			return
-		}
-	}
-
-	// Click on an inactive pane always switches focus, regardless of PTY mouse mode.
-	// When zoomed, only the focused pane is visible — skip pane-switch hit test.
-	if leftPressed && !leftWas && !g.zoomed {
-		if clicked := g.layout.PaneAt(mx, my); clicked != nil && clicked != g.focused {
-			g.setFocus(clicked)
-			return
-		}
-	}
-
-	// Double-click on pane header area → rename pane (mirrors tab double-click).
-	if leftPressed && !leftWas && g.focused.HeaderH > 0 &&
-		my >= g.focused.Rect.Min.Y && my < g.focused.Rect.Min.Y+g.focused.HeaderH {
-		now := time.Now()
-		if now.Sub(g.lastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
-			g.startRenamePane()
-			return
-		}
-		g.lastClickTime = now
-		return
-	}
-
-	if mouseMode == 0 {
-		col := (mx - g.focused.Rect.Min.X - pad) / g.font.CellW
-		row := (my - g.focused.Rect.Min.Y - pad - g.focused.HeaderH) / g.font.CellH
-
-		g.focused.Term.Buf.RLock()
-		maxRow := g.focused.Term.Buf.Rows - 1
-		maxCol := g.focused.Term.Buf.Cols - 1
-		g.focused.Term.Buf.RUnlock()
-
-		// Save unclamped row for auto-scroll during selection drag.
-		rawRow := row
-
-		if col < 0 {
-			col = 0
-		} else if col > maxCol {
-			col = maxCol
-		}
-		if row < 0 {
-			row = 0
-		} else if row > maxRow {
-			row = maxRow
-		}
-
-		// Cmd+click opens the URL under the cursor in the default browser.
-		if leftPressed && !leftWas && ebiten.IsKeyPressed(ebiten.KeyMeta) {
-			if g.hoveredURL != nil {
-				if err := exec.Command("open", g.hoveredURL.Text).Start(); err != nil { // #nosec G204 — opens user-visible URL in default browser
+	// Cmd+click opens the URL under the cursor in the default browser.
+	if leftPressed && !leftWas && ebiten.IsKeyPressed(ebiten.KeyMeta) {
+		if g.hoveredURL != nil {
+			if err := exec.Command("open", g.hoveredURL.Text).Start(); err != nil { // #nosec G204 — opens user-visible URL in default browser
 				log.Printf("open URL failed: %v", err)
 			}
-				return
-			}
-		}
-
-		// Shift+click extends the current selection to the clicked cell.
-		if leftPressed && !leftWas && ebiten.IsKeyPressed(ebiten.KeyShift) {
-			g.focused.Term.Buf.Lock()
-			if g.focused.Term.Buf.Selection.Active {
-				absRow := g.focused.Term.Buf.DisplayToAbsRow(row)
-				snapCol := col
-				if snapCol >= 0 && snapCol < g.focused.Term.Buf.Cols &&
-					g.focused.Term.Buf.GetDisplayCell(row, snapCol).Width == 0 && snapCol > 0 {
-					snapCol--
-				}
-				g.focused.Term.Buf.Selection.EndRow = absRow
-				g.focused.Term.Buf.Selection.EndCol = snapCol
-				g.focused.Term.Buf.BumpRenderGen()
-			}
-			g.focused.Term.Buf.Unlock()
 			return
 		}
+	}
 
-		if leftPressed && !leftWas {
-			now := time.Now()
-			sameCell := row == g.lastClickRow && col == g.lastClickCol
-			if sameCell && now.Sub(g.lastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
-				g.clickCount++
-			} else {
-				g.clickCount = 1
-			}
-			g.lastClickTime = now
-			g.lastClickRow = row
-			g.lastClickCol = col
-
-			g.focused.Term.Buf.Lock()
+	// Shift+click extends the current selection to the clicked cell.
+	if leftPressed && !leftWas && ebiten.IsKeyPressed(ebiten.KeyShift) {
+		g.focused.Term.Buf.Lock()
+		if g.focused.Term.Buf.Selection.Active {
 			absRow := g.focused.Term.Buf.DisplayToAbsRow(row)
-			// Snap col to parent cell if clicking on a wide char continuation.
 			snapCol := col
-			if snapCol >= 0 && snapCol < g.focused.Term.Buf.Cols && g.focused.Term.Buf.GetDisplayCell(row, snapCol).Width == 0 && snapCol > 0 {
+			if snapCol >= 0 && snapCol < g.focused.Term.Buf.Cols &&
+				g.focused.Term.Buf.GetDisplayCell(row, snapCol).Width == 0 && snapCol > 0 {
 				snapCol--
 			}
-			switch g.clickCount {
-			case 1:
-				g.selDrag.Active = true
-				g.focused.Term.Buf.Selection = terminal.Selection{
-					Active:   true,
-					StartRow: absRow, StartCol: snapCol,
-					EndRow:   absRow, EndCol: snapCol,
-				}
-			case 2:
-				g.selDrag.Active = false
-				g.focused.Term.Buf.Selection = g.wordSelection(row, col)
-			default:
-				g.selDrag.Active = false
-				g.focused.Term.Buf.Selection = terminal.Selection{
-					Active:   true,
-					StartRow: absRow, StartCol: 0,
-					EndRow:   absRow, EndCol: g.focused.Term.Buf.Cols - 1,
-				}
-				g.clickCount = 0
-			}
+			g.focused.Term.Buf.Selection.EndRow = absRow
+			g.focused.Term.Buf.Selection.EndCol = snapCol
 			g.focused.Term.Buf.BumpRenderGen()
-			g.focused.Term.Buf.Unlock()
-		} else if leftPressed && leftWas && g.selDrag.Active {
-			g.focused.Term.Buf.Lock()
-			// Auto-scroll when dragging past the pane edges.
-			// Selection uses absolute rows, so StartRow stays stable across
-			// ViewOffset changes — no adjustment needed.
-			if rawRow < 0 {
-				vo := g.focused.Term.Buf.ViewOffset + 1
-				maxVO := g.focused.Term.Buf.ScrollbackLen()
-				if vo > maxVO {
-					vo = maxVO
-				}
-				g.focused.Term.Buf.SetViewOffset(vo)
-			} else if rawRow > maxRow {
-				vo := g.focused.Term.Buf.ViewOffset - 1
-				if vo < 0 {
-					vo = 0
-				}
-				g.focused.Term.Buf.SetViewOffset(vo)
-			}
-			g.focused.Term.Buf.Selection.EndRow = g.focused.Term.Buf.DisplayToAbsRow(row)
-			// Snap to parent cell if dragging onto a continuation cell.
-			dragCol := col
-			if dragCol >= 0 && dragCol < g.focused.Term.Buf.Cols && g.focused.Term.Buf.GetDisplayCell(row, dragCol).Width == 0 && dragCol > 0 {
-				dragCol--
-			}
-			g.focused.Term.Buf.Selection.EndCol = dragCol
-			g.focused.Term.Buf.BumpRenderGen()
-			g.focused.Term.Buf.Unlock()
-			g.screenDirty = true
-		} else if !leftPressed && leftWas {
-			if g.selDrag.Active {
-				g.selDrag.Active = false
-				g.focused.Term.Buf.Lock()
-				sel := g.focused.Term.Buf.Selection.Normalize()
-				if sel.StartRow == sel.EndRow && sel.StartCol == sel.EndCol {
-					g.focused.Term.Buf.Selection = terminal.Selection{}
-				}
-				g.focused.Term.Buf.Unlock()
-			}
 		}
-
+		g.focused.Term.Buf.Unlock()
 		return
 	}
 
-	// PTY mouse mode.
+	if leftPressed && !leftWas {
+		now := time.Now()
+		sameCell := row == g.lastClickRow && col == g.lastClickCol
+		if sameCell && now.Sub(g.lastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
+			g.clickCount++
+		} else {
+			g.clickCount = 1
+		}
+		g.lastClickTime = now
+		g.lastClickRow = row
+		g.lastClickCol = col
+
+		g.focused.Term.Buf.Lock()
+		absRow := g.focused.Term.Buf.DisplayToAbsRow(row)
+		// Snap col to parent cell if clicking on a wide char continuation.
+		snapCol := col
+		if snapCol >= 0 && snapCol < g.focused.Term.Buf.Cols && g.focused.Term.Buf.GetDisplayCell(row, snapCol).Width == 0 && snapCol > 0 {
+			snapCol--
+		}
+		switch g.clickCount {
+		case 1:
+			g.selDrag.Active = true
+			g.focused.Term.Buf.Selection = terminal.Selection{
+				Active:   true,
+				StartRow: absRow, StartCol: snapCol,
+				EndRow:   absRow, EndCol: snapCol,
+			}
+		case 2:
+			g.selDrag.Active = false
+			g.focused.Term.Buf.Selection = g.wordSelection(row, col)
+		default:
+			g.selDrag.Active = false
+			g.focused.Term.Buf.Selection = terminal.Selection{
+				Active:   true,
+				StartRow: absRow, StartCol: 0,
+				EndRow:   absRow, EndCol: g.focused.Term.Buf.Cols - 1,
+			}
+			g.clickCount = 0
+		}
+		g.focused.Term.Buf.BumpRenderGen()
+		g.focused.Term.Buf.Unlock()
+	} else if leftPressed && leftWas && g.selDrag.Active {
+		g.focused.Term.Buf.Lock()
+		// Auto-scroll when dragging past the pane edges.
+		if rawRow < 0 {
+			vo := g.focused.Term.Buf.ViewOffset + 1
+			maxVO := g.focused.Term.Buf.ScrollbackLen()
+			if vo > maxVO {
+				vo = maxVO
+			}
+			g.focused.Term.Buf.SetViewOffset(vo)
+		} else if rawRow > maxRow {
+			vo := g.focused.Term.Buf.ViewOffset - 1
+			if vo < 0 {
+				vo = 0
+			}
+			g.focused.Term.Buf.SetViewOffset(vo)
+		}
+		g.focused.Term.Buf.Selection.EndRow = g.focused.Term.Buf.DisplayToAbsRow(row)
+		// Snap to parent cell if dragging onto a continuation cell.
+		dragCol := col
+		if dragCol >= 0 && dragCol < g.focused.Term.Buf.Cols && g.focused.Term.Buf.GetDisplayCell(row, dragCol).Width == 0 && dragCol > 0 {
+			dragCol--
+		}
+		g.focused.Term.Buf.Selection.EndCol = dragCol
+		g.focused.Term.Buf.BumpRenderGen()
+		g.focused.Term.Buf.Unlock()
+		g.screenDirty = true
+	} else if !leftPressed && leftWas {
+		if g.selDrag.Active {
+			g.selDrag.Active = false
+			g.focused.Term.Buf.Lock()
+			sel := g.focused.Term.Buf.Selection.Normalize()
+			if sel.StartRow == sel.EndRow && sel.StartCol == sel.EndCol {
+				g.focused.Term.Buf.Selection = terminal.Selection{}
+			}
+			g.focused.Term.Buf.Unlock()
+		}
+	}
+}
+
+// handleMousePTY forwards mouse events to the PTY when a mouse mode is active.
+func (g *Game) handleMousePTY(mx, my, mouseMode int, sgrMouse bool) {
+	pad := g.cfg.Window.Padding
 	col := (mx-g.focused.Rect.Min.X-pad)/g.font.CellW + 1
 	row := (my-g.focused.Rect.Min.Y-pad-g.focused.HeaderH)/g.font.CellH + 1
 	if col < 1 {
@@ -523,9 +530,7 @@ func (g *Game) handleMouse() {
 		g.prevMouseButtons[b.btn] = pressed
 	}
 
-	// Send motion events for mode 1002 (button-tracking: only while a button is held)
-	// and mode 1003 (any-motion: always). The motion button code = held button + 32,
-	// or 35 when no button is held (mode 1003 only).
+	// Send motion events for mode 1002 (button-tracking) and mode 1003 (any-motion).
 	if mouseMode >= 1002 && (col != g.lastMouseCol || row != g.lastMouseRow) {
 		if mouseMode == 1003 || g.mouseHeldBtn >= 0 {
 			motionBtn := 35 // no button held

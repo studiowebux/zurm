@@ -389,24 +389,43 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 	contentClipRect := image.Rect(panelX, contentTop, panelX+panelW, contentTop+visibleContentH)
 	contentImg := r.modalLayer.SubImage(contentClipRect).(*ebiten.Image)
 
-	// Draw styled lines.
-	drawY := contentTop - state.ScrollOffset
+	// Content area.
 	contentLeft := panelX + panelPad
 	contentRight := panelX + panelW - panelPad
+	drawY := contentTop - state.ScrollOffset
 
-	// Heading and emphasis colors.
+	r.drawMdContent(contentImg, state, contentLeft, contentRight, drawY, cw, rowH)
+	r.drawMdFollowBadges(state, contentLeft, contentTop, visibleContentH, cw, rowH)
+
+	// Scrollbar.
+	if state.MaxScroll > 0 {
+		sbX := panelRect.Max.X - 4
+		sbTrackH := visibleContentH
+		thumbH := sbTrackH * visibleContentH / totalContentH
+		if thumbH < 8 {
+			thumbH = 8
+		}
+		thumbY := contentTop + (sbTrackH-thumbH)*state.ScrollOffset/state.MaxScroll
+		r.modalLayer.SubImage(image.Rect(sbX, thumbY, sbX+3, thumbY+thumbH)).(*ebiten.Image).Fill(r.ui.Dim)
+	}
+
+	r.drawMdSearchBar(state, panelX, panelW, panelRect, panelPad, cw, ch)
+}
+
+// drawMdContent renders styled markdown lines with backgrounds, search highlights, and span styling.
+func (r *Renderer) drawMdContent(contentImg *ebiten.Image, state *MarkdownViewerState, contentLeft, contentRight, drawY, cw, rowH int) {
 	boldColor := r.ui.MdBold
 	h1Color := r.ui.MdHeading
-	h2Color := r.ui.Accent // theme accent
-	h3Color := r.ui.Dim    // subdued
+	h2Color := r.ui.Accent
+	h3Color := r.ui.Dim
 	codeFg := r.ui.MdCode
 	codeBorder := r.ui.MdCodeBorder
 	tableBorder := r.ui.MdTableBorder
-
-	// Index search matches by line for the per-line drawing loop.
 	matchBg := r.ui.MdMatchBg
 	currentBg := r.ui.MdMatchCurBg
-	matchesByLine := map[int][]int{} // lineIdx -> match indices
+
+	// Index search matches by line for the per-line drawing loop.
+	matchesByLine := map[int][]int{}
 	for i, m := range state.SearchMatches {
 		matchesByLine[m.LineIdx] = append(matchesByLine[m.LineIdx], i)
 	}
@@ -440,8 +459,7 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 
 		// Blockquote accent stripe.
 		if len(line.Spans) > 0 && line.Spans[0].Style == MdStyleBlockquote {
-			stripeX := contentLeft
-			contentImg.SubImage(image.Rect(stripeX, drawY, stripeX+2, drawY+rowH)).(*ebiten.Image).Fill(r.ui.Accent)
+			contentImg.SubImage(image.Rect(contentLeft, drawY, contentLeft+2, drawY+rowH)).(*ebiten.Image).Fill(r.ui.Accent)
 		}
 
 		// Search highlights — after backgrounds, before text.
@@ -523,75 +541,67 @@ func (r *Renderer) drawMarkdownViewer(state *MarkdownViewerState) {
 		drawY += rowH
 		lineIdx++
 	}
+}
 
-	// Follow-mode link badges: draw letter labels over link spans.
-	if state.FollowMode && len(state.LinkHints) > 0 {
-		badgeBg := r.ui.MdBadgeBg
-		badgeFg := r.ui.MdBadgeFg
-		for _, hint := range state.LinkHints {
-			if hint.LineIdx >= len(state.Lines) {
-				continue
-			}
-			lineY := hint.LineIdx*rowH - state.ScrollOffset + contentTop
-			if lineY+rowH < contentTop || lineY > contentTop+visibleContentH {
-				continue // off-screen
-			}
-			// Calculate X position of the link span.
-			line := state.Lines[hint.LineIdx]
-			sx := contentLeft + line.Indent*cw
-			for si := 0; si < hint.SpanIdx && si < len(line.Spans); si++ {
-				sx += len([]rune(line.Spans[si].Text)) * cw
-			}
-			// Draw badge: [letter] before the link text.
-			badgeStr := string(hint.Label)
-			bx := sx - 2*cw
-			if bx < contentLeft {
-				bx = sx // fallback: draw at span start
-			}
-			badgeRect := image.Rect(bx, lineY, bx+cw+2, lineY+rowH)
-			r.modalLayer.SubImage(badgeRect).(*ebiten.Image).Fill(badgeBg)
-			r.font.DrawString(r.modalLayer, badgeStr, bx+1, lineY+1, badgeFg)
-		}
+// drawMdFollowBadges renders letter labels over link spans in follow-mode.
+func (r *Renderer) drawMdFollowBadges(state *MarkdownViewerState, contentLeft, contentTop, visibleContentH, cw, rowH int) {
+	if !state.FollowMode || len(state.LinkHints) == 0 {
+		return
 	}
-
-	// Scrollbar.
-	if state.MaxScroll > 0 {
-		sbX := panelRect.Max.X - 4
-		sbTrackY := contentTop
-		sbTrackH := visibleContentH
-		thumbH := sbTrackH * visibleContentH / totalContentH
-		if thumbH < 8 {
-			thumbH = 8
+	badgeBg := r.ui.MdBadgeBg
+	badgeFg := r.ui.MdBadgeFg
+	for _, hint := range state.LinkHints {
+		if hint.LineIdx >= len(state.Lines) {
+			continue
 		}
-		thumbY := sbTrackY + (sbTrackH-thumbH)*state.ScrollOffset/state.MaxScroll
-		r.modalLayer.SubImage(image.Rect(sbX, thumbY, sbX+3, thumbY+thumbH)).(*ebiten.Image).Fill(r.ui.Dim)
+		lineY := hint.LineIdx*rowH - state.ScrollOffset + contentTop
+		if lineY+rowH < contentTop || lineY > contentTop+visibleContentH {
+			continue // off-screen
+		}
+		// Calculate X position of the link span.
+		line := state.Lines[hint.LineIdx]
+		sx := contentLeft + line.Indent*cw
+		for si := 0; si < hint.SpanIdx && si < len(line.Spans); si++ {
+			sx += len([]rune(line.Spans[si].Text)) * cw
+		}
+		// Draw badge: [letter] before the link text.
+		badgeStr := string(hint.Label)
+		bx := sx - 2*cw
+		if bx < contentLeft {
+			bx = sx // fallback: draw at span start
+		}
+		badgeRect := image.Rect(bx, lineY, bx+cw+2, lineY+rowH)
+		r.modalLayer.SubImage(badgeRect).(*ebiten.Image).Fill(badgeBg)
+		r.font.DrawString(r.modalLayer, badgeStr, bx+1, lineY+1, badgeFg)
 	}
+}
 
-	// Search bar at bottom of panel.
-	if state.SearchOpen {
-		barH := ch + 8
-		barY := panelRect.Max.Y - barH
-		barRect := image.Rect(panelX, barY, panelX+panelW, panelRect.Max.Y)
-		r.modalLayer.SubImage(barRect).(*ebiten.Image).Fill(r.ui.PanelBg)
-		// Top border.
-		r.modalLayer.SubImage(image.Rect(panelX, barY, panelX+panelW, barY+1)).(*ebiten.Image).Fill(r.ui.Border)
+// drawMdSearchBar renders the bottom search bar in the markdown viewer.
+func (r *Renderer) drawMdSearchBar(state *MarkdownViewerState, panelX, panelW int, panelRect image.Rectangle, panelPad, cw, ch int) {
+	if !state.SearchOpen {
+		return
+	}
+	barH := ch + 8
+	barY := panelRect.Max.Y - barH
+	barRect := image.Rect(panelX, barY, panelX+panelW, panelRect.Max.Y)
+	r.modalLayer.SubImage(barRect).(*ebiten.Image).Fill(r.ui.PanelBg)
+	// Top border.
+	r.modalLayer.SubImage(image.Rect(panelX, barY, panelX+panelW, barY+1)).(*ebiten.Image).Fill(r.ui.Border)
 
-		// Search label and query.
-		label := "/"
-		r.font.DrawString(r.modalLayer, label, panelX+panelPad, barY+4, r.ui.Dim)
-		queryX := panelX + panelPad + cw*2
-		query := inputWithCursor(state.SearchQuery, state.SearchCursorPos)
-		r.font.DrawString(r.modalLayer, query, queryX, barY+4, r.ui.Fg)
+	// Search label and query.
+	r.font.DrawString(r.modalLayer, "/", panelX+panelPad, barY+4, r.ui.Dim)
+	queryX := panelX + panelPad + cw*2
+	query := inputWithCursor(state.SearchQuery, state.SearchCursorPos)
+	r.font.DrawString(r.modalLayer, query, queryX, barY+4, r.ui.Fg)
 
-		// Match count.
-		if len(state.SearchMatches) > 0 {
-			countStr := fmt.Sprintf("%d/%d", state.SearchIdx+1, len(state.SearchMatches))
-			countX := panelRect.Max.X - panelPad - len([]rune(countStr))*cw
-			r.font.DrawString(r.modalLayer, countStr, countX, barY+4, r.ui.Dim)
-		} else if state.SearchQuery != "" {
-			nmX := panelRect.Max.X - panelPad - len([]rune(noMatchesLabel))*cw
-			r.font.DrawString(r.modalLayer, noMatchesLabel, nmX, barY+4, r.ui.Dim)
-		}
+	// Match count.
+	if len(state.SearchMatches) > 0 {
+		countStr := fmt.Sprintf("%d/%d", state.SearchIdx+1, len(state.SearchMatches))
+		countX := panelRect.Max.X - panelPad - len([]rune(countStr))*cw
+		r.font.DrawString(r.modalLayer, countStr, countX, barY+4, r.ui.Dim)
+	} else if state.SearchQuery != "" {
+		nmX := panelRect.Max.X - panelPad - len([]rune(noMatchesLabel))*cw
+		r.font.DrawString(r.modalLayer, noMatchesLabel, nmX, barY+4, r.ui.Dim)
 	}
 }
 

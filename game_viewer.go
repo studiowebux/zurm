@@ -276,31 +276,7 @@ func (g *Game) handleMarkdownViewerInput() {
 
 	// Follow-link mode: letter keys follow, Esc cancels.
 	if g.mdViewerState.FollowMode {
-		if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-			g.mdViewerState.FollowMode = false
-			g.mdViewerState.LinkHints = nil
-			g.screenDirty = true
-			return
-		}
-		// Check for letter key press (a-z). Only the first input char matters.
-		if chars := ebiten.AppendInputChars(nil); len(chars) > 0 {
-			r := chars[0]
-			if r >= 'a' && r <= 'z' {
-				for _, hint := range g.mdViewerState.LinkHints {
-					if hint.Label == r {
-						g.mdViewerState.FollowMode = false
-						g.mdViewerState.LinkHints = nil
-						g.llmsFollowLink(hint.URL)
-						return
-					}
-				}
-			}
-			// Any non-matching key cancels follow mode.
-			g.mdViewerState.FollowMode = false
-			g.mdViewerState.LinkHints = nil
-			g.screenDirty = true
-			return
-		}
+		g.handleViewerFollowMode()
 		return
 	}
 
@@ -397,6 +373,42 @@ func (g *Game) handleMarkdownViewerInput() {
 			return
 		}
 	}
+
+	g.handleViewerScroll()
+}
+
+// handleViewerFollowMode processes input when follow-link mode is active.
+// Letter keys (a-z) follow the matching link; Esc or any other key cancels.
+func (g *Game) handleViewerFollowMode() {
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		g.mdViewerState.FollowMode = false
+		g.mdViewerState.LinkHints = nil
+		g.screenDirty = true
+		return
+	}
+	// Check for letter key press (a-z). Only the first input char matters.
+	if chars := ebiten.AppendInputChars(nil); len(chars) > 0 {
+		r := chars[0]
+		if r >= 'a' && r <= 'z' {
+			for _, hint := range g.mdViewerState.LinkHints {
+				if hint.Label == r {
+					g.mdViewerState.FollowMode = false
+					g.mdViewerState.LinkHints = nil
+					g.llmsFollowLink(hint.URL)
+					return
+				}
+			}
+		}
+		// Any non-matching key cancels follow mode.
+		g.mdViewerState.FollowMode = false
+		g.mdViewerState.LinkHints = nil
+		g.screenDirty = true
+	}
+}
+
+// handleViewerScroll processes keyboard and mouse scroll input in the markdown viewer.
+func (g *Game) handleViewerScroll() {
+	shift := ebiten.IsKeyPressed(ebiten.KeyShift)
 
 	rowH := g.mdViewerState.RowH
 	if rowH == 0 {

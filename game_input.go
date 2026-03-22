@@ -199,263 +199,9 @@ func (g *Game) handleInput() {
 		return
 	}
 
-	var sentToPTY bool
-
-	// Handle printable rune input via InputChars (handles shift, compose, IME).
-	// On macOS, Option+letter arrives here as a composed char (∫, ∂, etc.) because
-	// the IME intercepts keyDown before GLFW can report it via IsKeyPressed.
-	// When left-Option-as-Meta is active, map the composed char to ESC+base_char.
-	if !ctrl && !meta {
-		runes := ebiten.AppendInputChars(nil)
-		for _, r := range runes {
-			if alt {
-				if seq := terminal.MetaFromChar(r); seq != nil {
-					g.focused.Term.SendBytes(seq)
-					sentToPTY = true
-				}
-				// else: dead-key or non-US layout char — ignore
-			} else {
-				g.focused.Term.SendBytes([]byte(string(r)))
-				sentToPTY = true
-			}
-		}
-	}
-
-	for _, key := range allKeys {
-		pressed := ebiten.IsKeyPressed(key)
-		wasPressed := g.prevKeys[key]
-		if pressed && !wasPressed {
-			switch {
-			case meta && key == ebiten.KeyC:
-				g.copySelection()
-
-			case meta && !shift && key == ebiten.KeyV:
-				g.handlePaste()
-
-			case meta && key == ebiten.KeySlash:
-				// Cmd+/ — toggle keybindings help overlay.
-				if g.cfg.Help.Enabled {
-					g.toggleOverlay()
-				}
-
-			case meta && key == ebiten.KeyP:
-				// Cmd+P — open command palette.
-				if g.cfg.Help.Enabled {
-					g.openPalette()
-				}
-
-			case meta && key == ebiten.KeyJ:
-				// Cmd+J — open tab search.
-				g.openTabSearch()
-
-			case meta && key == ebiten.KeyF:
-				// Cmd+F — open in-buffer search.
-				g.openSearchOverlay()
-
-			case meta && !shift && key == ebiten.KeyB:
-				// Cmd+B — toggle command blocks.
-				g.blocksEnabled = !g.blocksEnabled
-				g.renderer.BlocksEnabled = g.blocksEnabled
-				if g.blocksEnabled {
-					g.flashStatus("Command blocks: on")
-				} else {
-					g.flashStatus("Command blocks: off")
-				}
-
-			case meta && key == ebiten.KeyI:
-				// Cmd+I — toggle stats overlay.
-				g.statsState.Open = !g.statsState.Open
-				if g.statsState.Open {
-					g.collectStats()
-					g.flashStatus("Stats: on")
-				} else {
-					g.renderer.SetLayoutDirty()
-					g.renderer.ClearPaneCache()
-					g.flashStatus("Stats: off")
-				}
-
-			case meta && !shift && key == ebiten.KeyEqual:
-				// Cmd+= (plus) — increase font size.
-				g.adjustFontSize(1)
-
-			case meta && !shift && key == ebiten.KeyMinus:
-				// Cmd+- — decrease font size.
-				g.adjustFontSize(-1)
-
-			case meta && key == ebiten.KeyComma:
-				// Cmd+, — reload config.
-				g.reloadConfig()
-
-			case meta && key == ebiten.KeyE:
-				// Cmd+E — toggle file explorer.
-				if g.explorer.State.Open {
-					g.closeFileExplorer()
-				} else if g.cfg.FileExplorer.Enabled {
-					g.openFileExplorer()
-				}
-
-			case meta && shift && key == ebiten.KeyS:
-				// Cmd+Shift+S — take screenshot.
-				g.screenshotPending = true
-				g.screenDirty = true
-
-			case meta && shift && key == ebiten.KeyPeriod:
-				// Cmd+Shift+. — toggle screen recording.
-				g.toggleRecording()
-			case meta && shift && key == ebiten.KeyM:
-				// Cmd+Shift+M — markdown reader mode.
-				g.openMarkdownViewer()
-
-			case meta && !shift && key == ebiten.KeyL:
-				// Cmd+L — open llms.txt browser.
-				g.openURLInput()
-
-			// Tab management.
-			case meta && shift && key == ebiten.KeyT:
-				g.openTabSwitcher()
-			case meta && key == ebiten.KeyG:
-				g.tabMgr.PinMode = true
-				g.screenDirty = true
-			case meta && key == ebiten.KeyT:
-				g.newTab()
-			case meta && shift && key == ebiten.KeyB:
-				// Cmd+Shift+B — new server-backed tab (Mode B); falls back to local PTY.
-				g.newServerTab()
-			case meta && shift && key == ebiten.KeyR:
-				g.startRenameTab(g.tabMgr.ActiveIdx)
-			case meta && shift && key == ebiten.KeyN:
-				g.startNoteEdit(g.tabMgr.ActiveIdx)
-			case meta && key == ebiten.KeySemicolon:
-				g.goBack()
-			case meta && shift && key == ebiten.KeyBracketLeft:
-				g.prevTab()
-			case meta && shift && key == ebiten.KeyBracketRight:
-				g.nextTab()
-				// Cmd+1-9: switch to tab at position N (normal navigation).
-			case meta && key == ebiten.Key1:
-				g.switchTab(0)
-			case meta && key == ebiten.Key2:
-				g.switchTab(1)
-			case meta && key == ebiten.Key3:
-				g.switchTab(2)
-			case meta && key == ebiten.Key4:
-				g.switchTab(3)
-			case meta && key == ebiten.Key5:
-				g.switchTab(4)
-			case meta && key == ebiten.Key6:
-				g.switchTab(5)
-			case meta && key == ebiten.Key7:
-				g.switchTab(6)
-			case meta && key == ebiten.Key8:
-				g.switchTab(7)
-			case meta && key == ebiten.Key9:
-				g.switchTab(8)
-
-			// Pane management.
-			case meta && key == ebiten.KeyZ:
-				g.toggleZoom()
-			case meta && shift && key == ebiten.KeyD:
-				g.splitV()
-			case meta && shift && key == ebiten.KeyH:
-				g.splitHServer()
-			case meta && shift && key == ebiten.KeyV:
-				g.splitVServer()
-			case meta && !shift && key == ebiten.KeyD:
-				g.splitH()
-			case meta && key == ebiten.KeyW:
-				// Close pane if 2+ panes in tab; close tab if last pane.
-				if g.cfg.Help.CloseConfirm {
-					if len(g.layout.Leaves()) <= 1 {
-						g.showConfirm("Close tab?", g.closeActiveTab)
-					} else {
-						pane := g.focused
-						g.showConfirm("Close pane?", func() { g.closePane(pane) })
-					}
-				} else {
-					if len(g.layout.Leaves()) <= 1 {
-						g.closeActiveTab()
-					} else {
-						g.closePane(g.focused)
-					}
-				}
-			case meta && key == ebiten.KeyBracketLeft:
-				if p := g.layout.PrevLeaf(g.focused); p != nil {
-					g.setFocus(p)
-				}
-			case meta && key == ebiten.KeyBracketRight:
-				if p := g.layout.NextLeaf(g.focused); p != nil {
-					g.setFocus(p)
-				}
-			case meta && shift && key == ebiten.KeyArrowLeft:
-				g.moveTabLeft()
-			case meta && shift && key == ebiten.KeyArrowRight:
-				g.moveTabRight()
-
-			// Cmd+Option+Arrow — resize focused pane's split.
-			case meta && ebiten.IsKeyPressed(ebiten.KeyAlt) && key == ebiten.KeyArrowLeft:
-				g.resizePane(-1, 0)
-			case meta && ebiten.IsKeyPressed(ebiten.KeyAlt) && key == ebiten.KeyArrowRight:
-				g.resizePane(1, 0)
-			case meta && ebiten.IsKeyPressed(ebiten.KeyAlt) && key == ebiten.KeyArrowUp:
-				g.resizePane(0, -1)
-			case meta && ebiten.IsKeyPressed(ebiten.KeyAlt) && key == ebiten.KeyArrowDown:
-				g.resizePane(0, 1)
-
-			case meta && !shift && key == ebiten.KeyArrowLeft:
-				g.focusDir(-1, 0)
-			case meta && !shift && key == ebiten.KeyArrowRight:
-				g.focusDir(1, 0)
-			case meta && !shift && key == ebiten.KeyArrowUp:
-				g.focusDir(0, -1)
-			case meta && !shift && key == ebiten.KeyArrowDown:
-				g.focusDir(0, 1)
-
-			// Left Option as Meta — specific sequences with repeat support.
-			case alt && key == ebiten.KeyBackspace:
-				g.sendWithRepeat(key, []byte("\x1b\x7f"))
-				sentToPTY = true
-			case alt && key == ebiten.KeyArrowLeft:
-				g.sendWithRepeat(key, []byte("\x1bb"))
-				sentToPTY = true
-			case alt && key == ebiten.KeyArrowRight:
-				g.sendWithRepeat(key, []byte("\x1bf"))
-				sentToPTY = true
-
-			// alt + symbol/digit keys: send ESC + ASCII.
-			// Needed for keys whose Option+key is a macOS dead key (e.g. Option+`)
-			// or produces a composed char not in the optionToBase IME map.
-			// This catches everything the MetaFromChar path misses.
-			case alt:
-				if seq := altPrintableSeq(key); seq != nil {
-					g.focused.Term.SendBytes(seq)
-					sentToPTY = true
-				}
-
-			// Vault ghost accept: right-arrow accepts the current suggestion.
-			case !ctrl && !alt && !meta && key == ebiten.KeyArrowRight && g.vaultSuggest != "":
-				g.focused.Term.SendBytes([]byte(g.vaultSuggest))
-				g.vaultSuggest = ""
-				g.vaultLineCache = ""
-				g.vaultSkip = 0
-				sentToPTY = true
-
-			case ctrl || isSpecialKey(key):
-				g.focused.Term.Buf.RLock()
-				appCursor := g.focused.Term.Buf.AppCursorKeys
-				g.focused.Term.Buf.RUnlock()
-				if seq := terminal.KeyEventToBytes(key, appCursor); seq != nil {
-					g.sendWithRepeat(key, seq)
-					sentToPTY = true
-				}
-			}
-		} else if !pressed && g.ptyRepeat.active && g.ptyRepeat.key == key {
-			g.ptyRepeat.Reset()
-		}
-		g.prevKeys[key] = pressed
-	}
+	sentToPTY := g.handleInputKeys(ctrl, shift, meta, alt)
 
 	// Consume async clipboard result for terminal paste (from Cmd+V last frame).
-	// No overlays are consuming the clipboard at this point, so terminal owns it.
 	if g.drainTerminalPaste() {
 		sentToPTY = true
 	}
@@ -465,7 +211,7 @@ func (g *Game) handleInput() {
 		g.focused.Term.Buf.ResetView() // snap back to live output on keystroke
 		g.focused.Term.Buf.ClearSelection()
 		g.focused.Term.Buf.Unlock()
-		g.screenDirty = true // ensure snap-back renders immediately without waiting for PTY output
+		g.screenDirty = true
 	}
 
 	// Vault suggestion update — extract current line from buffer and query vault.
@@ -482,6 +228,268 @@ func (g *Game) handleInput() {
 	} else if g.ptyRepeat.active {
 		g.ptyRepeat.Reset()
 	}
+}
+
+// handleInputKeys processes printable rune input and keybindings (app shortcuts, PTY forwarding).
+// Returns true if any input was sent to the PTY.
+func (g *Game) handleInputKeys(ctrl, shift, meta, alt bool) bool {
+	var sentToPTY bool
+
+	// Handle printable rune input via InputChars (handles shift, compose, IME).
+	// On macOS, Option+letter arrives here as a composed char (∫, ∂, etc.) because
+	// the IME intercepts keyDown before GLFW can report it via IsKeyPressed.
+	// When left-Option-as-Meta is active, map the composed char to ESC+base_char.
+	if !ctrl && !meta {
+		runes := ebiten.AppendInputChars(nil)
+		for _, r := range runes {
+			if alt {
+				if seq := terminal.MetaFromChar(r); seq != nil {
+					g.focused.Term.SendBytes(seq)
+					sentToPTY = true
+				}
+			} else {
+				g.focused.Term.SendBytes([]byte(string(r)))
+				sentToPTY = true
+			}
+		}
+	}
+
+	for _, key := range allKeys {
+		pressed := ebiten.IsKeyPressed(key)
+		wasPressed := g.prevKeys[key]
+		if pressed && !wasPressed {
+			if g.handleAppShortcut(key, ctrl, shift, meta, alt) {
+				// App-level shortcut consumed the key.
+			} else if pty := g.handleTerminalKey(key, ctrl, shift, meta, alt); pty {
+				sentToPTY = true
+			}
+		} else if !pressed && g.ptyRepeat.active && g.ptyRepeat.key == key {
+			g.ptyRepeat.Reset()
+		}
+		g.prevKeys[key] = pressed
+	}
+
+	return sentToPTY
+}
+
+// handleAppShortcut processes app-level keybindings (Cmd+shortcuts, tab/pane management).
+// Returns true if the key was consumed as an app shortcut.
+func (g *Game) handleAppShortcut(key ebiten.Key, ctrl, shift, meta, alt bool) bool {
+	switch {
+	case meta && key == ebiten.KeyC:
+		g.copySelection()
+
+	case meta && !shift && key == ebiten.KeyV:
+		g.handlePaste()
+
+	case meta && key == ebiten.KeySlash:
+		if g.cfg.Help.Enabled {
+			g.toggleOverlay()
+		}
+
+	case meta && key == ebiten.KeyP:
+		if g.cfg.Help.Enabled {
+			g.openPalette()
+		}
+
+	case meta && key == ebiten.KeyJ:
+		g.openTabSearch()
+
+	case meta && key == ebiten.KeyF:
+		g.openSearchOverlay()
+
+	case meta && !shift && key == ebiten.KeyB:
+		g.blocksEnabled = !g.blocksEnabled
+		g.renderer.BlocksEnabled = g.blocksEnabled
+		if g.blocksEnabled {
+			g.flashStatus("Command blocks: on")
+		} else {
+			g.flashStatus("Command blocks: off")
+		}
+
+	case meta && key == ebiten.KeyI:
+		g.statsState.Open = !g.statsState.Open
+		if g.statsState.Open {
+			g.collectStats()
+			g.flashStatus("Stats: on")
+		} else {
+			g.renderer.SetLayoutDirty()
+			g.renderer.ClearPaneCache()
+			g.flashStatus("Stats: off")
+		}
+
+	case meta && !shift && key == ebiten.KeyEqual:
+		g.adjustFontSize(1)
+
+	case meta && !shift && key == ebiten.KeyMinus:
+		g.adjustFontSize(-1)
+
+	case meta && key == ebiten.KeyComma:
+		g.reloadConfig()
+
+	case meta && key == ebiten.KeyE:
+		if g.explorer.State.Open {
+			g.closeFileExplorer()
+		} else if g.cfg.FileExplorer.Enabled {
+			g.openFileExplorer()
+		}
+
+	case meta && shift && key == ebiten.KeyS:
+		g.screenshotPending = true
+		g.screenDirty = true
+
+	case meta && shift && key == ebiten.KeyPeriod:
+		g.toggleRecording()
+
+	case meta && shift && key == ebiten.KeyM:
+		g.openMarkdownViewer()
+
+	case meta && !shift && key == ebiten.KeyL:
+		g.openURLInput()
+
+	// Tab management.
+	case meta && shift && key == ebiten.KeyT:
+		g.openTabSwitcher()
+	case meta && key == ebiten.KeyG:
+		g.tabMgr.PinMode = true
+		g.screenDirty = true
+	case meta && key == ebiten.KeyT:
+		g.newTab()
+	case meta && shift && key == ebiten.KeyB:
+		g.newServerTab()
+	case meta && shift && key == ebiten.KeyR:
+		g.startRenameTab(g.tabMgr.ActiveIdx)
+	case meta && shift && key == ebiten.KeyN:
+		g.startNoteEdit(g.tabMgr.ActiveIdx)
+	case meta && key == ebiten.KeySemicolon:
+		g.goBack()
+	case meta && shift && key == ebiten.KeyBracketLeft:
+		g.prevTab()
+	case meta && shift && key == ebiten.KeyBracketRight:
+		g.nextTab()
+	case meta && key == ebiten.Key1:
+		g.switchTab(0)
+	case meta && key == ebiten.Key2:
+		g.switchTab(1)
+	case meta && key == ebiten.Key3:
+		g.switchTab(2)
+	case meta && key == ebiten.Key4:
+		g.switchTab(3)
+	case meta && key == ebiten.Key5:
+		g.switchTab(4)
+	case meta && key == ebiten.Key6:
+		g.switchTab(5)
+	case meta && key == ebiten.Key7:
+		g.switchTab(6)
+	case meta && key == ebiten.Key8:
+		g.switchTab(7)
+	case meta && key == ebiten.Key9:
+		g.switchTab(8)
+
+	// Pane management.
+	case meta && key == ebiten.KeyZ:
+		g.toggleZoom()
+	case meta && shift && key == ebiten.KeyD:
+		g.splitV()
+	case meta && shift && key == ebiten.KeyH:
+		g.splitHServer()
+	case meta && shift && key == ebiten.KeyV:
+		g.splitVServer()
+	case meta && !shift && key == ebiten.KeyD:
+		g.splitH()
+	case meta && key == ebiten.KeyW:
+		if g.cfg.Help.CloseConfirm {
+			if len(g.layout.Leaves()) <= 1 {
+				g.showConfirm("Close tab?", g.closeActiveTab)
+			} else {
+				pane := g.focused
+				g.showConfirm("Close pane?", func() { g.closePane(pane) })
+			}
+		} else {
+			if len(g.layout.Leaves()) <= 1 {
+				g.closeActiveTab()
+			} else {
+				g.closePane(g.focused)
+			}
+		}
+	case meta && key == ebiten.KeyBracketLeft:
+		if p := g.layout.PrevLeaf(g.focused); p != nil {
+			g.setFocus(p)
+		}
+	case meta && key == ebiten.KeyBracketRight:
+		if p := g.layout.NextLeaf(g.focused); p != nil {
+			g.setFocus(p)
+		}
+	case meta && shift && key == ebiten.KeyArrowLeft:
+		g.moveTabLeft()
+	case meta && shift && key == ebiten.KeyArrowRight:
+		g.moveTabRight()
+
+	// Cmd+Option+Arrow — resize focused pane's split.
+	case meta && ebiten.IsKeyPressed(ebiten.KeyAlt) && key == ebiten.KeyArrowLeft:
+		g.resizePane(-1, 0)
+	case meta && ebiten.IsKeyPressed(ebiten.KeyAlt) && key == ebiten.KeyArrowRight:
+		g.resizePane(1, 0)
+	case meta && ebiten.IsKeyPressed(ebiten.KeyAlt) && key == ebiten.KeyArrowUp:
+		g.resizePane(0, -1)
+	case meta && ebiten.IsKeyPressed(ebiten.KeyAlt) && key == ebiten.KeyArrowDown:
+		g.resizePane(0, 1)
+
+	case meta && !shift && key == ebiten.KeyArrowLeft:
+		g.focusDir(-1, 0)
+	case meta && !shift && key == ebiten.KeyArrowRight:
+		g.focusDir(1, 0)
+	case meta && !shift && key == ebiten.KeyArrowUp:
+		g.focusDir(0, -1)
+	case meta && !shift && key == ebiten.KeyArrowDown:
+		g.focusDir(0, 1)
+
+	default:
+		return false
+	}
+	return true
+}
+
+// handleTerminalKey processes keys that forward input to the PTY (alt sequences, special keys).
+// Returns true if input was sent to the PTY.
+func (g *Game) handleTerminalKey(key ebiten.Key, ctrl, shift, meta, alt bool) bool {
+	switch {
+	// Left Option as Meta — specific sequences with repeat support.
+	case alt && key == ebiten.KeyBackspace:
+		g.sendWithRepeat(key, []byte("\x1b\x7f"))
+		return true
+	case alt && key == ebiten.KeyArrowLeft:
+		g.sendWithRepeat(key, []byte("\x1bb"))
+		return true
+	case alt && key == ebiten.KeyArrowRight:
+		g.sendWithRepeat(key, []byte("\x1bf"))
+		return true
+
+	// alt + symbol/digit keys: send ESC + ASCII.
+	case alt:
+		if seq := altPrintableSeq(key); seq != nil {
+			g.focused.Term.SendBytes(seq)
+			return true
+		}
+
+	// Vault ghost accept: right-arrow accepts the current suggestion.
+	case !ctrl && !alt && !meta && key == ebiten.KeyArrowRight && g.vaultSuggest != "":
+		g.focused.Term.SendBytes([]byte(g.vaultSuggest))
+		g.vaultSuggest = ""
+		g.vaultLineCache = ""
+		g.vaultSkip = 0
+		return true
+
+	case ctrl || isSpecialKey(key):
+		g.focused.Term.Buf.RLock()
+		appCursor := g.focused.Term.Buf.AppCursorKeys
+		g.focused.Term.Buf.RUnlock()
+		if seq := terminal.KeyEventToBytes(key, appCursor); seq != nil {
+			g.sendWithRepeat(key, seq)
+			return true
+		}
+	}
+	return false
 }
 
 // sendWithRepeat sends seq to the focused PTY and starts key repeat tracking.
