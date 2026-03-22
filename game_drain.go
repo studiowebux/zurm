@@ -186,7 +186,7 @@ func (g *Game) drainBlockDone() {
 		select {
 		case <-leaf.Pane.Term.Buf.BlockDoneCh:
 			// Capture the command text from the completed block for the vault.
-			if g.vault != nil {
+			if g.vlt.Vault != nil {
 				leaf.Pane.Term.Buf.RLock()
 				if ab := leaf.Pane.Term.Buf.ActiveBlock(); ab == nil {
 					// Active block is nil after D fires — check the most recent completed block.
@@ -194,7 +194,7 @@ func (g *Game) drainBlockDone() {
 					if len(blocks) > 0 {
 						cmd := strings.TrimSpace(blocks[len(blocks)-1].CommandText)
 						if cmd != "" {
-							g.vault.Add(cmd)
+							g.vlt.Vault.Add(cmd)
 						}
 					}
 				}
@@ -220,10 +220,10 @@ func (g *Game) drainBlockDone() {
 
 // updateVaultSuggestion extracts the current line from the focused pane's buffer
 // and queries the vault for a prefix-matched suggestion. The result is stored in
-// g.vaultSuggest for the renderer to draw as ghost text.
+// g.vlt.Suggest for the renderer to draw as ghost text.
 func (g *Game) updateVaultSuggestion() {
-	if g.vault == nil || !g.cfg.Vault.GhostText {
-		g.vaultSuggest = ""
+	if g.vlt.Vault == nil || !g.cfg.Vault.GhostText {
+		g.vlt.Suggest = ""
 		return
 	}
 
@@ -232,7 +232,7 @@ func (g *Game) updateVaultSuggestion() {
 	// No suggestions when scrolled back, in alt screen, or cursor is hidden.
 	if buf.ViewOffset != 0 || buf.IsAltActive() || !buf.CursorVisible {
 		buf.RUnlock()
-		g.vaultSuggest = ""
+		g.vlt.Suggest = ""
 		return
 	}
 
@@ -242,7 +242,7 @@ func (g *Game) updateVaultSuggestion() {
 	cells := buf.Cells
 	if row < 0 || row >= len(cells) || col <= 0 {
 		buf.RUnlock()
-		g.vaultSuggest = ""
+		g.vlt.Suggest = ""
 		return
 	}
 
@@ -261,12 +261,12 @@ func (g *Game) updateVaultSuggestion() {
 	buf.RUnlock()
 
 	lineStr := line.String()
-	if lineStr == g.vaultLineCache {
+	if lineStr == g.vlt.LineCache {
 		return // no change — keep current suggestion
 	}
-	g.vaultLineCache = lineStr
-	g.vaultSkip = 0
-	g.vaultSuggest = g.vault.Suggest(lineStr, g.vaultSkip)
+	g.vlt.LineCache = lineStr
+	g.vlt.Skip = 0
+	g.vlt.Suggest = g.vlt.Vault.Suggest(lineStr, g.vlt.Skip)
 }
 
 // drainGitBranch reads a completed async git info result from the poller.

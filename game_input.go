@@ -80,7 +80,7 @@ func (g *Game) handleInput() {
 	}
 
 	// When the URL input overlay is open, route input to URL input handling.
-	if g.urlInputState.Open {
+	if g.llms.URLInput.Open {
 		g.screenDirty = true
 		g.handleURLInputInput()
 		return
@@ -473,11 +473,11 @@ func (g *Game) handleTerminalKey(key ebiten.Key, ctrl, shift, meta, alt bool) bo
 		}
 
 	// Vault ghost accept: right-arrow accepts the current suggestion.
-	case !ctrl && !alt && !meta && key == ebiten.KeyArrowRight && g.vaultSuggest != "":
-		g.focused.Term.SendBytes([]byte(g.vaultSuggest))
-		g.vaultSuggest = ""
-		g.vaultLineCache = ""
-		g.vaultSkip = 0
+	case !ctrl && !alt && !meta && key == ebiten.KeyArrowRight && g.vlt.Suggest != "":
+		g.focused.Term.SendBytes([]byte(g.vlt.Suggest))
+		g.vlt.Suggest = ""
+		g.vlt.LineCache = ""
+		g.vlt.Skip = 0
 		return true
 
 	case ctrl || isSpecialKey(key):

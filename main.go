@@ -254,27 +254,15 @@ type Game struct {
 
 	// Markdown viewer overlay state (Cmd+Shift+M).
 	mdViewerState  renderer.MarkdownViewerState
-	mdViewerLastG  time.Time // timestamp of last 'g' press for gg detection
 
-	// llms.txt URL input overlay state (Cmd+L).
-	urlInputState    renderer.URLInputState
-	llmsFetchCh      chan llmsFetchResult
-	llmsFetchCancel  context.CancelFunc // cancels in-flight LLMS fetch
-	llmsShort        string // cached /llms.txt content
-	llmsFull         string // cached /llms-full.txt content
-	llmsDomain       string // domain of the last fetch
-	llmsViewingFull  bool   // true when showing /llms-full.txt
-	llmsHistory      []llmsHistoryEntry // back stack
-	llmsForward      []llmsHistoryEntry // forward stack
+	// llms.txt browser state (Cmd+L).
+	llms llmsState
 
 	// Key repeat state for URL input text field.
 	urlRepeat TextInputRepeat
 
 	// Command vault — encrypted history with ghost text suggestions.
-	vault          *vault.Vault
-	vaultSuggest   string // current ghost text (completion tail)
-	vaultLineCache string // last line used for suggestion (avoids recomputing every frame)
-	vaultSkip      int    // Tab cycles through matches: 0=most recent, 1=next, etc.
+	vlt vaultState
 
 }
 
@@ -545,7 +533,7 @@ func main() {
 			histPath = defaultHistoryPath(cfg.Shell.Program)
 		}
 		syncInterval := time.Duration(cfg.Vault.SyncIntervalSecs) * time.Second
-		game.vault = vault.Init(config.ConfigDir(), histPath, cfg.Vault.IgnorePrefix, cfg.Vault.MaxEntries, syncInterval)
+		game.vlt.Vault = vault.Init(config.ConfigDir(), histPath, cfg.Vault.IgnorePrefix, cfg.Vault.MaxEntries, syncInterval)
 	}
 
 	// Seed focus history with the initial tab so Cmd+; can return to it.
@@ -581,8 +569,8 @@ func main() {
 	// Save session and vault after the game loop exits, regardless of how it was
 	// terminated (Cmd+Q, red X button, last tab closed, or OS-level quit signal).
 	game.saveSession()
-	if game.vault != nil {
-		if err := game.vault.Save(); err != nil {
+	if game.vlt.Vault != nil {
+		if err := game.vlt.Vault.Save(); err != nil {
 			log.Printf("vault save: %v", err)
 		}
 	}
@@ -823,14 +811,14 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.lastPtySeq = terminal.RenderSeq()
 
 	g.renderer.HoveredURL = g.hoveredURL
-	g.renderer.VaultSuggestion = g.vaultSuggest
+	g.renderer.VaultSuggestion = g.vlt.Suggest
 	if g.tabMgr.ActiveIdx >= 0 && g.tabMgr.ActiveIdx < len(g.tabMgr.Tabs) {
 		g.statusBarState.TabNote = g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Note
 	}
 	// Hint mode: show tab number badges when Cmd is held and no modal is active.
 	hintMode := ebiten.IsKeyPressed(ebiten.KeyMeta) &&
 		!g.overlayState.Open && !g.palette.State.Open && !g.confirmState.Open &&
-		!g.mdViewerState.Open && !g.urlInputState.Open && !g.tabSwitcherState.Open &&
+		!g.mdViewerState.Open && !g.llms.URLInput.Open && !g.tabSwitcherState.Open &&
 		!g.tabSearchState.Open && !g.search.State.Open &&
 		!g.menuState.Open && !g.explorer.State.Open
 	g.renderer.DrawAll(renderer.DrawState{
@@ -852,7 +840,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		Stats:          &g.statsState,
 		TabHover:       &g.tabHoverState,
 		MdViewer:       &g.mdViewerState,
-		URLInput:       &g.urlInputState,
+		URLInput:       &g.llms.URLInput,
 		HintMode:       hintMode,
 	})
 	g.screenDirty = false

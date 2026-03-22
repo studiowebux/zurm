@@ -20,7 +20,16 @@ import (
 	"github.com/studiowebux/zurm/renderer"
 	"github.com/studiowebux/zurm/session"
 	"github.com/studiowebux/zurm/terminal"
+	"github.com/studiowebux/zurm/vault"
 )
+
+// vaultState groups command vault fields (encrypted history + ghost text suggestions).
+type vaultState struct {
+	Vault     *vault.Vault
+	Suggest   string // current ghost text (completion tail)
+	LineCache string // last line used for suggestion (avoids recomputing every frame)
+	Skip      int    // Tab cycles through matches: 0=most recent, 1=next, etc.
+}
 
 // --- Tab renaming ---
 
@@ -707,12 +716,12 @@ func (g *Game) recomputeAllTabs() {
 
 // reloadVault disables the vault and clears ghost text when vault is no longer enabled.
 func (g *Game) reloadVault() {
-	if !g.cfg.Vault.Enabled && g.vault != nil {
-		g.vault.Close()
-		g.vault = nil
-		g.vaultSuggest = ""
-		g.vaultLineCache = ""
-		g.vaultSkip = 0
+	if !g.cfg.Vault.Enabled && g.vlt.Vault != nil {
+		g.vlt.Vault.Close()
+		g.vlt.Vault = nil
+		g.vlt.Suggest = ""
+		g.vlt.LineCache = ""
+		g.vlt.Skip = 0
 	}
 }
 

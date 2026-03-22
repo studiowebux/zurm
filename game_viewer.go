@@ -30,6 +30,20 @@ const (
 	viewerMaxHTTPBody   = 10 << 20    // 10 MB cap on HTTP response bodies
 )
 
+// llmsState groups all llms.txt browser fields (URL input, fetch, cache, navigation).
+type llmsState struct {
+	URLInput    renderer.URLInputState
+	FetchCh     chan llmsFetchResult
+	FetchCancel context.CancelFunc
+	Short       string             // cached /llms.txt content
+	Full        string             // cached /llms-full.txt content
+	Domain      string             // domain of the last fetch
+	ViewingFull bool               // true when showing /llms-full.txt
+	History     []llmsHistoryEntry // back stack
+	Forward     []llmsHistoryEntry // forward stack
+	LastG       time.Time          // timestamp of last 'g' press for gg detection
+}
+
 // llmsFetchResult is the result of an async llms.txt HTTP fetch.
 // Both files are fetched in parallel; either may be empty if unavailable.
 type llmsFetchResult struct {
@@ -82,7 +96,7 @@ func (g *Game) openMarkdownViewerWithContent(content, title string) {
 
 // openURLInput opens the llms.txt URL input overlay.
 func (g *Game) openURLInput() {
-	g.urlInputState = renderer.URLInputState{Open: true}
+	g.llms.URLInput = renderer.URLInputState{Open: true}
 	g.screenDirty = true
 }
 
@@ -93,22 +107,22 @@ func (g *Game) handleURLInputInput() {
 
 	// ESC: close overlay (also cancels any pending fetch).
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		g.urlInputState = renderer.URLInputState{}
-		if g.llmsFetchCancel != nil {
-			g.llmsFetchCancel()
-			g.llmsFetchCancel = nil
+		g.llms.URLInput = renderer.URLInputState{}
+		if g.llms.FetchCancel != nil {
+			g.llms.FetchCancel()
+			g.llms.FetchCancel = nil
 		}
-		g.llmsFetchCh = nil
+		g.llms.FetchCh = nil
 		g.prevKeys[ebiten.KeyEscape] = true
 		return
 	}
 
 	// While loading, ignore all other input.
-	if g.urlInputState.Loading {
+	if g.llms.URLInput.Loading {
 		return
 	}
 
-	ti := &TextInput{Text: g.urlInputState.Query, CursorPos: g.urlInputState.CursorPos}
+	ti := &TextInput{Text: g.llms.URLInput.Query, CursorPos: g.llms.URLInput.CursorPos}
 
 	// Edge-triggered: Enter submits.
 	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyNumpadEnter} {
@@ -116,8 +130,8 @@ func (g *Game) handleURLInputInput() {
 		if pressed && !g.prevKeys[key] {
 			q := strings.TrimSpace(ti.Text)
 			if q != "" {
-				g.urlInputState.Query = ti.Text
-				g.urlInputState.CursorPos = ti.CursorPos
+				g.llms.URLInput.Query = ti.Text
+				g.llms.URLInput.CursorPos = ti.CursorPos
 				g.startLLMSFetch(q)
 			}
 		}
@@ -139,8 +153,8 @@ func (g *Game) handleURLInputInput() {
 
 	ti.Update(&g.urlRepeat, meta, alt)
 
-	g.urlInputState.Query = ti.Text
-	g.urlInputState.CursorPos = ti.CursorPos
+	g.llms.URLInput.Query = ti.Text
+	g.llms.URLInput.CursorPos = ti.CursorPos
 }
 
 // startLLMSFetch initiates an async HTTP fetch for both /llms.txt and /llms-full.txt
@@ -154,15 +168,15 @@ func (g *Game) startLLMSFetch(domain string) {
 	domain = strings.TrimSuffix(domain, "/llms-full.txt")
 
 	// Cancel any in-flight fetch before starting a new one.
-	if g.llmsFetchCancel != nil {
-		g.llmsFetchCancel()
+	if g.llms.FetchCancel != nil {
+		g.llms.FetchCancel()
 	}
 	ctx, cancel := context.WithTimeout(g.ctx, llmsFetchTimeout)
-	g.llmsFetchCancel = cancel
+	g.llms.FetchCancel = cancel
 
-	g.urlInputState.Loading = true
+	g.llms.URLInput.Loading = true
 	ch := make(chan llmsFetchResult, 1)
-	g.llmsFetchCh = ch
+	g.llms.FetchCh = ch
 
 	go func() {
 		defer cancel()
@@ -211,13 +225,13 @@ func (g *Game) startLLMSFetch(domain string) {
 
 // drainLLMSFetch reads a completed async llms.txt fetch result when available.
 func (g *Game) drainLLMSFetch() {
-	if g.llmsFetchCh == nil {
+	if g.llms.FetchCh == nil {
 		return
 	}
 	select {
-	case result := <-g.llmsFetchCh:
-		g.urlInputState = renderer.URLInputState{}
-		g.llmsFetchCh = nil
+	case result := <-g.llms.FetchCh:
+		g.llms.URLInput = renderer.URLInputState{}
+		g.llms.FetchCh = nil
 		g.screenDirty = true
 
 		if result.Err != nil {
@@ -226,10 +240,10 @@ func (g *Game) drainLLMSFetch() {
 		}
 
 		// Cache both results for Tab switching.
-		g.llmsShort = result.Short
-		g.llmsFull = result.Full
-		g.llmsDomain = result.Domain
-		g.llmsViewingFull = false
+		g.llms.Short = result.Short
+		g.llms.Full = result.Full
+		g.llms.Domain = result.Domain
+		g.llms.ViewingFull = false
 
 		// Show /llms.txt if available, otherwise /llms-full.txt.
 		content := result.Short
@@ -237,13 +251,13 @@ func (g *Game) drainLLMSFetch() {
 		if content == "" {
 			content = result.Full
 			title = "llms-full.txt — " + result.Domain
-			g.llmsViewingFull = true
+			g.llms.ViewingFull = true
 		}
 		g.openMarkdownViewerWithContent(content, title)
 		g.mdViewerState.HasAlt = result.Short != "" && result.Full != ""
 		g.mdViewerState.IsLLMS = true
-		g.mdViewerState.HistoryLen = len(g.llmsHistory)
-		g.mdViewerState.ForwardLen = len(g.llmsForward)
+		g.mdViewerState.HistoryLen = len(g.llms.History)
+		g.mdViewerState.ForwardLen = len(g.llms.Forward)
 	default:
 	}
 }
@@ -339,22 +353,22 @@ func (g *Game) handleMarkdownViewerInput() {
 	}
 
 	// Tab — switch between llms.txt and llms-full.txt when both are available.
-	if inpututil.IsKeyJustPressed(ebiten.KeyTab) && g.llmsShort != "" && g.llmsFull != "" {
-		g.llmsViewingFull = !g.llmsViewingFull
-		if g.llmsViewingFull {
-			g.openMarkdownViewerWithContent(g.llmsFull, "llms-full.txt — "+g.llmsDomain)
+	if inpututil.IsKeyJustPressed(ebiten.KeyTab) && g.llms.Short != "" && g.llms.Full != "" {
+		g.llms.ViewingFull = !g.llms.ViewingFull
+		if g.llms.ViewingFull {
+			g.openMarkdownViewerWithContent(g.llms.Full, "llms-full.txt — "+g.llms.Domain)
 		} else {
-			g.openMarkdownViewerWithContent(g.llmsShort, "llms.txt — "+g.llmsDomain)
+			g.openMarkdownViewerWithContent(g.llms.Short, "llms.txt — "+g.llms.Domain)
 		}
 		g.mdViewerState.HasAlt = true
 		g.mdViewerState.IsLLMS = true
-		g.mdViewerState.HistoryLen = len(g.llmsHistory)
-		g.mdViewerState.ForwardLen = len(g.llmsForward)
+		g.mdViewerState.HistoryLen = len(g.llms.History)
+		g.mdViewerState.ForwardLen = len(g.llms.Forward)
 		return
 	}
 
 	// Backspace or Shift+H — navigate back in llms.txt history.
-	if g.mdViewerState.IsLLMS && len(g.llmsHistory) > 0 {
+	if g.mdViewerState.IsLLMS && len(g.llms.History) > 0 {
 		if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) || (shift && inpututil.IsKeyJustPressed(ebiten.KeyH)) {
 			g.llmsNavigateBack()
 			return
@@ -362,7 +376,7 @@ func (g *Game) handleMarkdownViewerInput() {
 	}
 
 	// Shift+L — navigate forward in llms.txt history.
-	if g.mdViewerState.IsLLMS && len(g.llmsForward) > 0 {
+	if g.mdViewerState.IsLLMS && len(g.llms.Forward) > 0 {
 		if shift && inpututil.IsKeyJustPressed(ebiten.KeyL) {
 			g.llmsNavigateForward()
 			return
@@ -488,12 +502,12 @@ func (g *Game) handleViewerScroll() {
 		} else {
 			// gg detection: two 'g' presses within 500ms.
 			now := time.Now()
-			if now.Sub(g.mdViewerLastG) < viewerGGTimeout {
+			if now.Sub(g.llms.LastG) < viewerGGTimeout {
 				g.mdViewerState.ScrollOffset = 0
 				g.screenDirty = true
-				g.mdViewerLastG = time.Time{} // reset
+				g.llms.LastG = time.Time{} // reset
 			} else {
-				g.mdViewerLastG = now
+				g.llms.LastG = now
 			}
 		}
 	}
@@ -736,59 +750,59 @@ func (g *Game) collectVisibleLinkHints() []renderer.LinkHint {
 
 // llmsPushHistory saves the current llms state onto the back stack.
 func (g *Game) llmsPushHistory() {
-	g.llmsHistory = append(g.llmsHistory, llmsHistoryEntry{
-		Domain:       g.llmsDomain,
-		Short:        g.llmsShort,
-		Full:         g.llmsFull,
-		ViewingFull:  g.llmsViewingFull,
+	g.llms.History = append(g.llms.History, llmsHistoryEntry{
+		Domain:       g.llms.Domain,
+		Short:        g.llms.Short,
+		Full:         g.llms.Full,
+		ViewingFull:  g.llms.ViewingFull,
 		ScrollOffset: g.mdViewerState.ScrollOffset,
 	})
 }
 
 // llmsNavigateBack pops from the back stack and pushes current to forward.
 func (g *Game) llmsNavigateBack() {
-	if len(g.llmsHistory) == 0 {
+	if len(g.llms.History) == 0 {
 		return
 	}
 	// Push current to forward stack.
-	g.llmsForward = append(g.llmsForward, llmsHistoryEntry{
-		Domain:       g.llmsDomain,
-		Short:        g.llmsShort,
-		Full:         g.llmsFull,
-		ViewingFull:  g.llmsViewingFull,
+	g.llms.Forward = append(g.llms.Forward, llmsHistoryEntry{
+		Domain:       g.llms.Domain,
+		Short:        g.llms.Short,
+		Full:         g.llms.Full,
+		ViewingFull:  g.llms.ViewingFull,
 		ScrollOffset: g.mdViewerState.ScrollOffset,
 	})
 	// Pop from history.
-	entry := g.llmsHistory[len(g.llmsHistory)-1]
-	g.llmsHistory = g.llmsHistory[:len(g.llmsHistory)-1]
+	entry := g.llms.History[len(g.llms.History)-1]
+	g.llms.History = g.llms.History[:len(g.llms.History)-1]
 	g.llmsRestoreEntry(entry)
 }
 
 // llmsNavigateForward pops from the forward stack and pushes current to back.
 func (g *Game) llmsNavigateForward() {
-	if len(g.llmsForward) == 0 {
+	if len(g.llms.Forward) == 0 {
 		return
 	}
 	// Push current to back stack.
-	g.llmsHistory = append(g.llmsHistory, llmsHistoryEntry{
-		Domain:       g.llmsDomain,
-		Short:        g.llmsShort,
-		Full:         g.llmsFull,
-		ViewingFull:  g.llmsViewingFull,
+	g.llms.History = append(g.llms.History, llmsHistoryEntry{
+		Domain:       g.llms.Domain,
+		Short:        g.llms.Short,
+		Full:         g.llms.Full,
+		ViewingFull:  g.llms.ViewingFull,
 		ScrollOffset: g.mdViewerState.ScrollOffset,
 	})
 	// Pop from forward.
-	entry := g.llmsForward[len(g.llmsForward)-1]
-	g.llmsForward = g.llmsForward[:len(g.llmsForward)-1]
+	entry := g.llms.Forward[len(g.llms.Forward)-1]
+	g.llms.Forward = g.llms.Forward[:len(g.llms.Forward)-1]
 	g.llmsRestoreEntry(entry)
 }
 
 // llmsRestoreEntry restores the viewer to a history entry's state.
 func (g *Game) llmsRestoreEntry(entry llmsHistoryEntry) {
-	g.llmsDomain = entry.Domain
-	g.llmsShort = entry.Short
-	g.llmsFull = entry.Full
-	g.llmsViewingFull = entry.ViewingFull
+	g.llms.Domain = entry.Domain
+	g.llms.Short = entry.Short
+	g.llms.Full = entry.Full
+	g.llms.ViewingFull = entry.ViewingFull
 
 	content := entry.Short
 	title := "llms.txt — " + entry.Domain
@@ -800,8 +814,8 @@ func (g *Game) llmsRestoreEntry(entry llmsHistoryEntry) {
 	g.mdViewerState.HasAlt = entry.Short != "" && entry.Full != ""
 	g.mdViewerState.IsLLMS = true
 	g.mdViewerState.ScrollOffset = entry.ScrollOffset
-	g.mdViewerState.HistoryLen = len(g.llmsHistory)
-	g.mdViewerState.ForwardLen = len(g.llmsForward)
+	g.mdViewerState.HistoryLen = len(g.llms.History)
+	g.mdViewerState.ForwardLen = len(g.llms.Forward)
 }
 
 // llmsFollowLink handles following a link from the markdown viewer.
@@ -811,7 +825,7 @@ func (g *Game) llmsFollowLink(url string) {
 	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
 		// Push current state to history and clear forward stack.
 		g.llmsPushHistory()
-		g.llmsForward = nil
+		g.llms.Forward = nil
 		g.startLLMSFetch(url)
 		return
 	}
@@ -831,8 +845,8 @@ func (g *Game) sendViewerToPane() {
 	// Capture state before clearing.
 	lines := g.mdViewerState.Lines
 	paneName := g.mdViewerState.Title
-	if g.llmsDomain != "" {
-		paneName = "llms — " + g.llmsDomain
+	if g.llms.Domain != "" {
+		paneName = "llms — " + g.llms.Domain
 	}
 
 	// Build ANSI-colored text from styled lines for rich rendering in less -R.
