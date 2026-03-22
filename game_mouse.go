@@ -32,12 +32,12 @@ func (g *Game) handleMouse() {
 
 	// Any mouse button state change or scroll makes the frame dirty.
 	if leftPressed != leftWas || rightPressed != rightWas {
-		g.screenDirty = true
+		g.render.Dirty = true
 	}
 
 	// When blocks are enabled, cursor movement may change hover state.
 	if g.blocksEnabled && (mx != g.input.PrevMX || my != g.input.PrevMY) {
-		g.screenDirty = true
+		g.render.Dirty = true
 	}
 
 	// URL hover detection — update when cursor moves over the focused pane.
@@ -53,7 +53,7 @@ func (g *Game) handleMouse() {
 
 	_, scrollY := ebiten.Wheel()
 	if scrollY != 0 {
-		g.screenDirty = true
+		g.render.Dirty = true
 	}
 
 	// Overlays and UI chrome consume events before terminal interaction.
@@ -90,7 +90,7 @@ func (g *Game) handleMouse() {
 		if leftPressed {
 			if g.input.DivDrag.Update(mx, my) {
 				g.recomputeLayout()
-				g.screenDirty = true
+				g.render.Dirty = true
 			}
 		} else {
 			g.input.DivDrag.End()
@@ -216,40 +216,40 @@ func (g *Game) handleMouseOverlays(mx, my int, leftPressed, leftWas, rightPresse
 	}
 
 	// Overlay: wheel scrolls, click dismisses.
-	if g.overlayState.Open {
-		if scrollY != 0 && g.overlayState.RowH > 0 {
-			step := int(-scrollY*float64(g.overlayState.RowH)*3 + 0.5)
-			g.overlayState.ScrollOffset += step
-			if g.overlayState.ScrollOffset < 0 {
-				g.overlayState.ScrollOffset = 0
+	if g.overlays.Help.Open {
+		if scrollY != 0 && g.overlays.Help.RowH > 0 {
+			step := int(-scrollY*float64(g.overlays.Help.RowH)*3 + 0.5)
+			g.overlays.Help.ScrollOffset += step
+			if g.overlays.Help.ScrollOffset < 0 {
+				g.overlays.Help.ScrollOffset = 0
 			}
-			if g.overlayState.ScrollOffset > g.overlayState.MaxScroll {
-				g.overlayState.ScrollOffset = g.overlayState.MaxScroll
+			if g.overlays.Help.ScrollOffset > g.overlays.Help.MaxScroll {
+				g.overlays.Help.ScrollOffset = g.overlays.Help.MaxScroll
 			}
 		}
 		if leftPressed && !leftWas {
-			g.overlayState = renderer.OverlayState{}
+			g.overlays.Help = renderer.OverlayState{}
 		}
 		return true
 	}
 
 	// ? button in status bar toggles the keybinding overlay.
-	if leftPressed && !leftWas && image.Pt(mx, my).In(g.statusBarState.HelpBtnRect) {
+	if leftPressed && !leftWas && image.Pt(mx, my).In(g.status.Bar.HelpBtnRect) {
 		g.toggleOverlay()
 		return true
 	}
 
 	// Tab switcher dismisses on any click.
-	if g.tabSwitcherState.Open {
+	if g.overlays.TabSwitcher.Open {
 		if leftPressed && !leftWas {
-			g.tabSwitcherState.Open = false
-			g.screenDirty = true
+			g.overlays.TabSwitcher.Open = false
+			g.render.Dirty = true
 		}
 		return true
 	}
 
 	// Tab search dismisses on any click.
-	if g.tabSearchState.Open {
+	if g.overlays.TabSearch.Open {
 		if leftPressed && !leftWas {
 			g.closeTabSearch()
 		}
@@ -257,29 +257,29 @@ func (g *Game) handleMouseOverlays(mx, my int, leftPressed, leftWas, rightPresse
 	}
 
 	// Context menu takes priority: route all mouse events to menu handling.
-	if g.menuState.Open {
+	if g.overlays.Menu.Open {
 		g.updateMenuHover(mx, my)
 
 		if leftPressed && !leftWas {
-			if g.menuState.SubOpen && image.Pt(mx, my).In(g.menuState.SubRect) {
-				if g.menuState.SubHoverIdx >= 0 {
-					item := g.menuState.SubItems[g.menuState.SubHoverIdx]
+			if g.overlays.Menu.SubOpen && image.Pt(mx, my).In(g.overlays.Menu.SubRect) {
+				if g.overlays.Menu.SubHoverIdx >= 0 {
+					item := g.overlays.Menu.SubItems[g.overlays.Menu.SubHoverIdx]
 					if item.Action != nil {
 						g.closeMenu()
 						item.Action()
 					}
 				}
-			} else if g.menuState.HoverIdx >= 0 &&
-				len(g.menuState.Items[g.menuState.HoverIdx].Children) == 0 {
-				item := g.menuState.Items[g.menuState.HoverIdx]
+			} else if g.overlays.Menu.HoverIdx >= 0 &&
+				len(g.overlays.Menu.Items[g.overlays.Menu.HoverIdx].Children) == 0 {
+				item := g.overlays.Menu.Items[g.overlays.Menu.HoverIdx]
 				if item.Action != nil {
 					g.closeMenu()
 					item.Action()
 				} else {
 					g.closeMenu()
 				}
-			} else if !image.Pt(mx, my).In(g.menuState.Rect) &&
-				(!g.menuState.SubOpen || !image.Pt(mx, my).In(g.menuState.SubRect)) {
+			} else if !image.Pt(mx, my).In(g.overlays.Menu.Rect) &&
+				(!g.overlays.Menu.SubOpen || !image.Pt(mx, my).In(g.overlays.Menu.SubRect)) {
 				g.closeMenu()
 			}
 		}
@@ -321,7 +321,7 @@ func (g *Game) handleMouseTabBar(mx, my int, leftPressed, leftWas, rightPressed,
 				g.tabMgr.DragFromIdx = overIdx
 			}
 		}
-		g.screenDirty = true
+		g.render.Dirty = true
 		return
 	}
 
@@ -480,7 +480,7 @@ func (g *Game) handleMouseSelection(mx, my int, leftPressed, leftWas bool) {
 		g.activeFocused().Term.Buf.Selection.EndCol = dragCol
 		g.activeFocused().Term.Buf.BumpRenderGen()
 		g.activeFocused().Term.Buf.Unlock()
-		g.screenDirty = true
+		g.render.Dirty = true
 	} else if !leftPressed && leftWas {
 		if g.input.SelDrag.Active {
 			g.input.SelDrag.Active = false

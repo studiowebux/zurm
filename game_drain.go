@@ -46,7 +46,7 @@ func (g *Game) handleResize() {
 
 	// Resume PTY readers after all resizes are complete.
 	// Skip if window is idle-suspended — readers should stay paused.
-	if !g.suspended {
+	if !g.wfocus.Suspended {
 		for _, t := range g.tabMgr.Tabs {
 			for _, leaf := range t.Layout.Leaves() {
 				leaf.Pane.Term.SetPaused(false)
@@ -73,7 +73,7 @@ func (g *Game) handleResize() {
 		g.activeFocused().Term.Resize(cols, rows)
 	}
 
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 func (g *Game) drainTitle() {
@@ -88,7 +88,7 @@ func (g *Game) drainTitle() {
 			g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Title = clean
 		}
 		ebiten.SetWindowTitle(clean)
-		g.screenDirty = true
+		g.render.Dirty = true
 	default:
 	}
 }
@@ -102,19 +102,19 @@ func (g *Game) drainCwd() {
 	}
 	select {
 	case cwd := <-g.activeFocused().Term.CwdCh:
-		if cwd != g.statusBarState.Cwd {
-			g.statusBarState.Cwd = cwd
+		if cwd != g.status.Bar.Cwd {
+			g.status.Bar.Cwd = cwd
 			g.activeFocused().Term.Cwd = cwd
-			g.statusBarState.GitBranch = ""
-			g.statusBarState.GitCommit = ""
-			g.statusBarState.GitDirty = 0
-			g.statusBarState.GitStaged = 0
-			g.statusBarState.GitAhead = 0
-			g.statusBarState.GitBehind = 0
+			g.status.Bar.GitBranch = ""
+			g.status.Bar.GitCommit = ""
+			g.status.Bar.GitDirty = 0
+			g.status.Bar.GitStaged = 0
+			g.status.Bar.GitAhead = 0
+			g.status.Bar.GitBehind = 0
 			if g.cfg.StatusBar.ShowGit {
-				g.poller.StartGitQuery(cwd)
+				g.status.Poller.StartGitQuery(cwd)
 			}
-			g.screenDirty = true
+			g.render.Dirty = true
 		}
 	default:
 	}
@@ -134,7 +134,7 @@ func (g *Game) drainBell() {
 				leaf.Pane.BellUntil = now.Add(dur)
 			}
 			fired = true
-			g.screenDirty = true
+			g.render.Dirty = true
 		default:
 		}
 	}
@@ -150,7 +150,7 @@ func (g *Game) drainBell() {
 				t.HasActivity = true
 				t.HasBell = true
 				fired = true
-				g.screenDirty = true
+				g.render.Dirty = true
 			default:
 			}
 		}
@@ -161,10 +161,10 @@ func (g *Game) drainBell() {
 	}
 
 	// Debounce sound + dock notifications (500ms).
-	if now.Sub(g.lastBellSound) < bellDebounce {
+	if now.Sub(g.status.LastBell) < bellDebounce {
 		return
 	}
-	g.lastBellSound = now
+	g.status.LastBell = now
 
 	if g.cfg.Bell.Sound {
 		go playBellSound()
@@ -273,14 +273,14 @@ func (g *Game) updateVaultSuggestion() {
 
 // drainGitBranch reads a completed async git info result from the poller.
 func (g *Game) drainGitBranch() {
-	if info, ok := g.poller.DrainGit(); ok {
-		g.statusBarState.GitBranch = info.Branch
-		g.statusBarState.GitCommit = info.Commit
-		g.statusBarState.GitDirty = info.Dirty
-		g.statusBarState.GitStaged = info.Staged
-		g.statusBarState.GitAhead = info.Ahead
-		g.statusBarState.GitBehind = info.Behind
-		g.screenDirty = true
+	if info, ok := g.status.Poller.DrainGit(); ok {
+		g.status.Bar.GitBranch = info.Branch
+		g.status.Bar.GitCommit = info.Commit
+		g.status.Bar.GitDirty = info.Dirty
+		g.status.Bar.GitStaged = info.Staged
+		g.status.Bar.GitAhead = info.Ahead
+		g.status.Bar.GitBehind = info.Behind
+		g.render.Dirty = true
 	}
 }
 
@@ -299,9 +299,9 @@ func (g *Game) drainForeground() {
 		case name := <-p.Term.ForegroundProcCh:
 			if name != p.ProcName {
 				p.ProcName = name
-				g.screenDirty = true
+				g.render.Dirty = true
 				if p == g.activeFocused() {
-					g.statusBarState.ForegroundProc = name
+					g.status.Bar.ForegroundProc = name
 				}
 			}
 		default:
@@ -328,9 +328,9 @@ func (g *Game) drainShellIntegration() {
 				// Shell at prompt — clear foreground process.
 				if p.ProcName != "" {
 					p.ProcName = ""
-					g.screenDirty = true
+					g.render.Dirty = true
 					if p == g.activeFocused() {
-						g.statusBarState.ForegroundProc = ""
+						g.status.Bar.ForegroundProc = ""
 					}
 				}
 			case 'C':
@@ -347,13 +347,13 @@ func (g *Game) drainShellIntegration() {
 func (g *Game) pollStatusOnOutput() {
 	seq := terminal.RenderSeq()
 
-	if g.poller.ShouldPollCwd(seq) {
+	if g.status.Poller.ShouldPollCwd(seq) {
 		if g.activeFocused() != nil {
 			go g.activeFocused().Term.QueryCWD(g.ctx)
 		}
 	}
 
-	if g.cfg.StatusBar.ShowProcess && g.poller.ShouldPollFg(seq) && g.tabMgr.ActiveIdx < len(g.tabMgr.Tabs) {
+	if g.cfg.StatusBar.ShowProcess && g.status.Poller.ShouldPollFg(seq) && g.tabMgr.ActiveIdx < len(g.tabMgr.Tabs) {
 		for _, leaf := range g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Layout.Leaves() {
 			if !leaf.Pane.Term.HasOSC133() {
 				go leaf.Pane.Term.QueryForeground(g.ctx)

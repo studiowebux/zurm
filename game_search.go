@@ -146,7 +146,7 @@ func (sc *SearchController) Prev(buf *terminal.ScreenBuffer) bool {
 // openSearchOverlay opens the search bar and marks the screen dirty.
 func (g *Game) openSearchOverlay() {
 	g.search.Open()
-	g.screenDirty = true
+	g.render.Dirty = true
 	if g.activeFocused() != nil {
 		g.activeFocused().Term.Buf.BumpRenderGen()
 	}
@@ -155,7 +155,7 @@ func (g *Game) openSearchOverlay() {
 // closeSearchOverlay closes the search bar, clears state, and marks the screen dirty.
 func (g *Game) closeSearchOverlay() {
 	g.search.Close()
-	g.screenDirty = true
+	g.render.Dirty = true
 	if g.activeFocused() != nil {
 		g.activeFocused().Term.Buf.BumpRenderGen()
 	}
@@ -185,11 +185,11 @@ func (g *Game) handleSearchInput() {
 			}
 			if key == ebiten.KeyArrowDown {
 				if g.search.Next(buf) {
-					g.screenDirty = true
+					g.render.Dirty = true
 				}
 			} else {
 				if g.search.Prev(buf) {
-					g.screenDirty = true
+					g.render.Dirty = true
 				}
 			}
 		}
@@ -207,7 +207,7 @@ func (g *Game) handleSearchInput() {
 		line := strings.TrimSpace(strings.SplitN(clip, "\n", 2)[0])
 		if line != "" {
 			ti.AddString(line)
-			g.screenDirty = true
+			g.render.Dirty = true
 		}
 	default:
 	}
@@ -216,7 +216,7 @@ func (g *Game) handleSearchInput() {
 	prevCursor := g.search.State.CursorPos
 	ti.Update(&g.search.repeat, meta, alt)
 	if ti.Text != prevQuery || ti.CursorPos != prevCursor {
-		g.screenDirty = true
+		g.render.Dirty = true
 	}
 
 	g.search.State.Query = ti.Text

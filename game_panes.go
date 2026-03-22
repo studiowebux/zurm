@@ -24,28 +24,28 @@ func (g *Game) performSplit(kind pane.NodeKind, createPane func() (*pane.Pane, e
 }
 
 func (g *Game) splitH() {
-	dir := sanitizeDirectory(g.statusBarState.Cwd)
+	dir := sanitizeDirectory(g.status.Bar.Cwd)
 	g.performSplit(pane.HSplit, func() (*pane.Pane, error) {
 		return pane.New(g.cfg, g.activeFocused().Rect, g.font.CellW, g.font.CellH, dir)
 	})
 }
 
 func (g *Game) splitV() {
-	dir := sanitizeDirectory(g.statusBarState.Cwd)
+	dir := sanitizeDirectory(g.status.Bar.Cwd)
 	g.performSplit(pane.VSplit, func() (*pane.Pane, error) {
 		return pane.New(g.cfg, g.activeFocused().Rect, g.font.CellW, g.font.CellH, dir)
 	})
 }
 
 func (g *Game) splitHServer() {
-	dir := sanitizeDirectory(g.statusBarState.Cwd)
+	dir := sanitizeDirectory(g.status.Bar.Cwd)
 	g.performSplit(pane.HSplit, func() (*pane.Pane, error) {
 		return pane.NewServer(g.cfg, g.activeFocused().Rect, g.font.CellW, g.font.CellH, dir, "")
 	})
 }
 
 func (g *Game) splitVServer() {
-	dir := sanitizeDirectory(g.statusBarState.Cwd)
+	dir := sanitizeDirectory(g.status.Bar.Cwd)
 	g.performSplit(pane.VSplit, func() (*pane.Pane, error) {
 		return pane.NewServer(g.cfg, g.activeFocused().Rect, g.font.CellW, g.font.CellH, dir, "")
 	})
@@ -225,7 +225,7 @@ func (g *Game) setFocusNoHistory(p *pane.Pane) {
 	g.input.MouseHeldBtn = -1
 	g.input.LastMouseCol = 0
 	g.input.LastMouseRow = 0
-	g.statusBarState.ForegroundProc = ""
+	g.status.Bar.ForegroundProc = ""
 	p.Term.RefreshForeground(g.ctx)
 	if g.search.State.Open {
 		g.closeSearchOverlay()
@@ -233,7 +233,7 @@ func (g *Game) setFocusNoHistory(p *pane.Pane) {
 	// Force both old and new pane borders to redraw; the pane cache
 	// does not track focus state, so clearing it ensures correct borders.
 	g.renderer.ClearPaneCache()
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // focusDir moves focus to the nearest pane in direction (dx, dy).
@@ -288,7 +288,7 @@ func (g *Game) resizePane(dx, dy int) {
 		parent.Ratio = 0.9
 	}
 	g.recomputeLayout()
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // startRenamePane enters inline rename mode for the focused pane.
@@ -301,7 +301,7 @@ func (g *Game) startRenamePane() {
 	g.activeFocused().Renaming = true
 	g.activeFocused().RenameText = g.activeFocused().CustomName
 	g.activeFocused().RenameCursorPos = len([]rune(g.activeFocused().CustomName))
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // commitPaneRename applies the pane rename text.
@@ -314,7 +314,7 @@ func (g *Game) commitPaneRename() {
 		if g.activeFocused().ServerSessionID != "" {
 			g.activeFocused().Term.RenameSession(name)
 		}
-		g.screenDirty = true
+		g.render.Dirty = true
 	}
 }
 
@@ -323,7 +323,7 @@ func (g *Game) cancelPaneRename() {
 	if g.activeFocused() != nil && g.activeFocused().Renaming {
 		g.activeFocused().Renaming = false
 		g.activeFocused().RenameText = ""
-		g.screenDirty = true
+		g.render.Dirty = true
 	}
 }
 
@@ -341,7 +341,7 @@ func (g *Game) toggleZoom() {
 	fullRect := g.contentRect()
 
 	g.zoomed = true
-	g.screenDirty = true
+	g.render.Dirty = true
 	g.renderer.SetLayoutDirty()
 	g.renderer.ClearPaneCache()
 	p := g.activeFocused()
@@ -400,7 +400,7 @@ func setPaneHeaders(layout *pane.LayoutNode, cellH int) {
 // switchTab so the layout is always consistent when leaving zoom state.
 func (g *Game) unzoom() {
 	g.zoomed = false
-	g.screenDirty = true
+	g.render.Dirty = true
 	g.renderer.SetLayoutDirty()
 	g.renderer.ClearPaneCache()
 

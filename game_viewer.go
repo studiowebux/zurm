@@ -86,18 +86,18 @@ func (g *Game) openMarkdownViewerWithContent(content, title string) {
 	}
 
 	lines := convertMdLines(markdown.Parse(content, wrapCols))
-	g.mdViewerState = renderer.MarkdownViewerState{
+	g.overlays.MdViewer = renderer.MarkdownViewerState{
 		Open:  true,
 		Title: title,
 		Lines: lines,
 	}
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // openURLInput opens the llms.txt URL input overlay.
 func (g *Game) openURLInput() {
 	g.llms.URLInput = renderer.URLInputState{Open: true}
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // handleURLInputInput processes keyboard input while the URL input overlay is open.
@@ -232,7 +232,7 @@ func (g *Game) drainLLMSFetch() {
 	case result := <-g.llms.FetchCh:
 		g.llms.URLInput = renderer.URLInputState{}
 		g.llms.FetchCh = nil
-		g.screenDirty = true
+		g.render.Dirty = true
 
 		if result.Err != nil {
 			g.flashStatus("llms.txt: " + result.Err.Error())
@@ -254,10 +254,10 @@ func (g *Game) drainLLMSFetch() {
 			g.llms.ViewingFull = true
 		}
 		g.openMarkdownViewerWithContent(content, title)
-		g.mdViewerState.HasAlt = result.Short != "" && result.Full != ""
-		g.mdViewerState.IsLLMS = true
-		g.mdViewerState.HistoryLen = len(g.llms.History)
-		g.mdViewerState.ForwardLen = len(g.llms.Forward)
+		g.overlays.MdViewer.HasAlt = result.Short != "" && result.Full != ""
+		g.overlays.MdViewer.IsLLMS = true
+		g.overlays.MdViewer.HistoryLen = len(g.llms.History)
+		g.overlays.MdViewer.ForwardLen = len(g.llms.Forward)
 	default:
 	}
 }
@@ -306,32 +306,32 @@ func (g *Game) handleMarkdownViewerInput() {
 	shift := ebiten.IsKeyPressed(ebiten.KeyShift)
 
 	// Follow-link mode: letter keys follow, Esc cancels.
-	if g.mdViewerState.FollowMode {
+	if g.overlays.MdViewer.FollowMode {
 		g.handleViewerFollowMode()
 		return
 	}
 
 	// Search mode: text input takes priority.
-	if g.mdViewerState.SearchOpen {
+	if g.overlays.MdViewer.SearchOpen {
 		g.handleMarkdownSearchInput()
 		return
 	}
 
 	// ESC or Cmd+Shift+M: close viewer.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		g.mdViewerState = renderer.MarkdownViewerState{}
+		g.overlays.MdViewer = renderer.MarkdownViewerState{}
 		g.renderer.SetLayoutDirty()
 		g.renderer.ClearPaneCache()
-		g.screenDirty = true
+		g.render.Dirty = true
 		g.input.PrevKeys[ebiten.KeyEscape] = true
 		return
 	}
 
 	if meta && shift && inpututil.IsKeyJustPressed(ebiten.KeyM) {
-		g.mdViewerState = renderer.MarkdownViewerState{}
+		g.overlays.MdViewer = renderer.MarkdownViewerState{}
 		g.renderer.SetLayoutDirty()
 		g.renderer.ClearPaneCache()
-		g.screenDirty = true
+		g.render.Dirty = true
 		return
 	}
 
@@ -345,9 +345,9 @@ func (g *Game) handleMarkdownViewerInput() {
 	if !meta && !shift && inpututil.IsKeyJustPressed(ebiten.KeyF) {
 		hints := g.collectVisibleLinkHints()
 		if len(hints) > 0 {
-			g.mdViewerState.FollowMode = true
-			g.mdViewerState.LinkHints = hints
-			g.screenDirty = true
+			g.overlays.MdViewer.FollowMode = true
+			g.overlays.MdViewer.LinkHints = hints
+			g.render.Dirty = true
 		}
 		return
 	}
@@ -360,15 +360,15 @@ func (g *Game) handleMarkdownViewerInput() {
 		} else {
 			g.openMarkdownViewerWithContent(g.llms.Short, "llms.txt — "+g.llms.Domain)
 		}
-		g.mdViewerState.HasAlt = true
-		g.mdViewerState.IsLLMS = true
-		g.mdViewerState.HistoryLen = len(g.llms.History)
-		g.mdViewerState.ForwardLen = len(g.llms.Forward)
+		g.overlays.MdViewer.HasAlt = true
+		g.overlays.MdViewer.IsLLMS = true
+		g.overlays.MdViewer.HistoryLen = len(g.llms.History)
+		g.overlays.MdViewer.ForwardLen = len(g.llms.Forward)
 		return
 	}
 
 	// Backspace or Shift+H — navigate back in llms.txt history.
-	if g.mdViewerState.IsLLMS && len(g.llms.History) > 0 {
+	if g.overlays.MdViewer.IsLLMS && len(g.llms.History) > 0 {
 		if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) || (shift && inpututil.IsKeyJustPressed(ebiten.KeyH)) {
 			g.llmsNavigateBack()
 			return
@@ -376,7 +376,7 @@ func (g *Game) handleMarkdownViewerInput() {
 	}
 
 	// Shift+L — navigate forward in llms.txt history.
-	if g.mdViewerState.IsLLMS && len(g.llms.Forward) > 0 {
+	if g.overlays.MdViewer.IsLLMS && len(g.llms.Forward) > 0 {
 		if shift && inpututil.IsKeyJustPressed(ebiten.KeyL) {
 			g.llmsNavigateForward()
 			return
@@ -385,16 +385,16 @@ func (g *Game) handleMarkdownViewerInput() {
 
 	// Cmd+F or / — open search.
 	if (meta && inpututil.IsKeyJustPressed(ebiten.KeyF)) || (!meta && inpututil.IsKeyJustPressed(ebiten.KeySlash)) {
-		g.mdViewerState.SearchOpen = true
-		g.mdViewerState.SearchQuery = ""
-		g.mdViewerState.SearchMatches = nil
-		g.mdViewerState.SearchIdx = -1
-		g.screenDirty = true
+		g.overlays.MdViewer.SearchOpen = true
+		g.overlays.MdViewer.SearchQuery = ""
+		g.overlays.MdViewer.SearchMatches = nil
+		g.overlays.MdViewer.SearchIdx = -1
+		g.render.Dirty = true
 		return
 	}
 
 	// n/N — jump to next/previous match (when matches exist from a previous search).
-	if len(g.mdViewerState.SearchMatches) > 0 {
+	if len(g.overlays.MdViewer.SearchMatches) > 0 {
 		if !meta && inpututil.IsKeyJustPressed(ebiten.KeyN) {
 			if shift {
 				g.mdViewerSearchPrev()
@@ -412,28 +412,28 @@ func (g *Game) handleMarkdownViewerInput() {
 // Letter keys (a-z) follow the matching link; Esc or any other key cancels.
 func (g *Game) handleViewerFollowMode() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		g.mdViewerState.FollowMode = false
-		g.mdViewerState.LinkHints = nil
-		g.screenDirty = true
+		g.overlays.MdViewer.FollowMode = false
+		g.overlays.MdViewer.LinkHints = nil
+		g.render.Dirty = true
 		return
 	}
 	// Check for letter key press (a-z). Only the first input char matters.
 	if chars := ebiten.AppendInputChars(nil); len(chars) > 0 {
 		r := chars[0]
 		if r >= 'a' && r <= 'z' {
-			for _, hint := range g.mdViewerState.LinkHints {
+			for _, hint := range g.overlays.MdViewer.LinkHints {
 				if hint.Label == r {
-					g.mdViewerState.FollowMode = false
-					g.mdViewerState.LinkHints = nil
+					g.overlays.MdViewer.FollowMode = false
+					g.overlays.MdViewer.LinkHints = nil
 					g.llmsFollowLink(hint.URL)
 					return
 				}
 			}
 		}
 		// Any non-matching key cancels follow mode.
-		g.mdViewerState.FollowMode = false
-		g.mdViewerState.LinkHints = nil
-		g.screenDirty = true
+		g.overlays.MdViewer.FollowMode = false
+		g.overlays.MdViewer.LinkHints = nil
+		g.render.Dirty = true
 	}
 }
 
@@ -441,7 +441,7 @@ func (g *Game) handleViewerFollowMode() {
 func (g *Game) handleViewerScroll() {
 	shift := ebiten.IsKeyPressed(ebiten.KeyShift)
 
-	rowH := g.mdViewerState.RowH
+	rowH := g.overlays.MdViewer.RowH
 	if rowH == 0 {
 		rowH = 16
 	}
@@ -469,42 +469,42 @@ func (g *Game) handleViewerScroll() {
 		}
 		switch key {
 		case ebiten.KeyArrowUp, ebiten.KeyK:
-			g.mdViewerState.ScrollOffset -= rowH
+			g.overlays.MdViewer.ScrollOffset -= rowH
 		case ebiten.KeyArrowDown, ebiten.KeyJ:
-			g.mdViewerState.ScrollOffset += rowH
+			g.overlays.MdViewer.ScrollOffset += rowH
 		case ebiten.KeyPageUp:
-			g.mdViewerState.ScrollOffset -= viewerPageScrollH * rowH
+			g.overlays.MdViewer.ScrollOffset -= viewerPageScrollH * rowH
 		case ebiten.KeyPageDown:
-			g.mdViewerState.ScrollOffset += viewerPageScrollH * rowH
+			g.overlays.MdViewer.ScrollOffset += viewerPageScrollH * rowH
 		case ebiten.KeyHome:
-			g.mdViewerState.ScrollOffset = 0
+			g.overlays.MdViewer.ScrollOffset = 0
 		case ebiten.KeyEnd:
-			g.mdViewerState.ScrollOffset = g.mdViewerState.MaxScroll
+			g.overlays.MdViewer.ScrollOffset = g.overlays.MdViewer.MaxScroll
 		}
-		g.screenDirty = true
+		g.render.Dirty = true
 	}
 
 	// Vim motions: gg (top), G (bottom), Ctrl+d (half-page down), Ctrl+u (half-page up).
 	ctrl := ebiten.IsKeyPressed(ebiten.KeyControl)
 	if ctrl && inpututil.IsKeyJustPressed(ebiten.KeyD) {
-		g.mdViewerState.ScrollOffset += viewerHalfPageH * rowH
-		g.screenDirty = true
+		g.overlays.MdViewer.ScrollOffset += viewerHalfPageH * rowH
+		g.render.Dirty = true
 	}
 	if ctrl && inpututil.IsKeyJustPressed(ebiten.KeyU) {
-		g.mdViewerState.ScrollOffset -= viewerHalfPageH * rowH
-		g.screenDirty = true
+		g.overlays.MdViewer.ScrollOffset -= viewerHalfPageH * rowH
+		g.render.Dirty = true
 	}
 	if !ctrl && inpututil.IsKeyJustPressed(ebiten.KeyG) {
 		if shift {
 			// Shift+G → bottom
-			g.mdViewerState.ScrollOffset = g.mdViewerState.MaxScroll
-			g.screenDirty = true
+			g.overlays.MdViewer.ScrollOffset = g.overlays.MdViewer.MaxScroll
+			g.render.Dirty = true
 		} else {
 			// gg detection: two 'g' presses within 500ms.
 			now := time.Now()
 			if now.Sub(g.llms.LastG) < viewerGGTimeout {
-				g.mdViewerState.ScrollOffset = 0
-				g.screenDirty = true
+				g.overlays.MdViewer.ScrollOffset = 0
+				g.render.Dirty = true
 				g.llms.LastG = time.Time{} // reset
 			} else {
 				g.llms.LastG = now
@@ -515,8 +515,8 @@ func (g *Game) handleViewerScroll() {
 	// Mouse wheel scroll.
 	_, wy := ebiten.Wheel()
 	if wy != 0 {
-		g.mdViewerState.ScrollOffset -= int(wy * float64(rowH) * 3)
-		g.screenDirty = true
+		g.overlays.MdViewer.ScrollOffset -= int(wy * float64(rowH) * 3)
+		g.render.Dirty = true
 	}
 
 	g.clampMdViewerScroll()
@@ -530,8 +530,8 @@ func (g *Game) handleMarkdownSearchInput() {
 
 	// ESC — close search bar (matches stay visible for n/N in normal mode).
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		g.mdViewerState.SearchOpen = false
-		g.screenDirty = true
+		g.overlays.MdViewer.SearchOpen = false
+		g.render.Dirty = true
 		return
 	}
 
@@ -548,32 +548,32 @@ func (g *Game) handleMarkdownSearchInput() {
 		return
 	}
 
-	ti := &TextInput{Text: g.mdViewerState.SearchQuery, CursorPos: g.mdViewerState.SearchCursorPos}
-	prevQuery := g.mdViewerState.SearchQuery
+	ti := &TextInput{Text: g.overlays.MdViewer.SearchQuery, CursorPos: g.overlays.MdViewer.SearchCursorPos}
+	prevQuery := g.overlays.MdViewer.SearchQuery
 
 	ti.Update(&g.repeats.MdSearch, meta, alt)
 
-	g.mdViewerState.SearchQuery = ti.Text
-	g.mdViewerState.SearchCursorPos = ti.CursorPos
+	g.overlays.MdViewer.SearchQuery = ti.Text
+	g.overlays.MdViewer.SearchCursorPos = ti.CursorPos
 
-	if g.mdViewerState.SearchQuery != prevQuery {
+	if g.overlays.MdViewer.SearchQuery != prevQuery {
 		g.mdViewerUpdateSearch()
-		g.screenDirty = true
+		g.render.Dirty = true
 	}
 }
 
 // mdViewerUpdateSearch rebuilds the match list for the current search query.
 func (g *Game) mdViewerUpdateSearch() {
-	q := strings.ToLower(g.mdViewerState.SearchQuery)
-	g.mdViewerState.SearchMatches = nil
-	g.mdViewerState.SearchIdx = -1
+	q := strings.ToLower(g.overlays.MdViewer.SearchQuery)
+	g.overlays.MdViewer.SearchMatches = nil
+	g.overlays.MdViewer.SearchIdx = -1
 
 	if q == "" {
 		return
 	}
 
 	qLen := len([]rune(q))
-	for lineIdx, line := range g.mdViewerState.Lines {
+	for lineIdx, line := range g.overlays.MdViewer.Lines {
 		// Concatenate span text to find matches across span boundaries.
 		col := 0
 		for _, span := range line.Spans {
@@ -581,7 +581,7 @@ func (g *Game) mdViewerUpdateSearch() {
 			runes := []rune(lower)
 			for j := 0; j <= len(runes)-qLen; j++ {
 				if string(runes[j:j+qLen]) == q {
-					g.mdViewerState.SearchMatches = append(g.mdViewerState.SearchMatches, renderer.SearchMatch{
+					g.overlays.MdViewer.SearchMatches = append(g.overlays.MdViewer.SearchMatches, renderer.SearchMatch{
 						LineIdx: lineIdx,
 						Col:     col + j,
 						Len:     qLen,
@@ -593,57 +593,57 @@ func (g *Game) mdViewerUpdateSearch() {
 	}
 
 	// Auto-scroll to first match.
-	if len(g.mdViewerState.SearchMatches) > 0 {
-		g.mdViewerState.SearchIdx = 0
+	if len(g.overlays.MdViewer.SearchMatches) > 0 {
+		g.overlays.MdViewer.SearchIdx = 0
 		g.mdViewerScrollToMatch()
 	}
 }
 
 // mdViewerSearchNext jumps to the next search match.
 func (g *Game) mdViewerSearchNext() {
-	if len(g.mdViewerState.SearchMatches) == 0 {
+	if len(g.overlays.MdViewer.SearchMatches) == 0 {
 		return
 	}
-	g.mdViewerState.SearchIdx = (g.mdViewerState.SearchIdx + 1) % len(g.mdViewerState.SearchMatches)
+	g.overlays.MdViewer.SearchIdx = (g.overlays.MdViewer.SearchIdx + 1) % len(g.overlays.MdViewer.SearchMatches)
 	g.mdViewerScrollToMatch()
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // mdViewerSearchPrev jumps to the previous search match.
 func (g *Game) mdViewerSearchPrev() {
-	if len(g.mdViewerState.SearchMatches) == 0 {
+	if len(g.overlays.MdViewer.SearchMatches) == 0 {
 		return
 	}
-	g.mdViewerState.SearchIdx--
-	if g.mdViewerState.SearchIdx < 0 {
-		g.mdViewerState.SearchIdx = len(g.mdViewerState.SearchMatches) - 1
+	g.overlays.MdViewer.SearchIdx--
+	if g.overlays.MdViewer.SearchIdx < 0 {
+		g.overlays.MdViewer.SearchIdx = len(g.overlays.MdViewer.SearchMatches) - 1
 	}
 	g.mdViewerScrollToMatch()
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // mdViewerScrollToMatch scrolls the viewer so the current match is visible.
 func (g *Game) mdViewerScrollToMatch() {
-	if g.mdViewerState.SearchIdx < 0 || g.mdViewerState.SearchIdx >= len(g.mdViewerState.SearchMatches) {
+	if g.overlays.MdViewer.SearchIdx < 0 || g.overlays.MdViewer.SearchIdx >= len(g.overlays.MdViewer.SearchMatches) {
 		return
 	}
-	rowH := g.mdViewerState.RowH
+	rowH := g.overlays.MdViewer.RowH
 	if rowH == 0 {
 		rowH = 16
 	}
-	m := g.mdViewerState.SearchMatches[g.mdViewerState.SearchIdx]
+	m := g.overlays.MdViewer.SearchMatches[g.overlays.MdViewer.SearchIdx]
 	targetOffset := m.LineIdx * rowH
-	g.mdViewerState.ScrollOffset = targetOffset
+	g.overlays.MdViewer.ScrollOffset = targetOffset
 	g.clampMdViewerScroll()
 }
 
 // clampMdViewerScroll keeps the scroll offset within valid bounds.
 func (g *Game) clampMdViewerScroll() {
-	if g.mdViewerState.ScrollOffset < 0 {
-		g.mdViewerState.ScrollOffset = 0
+	if g.overlays.MdViewer.ScrollOffset < 0 {
+		g.overlays.MdViewer.ScrollOffset = 0
 	}
-	if g.mdViewerState.MaxScroll > 0 && g.mdViewerState.ScrollOffset > g.mdViewerState.MaxScroll {
-		g.mdViewerState.ScrollOffset = g.mdViewerState.MaxScroll
+	if g.overlays.MdViewer.MaxScroll > 0 && g.overlays.MdViewer.ScrollOffset > g.overlays.MdViewer.MaxScroll {
+		g.overlays.MdViewer.ScrollOffset = g.overlays.MdViewer.MaxScroll
 	}
 }
 
@@ -709,7 +709,7 @@ func spanToANSI(span renderer.MdSpan) string {
 // collectVisibleLinkHints scans visible lines for StyleLink spans and assigns
 // letter badges (a-z). Returns at most 26 hints.
 func (g *Game) collectVisibleLinkHints() []renderer.LinkHint {
-	rowH := g.mdViewerState.RowH
+	rowH := g.overlays.MdViewer.RowH
 	if rowH == 0 {
 		rowH = 16
 	}
@@ -720,8 +720,8 @@ func (g *Game) collectVisibleLinkHints() []renderer.LinkHint {
 
 	var hints []renderer.LinkHint
 	label := 'a'
-	for lineIdx, line := range g.mdViewerState.Lines {
-		lineY := lineIdx*rowH - g.mdViewerState.ScrollOffset
+	for lineIdx, line := range g.overlays.MdViewer.Lines {
+		lineY := lineIdx*rowH - g.overlays.MdViewer.ScrollOffset
 		// Only include lines visible in the content area.
 		if lineY+rowH < 0 {
 			continue
@@ -755,7 +755,7 @@ func (g *Game) llmsPushHistory() {
 		Short:        g.llms.Short,
 		Full:         g.llms.Full,
 		ViewingFull:  g.llms.ViewingFull,
-		ScrollOffset: g.mdViewerState.ScrollOffset,
+		ScrollOffset: g.overlays.MdViewer.ScrollOffset,
 	})
 }
 
@@ -770,7 +770,7 @@ func (g *Game) llmsNavigateBack() {
 		Short:        g.llms.Short,
 		Full:         g.llms.Full,
 		ViewingFull:  g.llms.ViewingFull,
-		ScrollOffset: g.mdViewerState.ScrollOffset,
+		ScrollOffset: g.overlays.MdViewer.ScrollOffset,
 	})
 	// Pop from history.
 	entry := g.llms.History[len(g.llms.History)-1]
@@ -789,7 +789,7 @@ func (g *Game) llmsNavigateForward() {
 		Short:        g.llms.Short,
 		Full:         g.llms.Full,
 		ViewingFull:  g.llms.ViewingFull,
-		ScrollOffset: g.mdViewerState.ScrollOffset,
+		ScrollOffset: g.overlays.MdViewer.ScrollOffset,
 	})
 	// Pop from forward.
 	entry := g.llms.Forward[len(g.llms.Forward)-1]
@@ -811,11 +811,11 @@ func (g *Game) llmsRestoreEntry(entry llmsHistoryEntry) {
 		title = "llms-full.txt — " + entry.Domain
 	}
 	g.openMarkdownViewerWithContent(content, title)
-	g.mdViewerState.HasAlt = entry.Short != "" && entry.Full != ""
-	g.mdViewerState.IsLLMS = true
-	g.mdViewerState.ScrollOffset = entry.ScrollOffset
-	g.mdViewerState.HistoryLen = len(g.llms.History)
-	g.mdViewerState.ForwardLen = len(g.llms.Forward)
+	g.overlays.MdViewer.HasAlt = entry.Short != "" && entry.Full != ""
+	g.overlays.MdViewer.IsLLMS = true
+	g.overlays.MdViewer.ScrollOffset = entry.ScrollOffset
+	g.overlays.MdViewer.HistoryLen = len(g.llms.History)
+	g.overlays.MdViewer.ForwardLen = len(g.llms.Forward)
 }
 
 // llmsFollowLink handles following a link from the markdown viewer.
@@ -838,13 +838,13 @@ func (g *Game) llmsFollowLink(url string) {
 // sendViewerToPane writes the current viewer content to a temp file and opens
 // it in a new pane running `less`.
 func (g *Game) sendViewerToPane() {
-	if !g.mdViewerState.Open {
+	if !g.overlays.MdViewer.Open {
 		return
 	}
 
 	// Capture state before clearing.
-	lines := g.mdViewerState.Lines
-	paneName := g.mdViewerState.Title
+	lines := g.overlays.MdViewer.Lines
+	paneName := g.overlays.MdViewer.Title
 	if g.llms.Domain != "" {
 		paneName = "llms — " + g.llms.Domain
 	}
@@ -901,7 +901,7 @@ func (g *Game) sendViewerToPane() {
 	}
 
 	// Close the viewer.
-	g.mdViewerState = renderer.MarkdownViewerState{}
+	g.overlays.MdViewer = renderer.MarkdownViewerState{}
 	g.renderer.SetLayoutDirty()
 	g.renderer.ClearPaneCache()
 
@@ -952,6 +952,6 @@ func (g *Game) sendViewerToPane() {
 	}
 	g.tabMgr.Tabs = append(g.tabMgr.Tabs, t)
 	g.switchTab(len(g.tabMgr.Tabs) - 1)
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 

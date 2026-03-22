@@ -40,7 +40,7 @@ func (g *Game) openFileExplorer() {
 		Side:    g.cfg.FileExplorer.Side,
 	}
 	g.closePalette()
-	g.overlayState = renderer.OverlayState{}
+	g.overlays.Help = renderer.OverlayState{}
 	g.closeMenu()
 	g.closeSearchOverlay()
 
@@ -51,19 +51,19 @@ func (g *Game) openFileExplorer() {
 		g.input.PrevKeys[k] = ebiten.IsKeyPressed(k)
 	}
 	g.explorer.repeat.Reset()
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // closeFileExplorer closes the file explorer sidebar.
 func (g *Game) closeFileExplorer() {
 	g.explorer.Close()
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // reloadExplorerTree rebuilds the entry list from the current root.
 func (g *Game) reloadExplorerTree() {
 	g.explorer.ReloadTree()
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // handleFileExplorerInput routes keyboard events while the file explorer is open.
@@ -494,7 +494,7 @@ func (g *Game) handleExplorerClick(mx, my int, panelRect image.Rectangle) {
 			return
 		}
 		st.Cursor = visualIdx
-		g.screenDirty = true
+		g.render.Dirty = true
 		return
 	}
 
@@ -525,5 +525,5 @@ func (g *Game) handleExplorerClick(mx, my int, panelRect image.Rectangle) {
 		}
 	}
 	st.Cursor = actualIdx
-	g.screenDirty = true
+	g.render.Dirty = true
 }

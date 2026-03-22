@@ -32,7 +32,7 @@ func (g *Game) newTab() {
 			dir = home
 		}
 	default: // "cwd"
-		dir = g.statusBarState.Cwd
+		dir = g.status.Bar.Cwd
 	}
 
 	// Sanitize the directory in case it's inside a .app bundle
@@ -60,7 +60,7 @@ func (g *Game) newServerTab() {
 			dir = home
 		}
 	default: // "cwd"
-		dir = g.statusBarState.Cwd
+		dir = g.status.Bar.Cwd
 	}
 	dir = sanitizeDirectory(dir)
 
@@ -98,9 +98,9 @@ func (g *Game) closeActiveTab() {
 
 // dismissTabHover clears the tab hover popover state and marks the screen dirty.
 func (g *Game) dismissTabHover() {
-	if g.tabHoverState.TabIdx >= 0 || g.tabHoverState.Active {
-		renderer.DismissTabHover(&g.tabHoverState)
-		g.screenDirty = true
+	if g.status.TabHover.TabIdx >= 0 || g.status.TabHover.Active {
+		renderer.DismissTabHover(&g.status.TabHover)
+		g.render.Dirty = true
 	}
 }
 
@@ -115,9 +115,9 @@ func (g *Game) updateTabHover(mx, my int) {
 	numTabs := len(g.tabMgr.Tabs)
 
 	// Dismiss conditions: single tab, overlays open, dragging, cursor outside tab bar.
-	if numTabs <= 1 || g.tabMgr.Dragging || g.menuState.Open || g.overlayState.Open ||
-		g.confirmState.Open || g.search.State.Open || g.palette.State.Open ||
-		g.explorer.State.Open || g.tabSwitcherState.Open || g.tabSearchState.Open {
+	if numTabs <= 1 || g.tabMgr.Dragging || g.overlays.Menu.Open || g.overlays.Help.Open ||
+		g.overlays.Confirm.Open || g.search.State.Open || g.palette.State.Open ||
+		g.explorer.State.Open || g.overlays.TabSwitcher.Open || g.overlays.TabSearch.Open {
 		g.dismissTabHover()
 		return
 	}
@@ -152,22 +152,22 @@ func (g *Game) updateTabHover(mx, my int) {
 	}
 
 	// Tab changed — reset hover timer.
-	if hoverIdx != g.tabHoverState.TabIdx {
+	if hoverIdx != g.status.TabHover.TabIdx {
 		g.dismissTabHover()
-		g.tabHoverState.TabIdx = hoverIdx
-		g.tabHoverState.HoverStart = time.Now()
+		g.status.TabHover.TabIdx = hoverIdx
+		g.status.TabHover.HoverStart = time.Now()
 		return
 	}
 
 	// Check if delay has elapsed.
 	delay := time.Duration(g.cfg.Tabs.Hover.DelayMs) * time.Millisecond
-	if !g.tabHoverState.Active && time.Since(g.tabHoverState.HoverStart) < delay {
+	if !g.status.TabHover.Active && time.Since(g.status.TabHover.HoverStart) < delay {
 		return
 	}
 
 	// Activate the popover.
-	if !g.tabHoverState.Active {
-		g.tabHoverState.Active = true
+	if !g.status.TabHover.Active {
+		g.status.TabHover.Active = true
 
 		// Compute popover position (centered below the hovered tab).
 		popW := int(float64(g.cfg.Tabs.Hover.Width) * g.dpi)
@@ -176,24 +176,24 @@ func (g *Game) updateTabHover(mx, my int) {
 		popX := tabCenterX - popW/2
 		popY := tabBarH + 4 // small gap below tab bar
 
-		g.tabHoverState.PopoverX = popX
-		g.tabHoverState.PopoverY = popY
-		g.tabHoverState.PopoverW = popW
-		g.tabHoverState.PopoverH = popH
-		g.screenDirty = true
+		g.status.TabHover.PopoverX = popX
+		g.status.TabHover.PopoverY = popY
+		g.status.TabHover.PopoverW = popW
+		g.status.TabHover.PopoverH = popH
+		g.render.Dirty = true
 	}
 
 	// Check cache validity and regenerate thumbnail if stale.
 	hoveredTab := g.tabMgr.Tabs[hoverIdx]
 	cacheKey := renderer.TabHoverCacheKey(hoveredTab)
-	if cacheKey != g.tabHoverState.CacheKey || g.tabHoverState.Thumbnail == nil {
-		if g.tabHoverState.Thumbnail != nil {
-			g.tabHoverState.Thumbnail.Deallocate()
+	if cacheKey != g.status.TabHover.CacheKey || g.status.TabHover.Thumbnail == nil {
+		if g.status.TabHover.Thumbnail != nil {
+			g.status.TabHover.Thumbnail.Deallocate()
 		}
 		contentRect := g.renderer.ComputeContentRect(hoveredTab)
-		g.tabHoverState.Thumbnail = g.renderer.RenderTabThumbnail(hoveredTab, contentRect)
-		g.tabHoverState.CacheKey = cacheKey
-		g.screenDirty = true
+		g.status.TabHover.Thumbnail = g.renderer.RenderTabThumbnail(hoveredTab, contentRect)
+		g.status.TabHover.CacheKey = cacheKey
+		g.render.Dirty = true
 	}
 }
 
@@ -262,14 +262,14 @@ func (g *Game) switchTabNoHistory(i int) {
 	g.renderer.SetLayoutDirty()
 	g.renderer.ClearPaneCache()
 	g.input.SelDrag.Active = false
-	g.statusBarState.ForegroundProc = ""
+	g.status.Bar.ForegroundProc = ""
 	if f := g.activeFocused(); f != nil {
 		f.Term.RefreshForeground(g.ctx)
 	}
 	if g.search.State.Open {
 		g.closeSearchOverlay()
 	}
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // nextTab cycles to the next tab.
@@ -286,7 +286,7 @@ func (g *Game) prevTab() {
 // occupant. Calling again with the same slot while already pinned there unpins.
 func (g *Game) pinTab(slot rune) {
 	g.tabMgr.PinActive(slot)
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // switchToSlot activates the tab pinned to the given home-row slot.
@@ -299,13 +299,13 @@ func (g *Game) switchToSlot(slot rune) {
 
 // openTabSwitcher opens (or closes) the tab switcher overlay.
 func (g *Game) openTabSwitcher() {
-	if g.tabSwitcherState.Open {
-		g.tabSwitcherState.Open = false
+	if g.overlays.TabSwitcher.Open {
+		g.overlays.TabSwitcher.Open = false
 	} else {
-		g.tabSwitcherState.Open = true
-		g.tabSwitcherState.Cursor = g.tabMgr.ActiveIdx
+		g.overlays.TabSwitcher.Open = true
+		g.overlays.TabSwitcher.Cursor = g.tabMgr.ActiveIdx
 	}
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // handlePinInput processes the second keypress of the Cmd+Space chord.
@@ -335,7 +335,7 @@ func (g *Game) handlePinInput() {
 				g.switchToSlot(hr.slot)
 			}
 			g.tabMgr.PinMode = false
-			g.screenDirty = true
+			g.render.Dirty = true
 			return
 		}
 	}
@@ -343,7 +343,7 @@ func (g *Game) handlePinInput() {
 	// ESC cancels immediately. inpututil catches sub-frame taps that polling misses.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.tabMgr.PinMode = false
-		g.screenDirty = true
+		g.render.Dirty = true
 		g.input.PrevKeys[ebiten.KeyEscape] = true
 		return
 	}
@@ -358,14 +358,14 @@ func (g *Game) handlePinInput() {
 		g.input.PrevKeys[key] = pressed
 		if pressed && !wasPressed {
 			g.tabMgr.PinMode = false
-			g.screenDirty = true
+			g.render.Dirty = true
 			return
 		}
 	}
 	// Cancel on any printable char not in home row.
 	if len(ebiten.AppendInputChars(nil)) > 0 {
 		g.tabMgr.PinMode = false
-		g.screenDirty = true
+		g.render.Dirty = true
 	}
 }
 
@@ -373,8 +373,8 @@ func (g *Game) handlePinInput() {
 func (g *Game) reorderTab(from, to int) {
 	g.dismissTabHover()
 	g.tabMgr.Reorder(from, to)
-	g.tabSwitcherState.Cursor = to
-	g.screenDirty = true
+	g.overlays.TabSwitcher.Cursor = to
+	g.render.Dirty = true
 }
 
 // moveTabLeft moves the active tab one position to the left.
@@ -398,8 +398,8 @@ func (g *Game) handleTabSwitcherInput() {
 
 	// inpututil.IsKeyJustPressed catches sub-frame taps that polling misses.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		g.tabSwitcherState.Open = false
-		g.screenDirty = true
+		g.overlays.TabSwitcher.Open = false
+		g.render.Dirty = true
 		g.input.PrevKeys[ebiten.KeyEscape] = true
 		return
 	}
@@ -415,53 +415,53 @@ func (g *Game) handleTabSwitcherInput() {
 		if pressed && !wasPressed {
 			switch {
 			case meta && shift && key == ebiten.KeyT:
-				g.tabSwitcherState.Open = false
+				g.overlays.TabSwitcher.Open = false
 			case key == ebiten.KeyArrowUp && !shift:
-				if g.tabSwitcherState.Cursor > 0 {
-					g.tabSwitcherState.Cursor--
+				if g.overlays.TabSwitcher.Cursor > 0 {
+					g.overlays.TabSwitcher.Cursor--
 				}
 			case key == ebiten.KeyArrowDown && !shift:
-				if g.tabSwitcherState.Cursor < len(g.tabMgr.Tabs)-1 {
-					g.tabSwitcherState.Cursor++
+				if g.overlays.TabSwitcher.Cursor < len(g.tabMgr.Tabs)-1 {
+					g.overlays.TabSwitcher.Cursor++
 				}
 			case key == ebiten.KeyArrowUp && shift:
-				c := g.tabSwitcherState.Cursor
+				c := g.overlays.TabSwitcher.Cursor
 				if c > 0 {
 					g.reorderTab(c, c-1)
 				}
 			case key == ebiten.KeyArrowDown && shift:
-				c := g.tabSwitcherState.Cursor
+				c := g.overlays.TabSwitcher.Cursor
 				if c < len(g.tabMgr.Tabs)-1 {
 					g.reorderTab(c, c+1)
 				}
 			case key == ebiten.KeyEnter || key == ebiten.KeyNumpadEnter:
-				g.switchTab(g.tabSwitcherState.Cursor)
-				g.tabSwitcherState.Open = false
+				g.switchTab(g.overlays.TabSwitcher.Cursor)
+				g.overlays.TabSwitcher.Open = false
 			}
 		}
 		g.input.PrevKeys[key] = pressed
 	}
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // openTabSearch opens the tab search overlay, closing conflicting surfaces.
 func (g *Game) openTabSearch() {
-	g.tabSearchState = renderer.TabSearchState{Open: true}
-	g.tabSwitcherState = renderer.TabSwitcherState{}
+	g.overlays.TabSearch = renderer.TabSearchState{Open: true}
+	g.overlays.TabSwitcher = renderer.TabSwitcherState{}
 	g.palette.Close()
-	g.overlayState = renderer.OverlayState{}
+	g.overlays.Help = renderer.OverlayState{}
 	g.closeMenu()
 	g.repeats.TabSearch.Reset()
 	g.input.PrevKeys[ebiten.KeyArrowUp] = ebiten.IsKeyPressed(ebiten.KeyArrowUp)
 	g.input.PrevKeys[ebiten.KeyArrowDown] = ebiten.IsKeyPressed(ebiten.KeyArrowDown)
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // closeTabSearch closes the tab search overlay.
 func (g *Game) closeTabSearch() {
-	g.tabSearchState = renderer.TabSearchState{}
+	g.overlays.TabSearch = renderer.TabSearchState{}
 	g.repeats.TabSearch.Reset()
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // handleTabSearchInput processes keyboard input while the tab search overlay is open.
@@ -470,29 +470,29 @@ func (g *Game) handleTabSearchInput() {
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
 	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 
-	filtered := renderer.FilterTabSearch(g.tabMgr.Tabs, g.tabSearchState.Query)
+	filtered := renderer.FilterTabSearch(g.tabMgr.Tabs, g.overlays.TabSearch.Query)
 
 	upPressed := ebiten.IsKeyPressed(ebiten.KeyArrowUp)
 	downPressed := ebiten.IsKeyPressed(ebiten.KeyArrowDown)
-	if g.repeats.TabSearch.Update(ebiten.KeyArrowUp, upPressed, g.input.PrevKeys[ebiten.KeyArrowUp], now) && g.tabSearchState.Cursor > 0 {
-		g.tabSearchState.Cursor--
+	if g.repeats.TabSearch.Update(ebiten.KeyArrowUp, upPressed, g.input.PrevKeys[ebiten.KeyArrowUp], now) && g.overlays.TabSearch.Cursor > 0 {
+		g.overlays.TabSearch.Cursor--
 	}
-	if g.repeats.TabSearch.Update(ebiten.KeyArrowDown, downPressed, g.input.PrevKeys[ebiten.KeyArrowDown], now) && g.tabSearchState.Cursor < len(filtered)-1 {
-		g.tabSearchState.Cursor++
+	if g.repeats.TabSearch.Update(ebiten.KeyArrowDown, downPressed, g.input.PrevKeys[ebiten.KeyArrowDown], now) && g.overlays.TabSearch.Cursor < len(filtered)-1 {
+		g.overlays.TabSearch.Cursor++
 	}
 	g.input.PrevKeys[ebiten.KeyArrowUp] = upPressed
 	g.input.PrevKeys[ebiten.KeyArrowDown] = downPressed
 
 	// ESC: clear query if non-empty, otherwise close.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		if g.tabSearchState.Query != "" {
-			g.tabSearchState.Query = ""
-			g.tabSearchState.Cursor = 0
+		if g.overlays.TabSearch.Query != "" {
+			g.overlays.TabSearch.Query = ""
+			g.overlays.TabSearch.Cursor = 0
 		} else {
 			g.closeTabSearch()
 		}
 		g.input.PrevKeys[ebiten.KeyEscape] = true
-		g.screenDirty = true
+		g.render.Dirty = true
 		return
 	}
 
@@ -509,22 +509,22 @@ func (g *Game) handleTabSearchInput() {
 		wasPressed := g.input.PrevKeys[key]
 		g.input.PrevKeys[key] = pressed
 		if pressed && !wasPressed {
-			if len(filtered) > 0 && g.tabSearchState.Cursor < len(filtered) {
-				g.switchTab(filtered[g.tabSearchState.Cursor].OrigIdx)
+			if len(filtered) > 0 && g.overlays.TabSearch.Cursor < len(filtered) {
+				g.switchTab(filtered[g.overlays.TabSearch.Cursor].OrigIdx)
 				g.closeTabSearch()
 			}
 			return
 		}
 	}
 
-	prevQuery := g.tabSearchState.Query
-	ti := &TextInput{Text: g.tabSearchState.Query, CursorPos: g.tabSearchState.CursorPos}
+	prevQuery := g.overlays.TabSearch.Query
+	ti := &TextInput{Text: g.overlays.TabSearch.Query, CursorPos: g.overlays.TabSearch.CursorPos}
 	ti.Update(&g.repeats.TabInput, meta, alt)
-	g.tabSearchState.Query = ti.Text
-	g.tabSearchState.CursorPos = ti.CursorPos
-	if g.tabSearchState.Query != prevQuery {
-		g.tabSearchState.Cursor = 0
+	g.overlays.TabSearch.Query = ti.Text
+	g.overlays.TabSearch.CursorPos = ti.CursorPos
+	if g.overlays.TabSearch.Query != prevQuery {
+		g.overlays.TabSearch.Cursor = 0
 	}
 
-	g.screenDirty = true
+	g.render.Dirty = true
 }

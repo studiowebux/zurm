@@ -104,117 +104,42 @@ var jetbrainsMono []byte
 // Game implements ebiten.Game.
 // Pattern: game loop — Update handles logic, Draw handles rendering.
 type Game struct {
-	// Root context — cancelled on app exit. Derived contexts scope goroutines
-	// to their parent lifecycle (fetch, search, clipboard, etc.).
+	// Root context — cancelled on app exit.
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	tabMgr *TabManager
-
-	// layout and focused are computed on-demand from tabMgr via activeLayout()/activeFocused().
-	// No cached pointers — eliminates the sync invariant entirely.
-
+	// Core infrastructure — needed by most subsystems.
+	tabMgr   *TabManager
 	renderer *renderer.Renderer
 	font     *renderer.FontRenderer
 	cfg      *config.Config
-
 	winW, winH int
+	dpi        float64 // device pixel ratio (2.0 on Retina)
+	zoomed     bool    // focused pane temporarily fullscreened (Cmd+Z)
 
-	// zoomed is true when the focused pane is temporarily fullscreened (Cmd+Z).
-	zoomed bool
+	// Grouped state — each sub-struct owns a clear concern.
+	input      inputTracker     // edge detection, drag, click, scroll, mouse
+	overlays   overlayGroup     // all modal overlay surfaces
+	status     statusGroup      // status bar, flash, bell, poller, tab hover
+	wfocus     windowFocusState // window focus tracking and idle suspension
+	render     renderState      // dirty flag and change detection
+	urlHover   urlHoverState    // URL hover detection
+	screenshot screenshotState  // screenshot capture (Cmd+Shift+S)
+	rec        recState         // screen recording (FFMPEG → MP4)
+	llms       llmsState        // llms.txt browser (Cmd+L)
+	vlt        vaultState       // encrypted command history + ghost text
+	repeats    inputRepeats     // key repeat for text input fields
 
-	// Input tracking — edge detection, drag, click, scroll, mouse state.
-	input inputTracker
-
-	// dpi is the device pixel ratio (2.0 on Retina).
-	dpi float64
-
-	// prevFocused tracks window focus state for mode-1004 focus events.
-	prevFocused bool
-
-	// Idle suspension — reduce TPS when window is unfocused to save CPU/memory.
-	unfocusedAt time.Time // when focus was lost; zero = focused
-	suspended   bool      // true when TPS has been reduced
-
-	// URL hover state — detected URLs in the focused pane's visible buffer.
-	urlHover urlHoverState
-
-	// Context menu state.
-	menuState renderer.MenuState
-
-	// Keybinding overlay state.
-	overlayState renderer.OverlayState
-
-	// Close-confirmation dialog state.
-	confirmState         renderer.ConfirmState
-	confirmPendingAction func()
-
-	// In-buffer search controller (Cmd+F).
-	search *SearchController
-
-	// Async clipboard — requestClipboard() spawns pbpaste in a goroutine,
-	// result arrives on clipboardCh. Each handler's Cmd+V triggers a request;
-	// the active handler consumes the result next frame via non-blocking receive.
-	clipboardCh chan string
-
-	// Status bar state.
-	statusBarState renderer.StatusBarState
-	poller *StatusPoller // async git status queries and poll intervals
-
-	// Tab switcher overlay state (pin-style).
-	tabSwitcherState renderer.TabSwitcherState
-
-	// Tab search overlay state (Cmd+J).
-	tabSearchState renderer.TabSearchState
-
-	// Key repeat state for all text input fields and tab search navigation.
-	repeats inputRepeats
-
-	// Command palette controller (Cmd+P).
-	palette *PaletteController
-
-	// File explorer controller (Cmd+E).
+	// Controllers — already encapsulated with their own state.
+	search   *SearchController
+	palette  *PaletteController
 	explorer *ExplorerController
 
-	// Dirty-render state — screen is only redrawn when something changes.
-	screenDirty  bool
-	lastPtySeq   uint64
-	lastClockSec int64
+	// Async clipboard — pbpaste goroutine sends result here.
+	clipboardCh chan string
 
-
-	// blocksEnabled is the runtime toggle for command block rendering.
-	// Initialized from cfg.Blocks.Enabled; toggled via command palette.
-	blocksEnabled bool
-
-	// Screenshot capture state (Cmd+Shift+S).
-	screenshot screenshotState
-
-	// Screen recording state (FFMPEG pipe → MP4).
-	rec recState
-
-	// Stats overlay state (Cmd+I).
-	statsState     renderer.StatsState
-	statsLastTick  time.Time // last stats collection time
-
-	// Tab hover popover state (minimap preview on background tab hover).
-	tabHoverState renderer.TabHoverState
-
-	// flashExpiry is when statusBarState.FlashMessage should be cleared.
-	flashExpiry time.Time
-
-	// lastBellSound debounces system sound + dock badge to avoid spamming.
-	lastBellSound time.Time
-
-	// Markdown viewer overlay state (Cmd+Shift+M).
-	mdViewerState  renderer.MarkdownViewerState
-
-	// llms.txt browser state (Cmd+L).
-	llms llmsState
-
-
-	// Command vault — encrypted history with ghost text suggestions.
-	vlt vaultState
-
+	// Feature toggles.
+	blocksEnabled bool // command block rendering (Cmd+B)
 }
 
 // buildRenderConfig extracts the subset of config the renderer needs,
@@ -464,19 +389,21 @@ func main() {
 			Done:     make(chan string, 1),
 		},
 		screenshot: screenshotState{Done: make(chan string, 1)},
-		tabHoverState:    renderer.TabHoverState{TabIdx: -1},
-		tabMgr:           NewTabManager(),
-		explorer:         NewExplorerController(),
-		poller:           NewStatusPoller(),
-		search:           NewSearchController(),
-		palette:          NewPaletteController(),
-		clipboardCh:      make(chan string, 1),
+		status: statusGroup{
+			Poller:   NewStatusPoller(),
+			TabHover: renderer.TabHoverState{TabIdx: -1},
+		},
+		tabMgr:      NewTabManager(),
+		explorer:    NewExplorerController(),
+		search:      NewSearchController(),
+		palette:     NewPaletteController(),
+		clipboardCh: make(chan string, 1),
 	}
 
 	game.tabMgr.Tabs = initialTabs
 	game.tabMgr.ActiveIdx = initialActive
 	game.renderer.BlocksEnabled = game.blocksEnabled
-	game.statusBarState.Version = version
+	game.status.Bar.Version = version
 	game.buildPalette()
 
 	// Initialize command vault (encrypted local history + ghost suggestions).
@@ -541,7 +468,7 @@ func (g *Game) Update() error {
 	ctrl := ebiten.IsKeyPressed(ebiten.KeyControl)
 	// Intercept window close button (red X) and Cmd+Q — show confirmation.
 	wantQuit := (meta || ctrl) && ebiten.IsKeyPressed(ebiten.KeyQ)
-	if (wantQuit || ebiten.IsWindowBeingClosed()) && !g.confirmState.Open {
+	if (wantQuit || ebiten.IsWindowBeingClosed()) && !g.overlays.Confirm.Open {
 		g.showConfirm("Quit zurm? All sessions will be closed.", func() {
 			g.cancel()
 			g.saveSession()
@@ -555,9 +482,9 @@ func (g *Game) Update() error {
 	}
 
 	// Clear transient flash message once its expiry has passed.
-	if g.statusBarState.FlashMessage != "" && time.Now().After(g.flashExpiry) {
-		g.statusBarState.FlashMessage = ""
-		g.screenDirty = true
+	if g.status.Bar.FlashMessage != "" && time.Now().After(g.status.FlashExpiry) {
+		g.status.Bar.FlashMessage = ""
+		g.render.Dirty = true
 	}
 
 	// Expire visual bell flashes — keep redrawing while any pane is flashing.
@@ -567,7 +494,7 @@ func (g *Game) Update() error {
 			if now.After(leaf.Pane.BellUntil) {
 				leaf.Pane.BellUntil = time.Time{}
 			}
-			g.screenDirty = true
+			g.render.Dirty = true
 		}
 	}
 
@@ -587,25 +514,25 @@ func (g *Game) Update() error {
 
 	// Update recording status bar fields once per second (blink + file size).
 	if g.rec.Recorder.Active() {
-		g.statusBarState.Recording = true
-		g.statusBarState.RecordingMode = g.rec.Recorder.OutputMode()
+		g.status.Bar.Recording = true
+		g.status.Bar.RecordingMode = g.rec.Recorder.OutputMode()
 		now := time.Now()
 		if now.Unix() != g.rec.LastStatusSec {
 			g.rec.LastStatusSec = now.Unix()
-			g.statusBarState.RecordingDuration = now.Sub(g.rec.Recorder.StartTime())
-			g.statusBarState.RecordingBytes = g.rec.Recorder.OutputSize()
-			g.screenDirty = true
+			g.status.Bar.RecordingDuration = now.Sub(g.rec.Recorder.StartTime())
+			g.status.Bar.RecordingBytes = g.rec.Recorder.OutputSize()
+			g.render.Dirty = true
 		}
-	} else if g.statusBarState.Recording {
-		g.statusBarState.Recording = false
-		g.screenDirty = true
+	} else if g.status.Bar.Recording {
+		g.status.Bar.Recording = false
+		g.render.Dirty = true
 	}
 
 	// Update cursor blink for all panes in the active tab.
 	// Update() returns true when blinkOn toggles — mark dirty so the frame redraws.
 	for _, leaf := range g.activeLayout().Leaves() {
 		if leaf.Pane.Term.Cursor.Update() {
-			g.screenDirty = true
+			g.render.Dirty = true
 			// Bump per-pane gen so the pane-skip logic redraws the cursor row.
 			leaf.Pane.Term.Buf.BumpRenderGen()
 		}
@@ -617,7 +544,7 @@ func (g *Game) Update() error {
 			had := t.HasActivity
 			t.CheckActivity()
 			if t.HasActivity != had {
-				g.screenDirty = true
+				g.render.Dirty = true
 			}
 		}
 	}
@@ -663,7 +590,7 @@ func (g *Game) Update() error {
 	g.pollStatusOnOutput()
 	if g.activeFocused() != nil {
 		if g.search.Recompute(g.activeFocused().Term.Buf) {
-			g.screenDirty = true
+			g.render.Dirty = true
 		}
 	}
 
@@ -683,26 +610,26 @@ func (g *Game) Update() error {
 
 // needsRender reports whether the offscreen must be redrawn this frame.
 func (g *Game) needsRender() bool {
-	if g.screenDirty {
+	if g.render.Dirty {
 		return true
 	}
 	// PTY output in any pane.
-	if seq := terminal.RenderSeq(); seq != g.lastPtySeq {
+	if seq := terminal.RenderSeq(); seq != g.render.LastPtySeq {
 		return true
 	}
 	// Clock ticks once per second — only relevant when enabled.
-	if g.cfg.StatusBar.ShowClock && time.Now().Unix() != g.lastClockSec {
+	if g.cfg.StatusBar.ShowClock && time.Now().Unix() != g.render.LastClock {
 		return true
 	}
 	// Stats overlay refreshes once per second when open.
-	if g.statsState.Open && time.Since(g.statsLastTick) >= time.Second {
+	if g.overlays.Stats.Open && time.Since(g.overlays.StatsLastTick) >= time.Second {
 		g.collectStats()
 		return true
 	}
 	// Tab hover popover: trigger redraw when delay has elapsed.
-	if g.cfg.Tabs.Hover.Enabled && g.tabHoverState.TabIdx >= 0 && !g.tabHoverState.Active {
+	if g.cfg.Tabs.Hover.Enabled && g.status.TabHover.TabIdx >= 0 && !g.status.TabHover.Active {
 		delay := time.Duration(g.cfg.Tabs.Hover.DelayMs) * time.Millisecond
-		if time.Since(g.tabHoverState.HoverStart) >= delay {
+		if time.Since(g.status.TabHover.HoverStart) >= delay {
 			return true
 		}
 	}
@@ -737,10 +664,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		return
 	}
 	// Sync transient status bar fields from live game state before rendering.
-	g.statusBarState.Zoomed = g.zoomed
-	g.statusBarState.PinMode = g.tabMgr.PinMode
-	g.statusBarState.BlocksEnabled = g.blocksEnabled
-	g.statusBarState.ServerSession = g.activeFocused() != nil && g.activeFocused().ServerSessionID != ""
+	g.status.Bar.Zoomed = g.zoomed
+	g.status.Bar.PinMode = g.tabMgr.PinMode
+	g.status.Bar.BlocksEnabled = g.blocksEnabled
+	g.status.Bar.ServerSession = g.activeFocused() != nil && g.activeFocused().ServerSessionID != ""
 	var srvCount int
 	for _, t := range g.tabMgr.Tabs {
 		for _, leaf := range t.Layout.Leaves() {
@@ -749,55 +676,55 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			}
 		}
 	}
-	g.statusBarState.ServerSessionCount = srvCount
+	g.status.Bar.ServerSessionCount = srvCount
 	if g.activeFocused() != nil {
 		g.activeFocused().Term.Buf.RLock()
-		g.statusBarState.ScrollOffset = g.activeFocused().Term.Buf.ViewOffset
+		g.status.Bar.ScrollOffset = g.activeFocused().Term.Buf.ViewOffset
 		if g.blocksEnabled {
-			g.statusBarState.BlockCount = len(g.activeFocused().Term.Buf.Blocks)
+			g.status.Bar.BlockCount = len(g.activeFocused().Term.Buf.Blocks)
 		}
 		g.activeFocused().Term.Buf.RUnlock()
 	}
 	// Snapshot renderSeq BEFORE DrawAll so that any PTY output arriving
 	// during rendering (e.g. shell responds to resize) bumps the seq above
 	// our snapshot and triggers a redraw on the next frame.
-	g.lastPtySeq = terminal.RenderSeq()
+	g.render.LastPtySeq = terminal.RenderSeq()
 
 	g.renderer.HoveredURL = g.urlHover.HoveredURL
 	g.renderer.VaultSuggestion = g.vlt.Suggest
 	if g.tabMgr.ActiveIdx >= 0 && g.tabMgr.ActiveIdx < len(g.tabMgr.Tabs) {
-		g.statusBarState.TabNote = g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Note
+		g.status.Bar.TabNote = g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Note
 	}
 	// Hint mode: show tab number badges when Cmd is held and no modal is active.
 	hintMode := ebiten.IsKeyPressed(ebiten.KeyMeta) &&
-		!g.overlayState.Open && !g.palette.State.Open && !g.confirmState.Open &&
-		!g.mdViewerState.Open && !g.llms.URLInput.Open && !g.tabSwitcherState.Open &&
-		!g.tabSearchState.Open && !g.search.State.Open &&
-		!g.menuState.Open && !g.explorer.State.Open
+		!g.overlays.Help.Open && !g.palette.State.Open && !g.overlays.Confirm.Open &&
+		!g.overlays.MdViewer.Open && !g.llms.URLInput.Open && !g.overlays.TabSwitcher.Open &&
+		!g.overlays.TabSearch.Open && !g.search.State.Open &&
+		!g.overlays.Menu.Open && !g.explorer.State.Open
 	g.renderer.DrawAll(renderer.DrawState{
 		Screen:         screen,
 		Tabs:           g.tabMgr.Tabs,
 		ActiveTab:      g.tabMgr.ActiveIdx,
 		Focused:        g.activeFocused(),
 		Zoomed:         g.zoomed,
-		Menu:           &g.menuState,
-		Overlay:        &g.overlayState,
-		Confirm:        &g.confirmState,
+		Menu:           &g.overlays.Menu,
+		Overlay:        &g.overlays.Help,
+		Confirm:        &g.overlays.Confirm,
 		Search:         &g.search.State,
-		StatusBar:      &g.statusBarState,
-		TabSwitcher:    &g.tabSwitcherState,
+		StatusBar:      &g.status.Bar,
+		TabSwitcher:    &g.overlays.TabSwitcher,
 		Palette:        &g.palette.State,
 		PaletteEntries: g.palette.Entries,
 		FileExplorer:   &g.explorer.State,
-		TabSearch:      &g.tabSearchState,
-		Stats:          &g.statsState,
-		TabHover:       &g.tabHoverState,
-		MdViewer:       &g.mdViewerState,
+		TabSearch:      &g.overlays.TabSearch,
+		Stats:          &g.overlays.Stats,
+		TabHover:       &g.status.TabHover,
+		MdViewer:       &g.overlays.MdViewer,
 		URLInput:       &g.llms.URLInput,
 		HintMode:       hintMode,
 	})
-	g.screenDirty = false
-	g.lastClockSec = time.Now().Unix()
+	g.render.Dirty = false
+	g.render.LastClock = time.Now().Unix()
 
 	// Screenshot capture: one-shot, triggered by Cmd+Shift+S.
 	// ReadPixels must run on the main thread (GPU access); PNG encoding runs in background.

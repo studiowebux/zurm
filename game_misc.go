@@ -24,6 +24,42 @@ import (
 	"github.com/studiowebux/zurm/vault"
 )
 
+// overlayGroup groups all modal overlay state — only one surface active at a time.
+type overlayGroup struct {
+	Menu          renderer.MenuState
+	Help          renderer.OverlayState
+	Confirm       renderer.ConfirmState
+	ConfirmAction func()
+	TabSwitcher   renderer.TabSwitcherState
+	TabSearch     renderer.TabSearchState
+	MdViewer      renderer.MarkdownViewerState
+	Stats         renderer.StatsState
+	StatsLastTick time.Time
+}
+
+// statusGroup groups status bar, flash message, bell debounce, poller, and tab hover.
+type statusGroup struct {
+	Bar         renderer.StatusBarState
+	Poller      *StatusPoller
+	FlashExpiry time.Time
+	LastBell    time.Time
+	TabHover    renderer.TabHoverState
+}
+
+// windowFocusState groups window focus tracking and idle suspension.
+type windowFocusState struct {
+	PrevFocused bool
+	UnfocusedAt time.Time
+	Suspended   bool
+}
+
+// renderState groups render optimization fields — dirty flag and change detection.
+type renderState struct {
+	Dirty      bool
+	LastPtySeq uint64
+	LastClock  int64
+}
+
 // screenshotState groups screenshot capture fields.
 type screenshotState struct {
 	Pending bool        // set by Cmd+Shift+S; consumed by Draw()
@@ -423,41 +459,41 @@ func (g *Game) collectStats() {
 	var gcStats debug.GCStats
 	debug.ReadGCStats(&gcStats)
 
-	g.statsState.TPS = ebiten.ActualTPS()
-	g.statsState.FPS = ebiten.ActualFPS()
-	g.statsState.Goroutines = runtime.NumGoroutine()
-	g.statsState.HeapAlloc = samples[0].Value.Uint64()
-	g.statsState.HeapSys = samples[1].Value.Uint64()
+	g.overlays.Stats.TPS = ebiten.ActualTPS()
+	g.overlays.Stats.FPS = ebiten.ActualFPS()
+	g.overlays.Stats.Goroutines = runtime.NumGoroutine()
+	g.overlays.Stats.HeapAlloc = samples[0].Value.Uint64()
+	g.overlays.Stats.HeapSys = samples[1].Value.Uint64()
 	if gcStats.NumGC >= 0 {
-		g.statsState.NumGC = uint32(gcStats.NumGC) // #nosec G115 — NumGC is a monotonic counter, always non-negative
+		g.overlays.Stats.NumGC = uint32(gcStats.NumGC) // #nosec G115 — NumGC is a monotonic counter, always non-negative
 	}
 	if len(gcStats.Pause) > 0 && gcStats.Pause[0] >= 0 {
-		g.statsState.GCPauseNs = uint64(gcStats.Pause[0]) // #nosec G115 — pause duration is always non-negative
+		g.overlays.Stats.GCPauseNs = uint64(gcStats.Pause[0]) // #nosec G115 — pause duration is always non-negative
 	}
-	g.statsState.TabCount = len(g.tabMgr.Tabs)
+	g.overlays.Stats.TabCount = len(g.tabMgr.Tabs)
 	paneCount := 0
 	for _, t := range g.tabMgr.Tabs {
 		paneCount += len(t.Layout.Leaves())
 	}
-	g.statsState.PaneCount = paneCount
+	g.overlays.Stats.PaneCount = paneCount
 	if g.activeFocused() != nil {
 		g.activeFocused().Term.Buf.RLock()
-		g.statsState.BufRows = g.activeFocused().Term.Buf.Rows
-		g.statsState.BufCols = g.activeFocused().Term.Buf.Cols
-		g.statsState.Scrollback = g.activeFocused().Term.Buf.ScrollbackLen()
+		g.overlays.Stats.BufRows = g.activeFocused().Term.Buf.Rows
+		g.overlays.Stats.BufCols = g.activeFocused().Term.Buf.Cols
+		g.overlays.Stats.Scrollback = g.activeFocused().Term.Buf.ScrollbackLen()
 		g.activeFocused().Term.Buf.RUnlock()
 	}
-	g.statsLastTick = time.Now()
-	g.screenDirty = true
+	g.overlays.StatsLastTick = time.Now()
+	g.render.Dirty = true
 }
 
 // --- Utilities ---
 
 // flashStatus shows msg in the status bar for 3 seconds.
 func (g *Game) flashStatus(msg string) {
-	g.statusBarState.FlashMessage = msg
-	g.flashExpiry = time.Now().Add(3 * time.Second)
-	g.screenDirty = true
+	g.status.Bar.FlashMessage = msg
+	g.status.FlashExpiry = time.Now().Add(3 * time.Second)
+	g.render.Dirty = true
 }
 
 // installShellHooks appends OSC 133 shell integration hooks to ~/.zshrc or
@@ -625,7 +661,7 @@ func (g *Game) updateURLHover(mx, my, pad int) {
 	if col < 0 || row < 0 || col >= g.activeFocused().Cols || row >= g.activeFocused().Rows {
 		if g.urlHover.HoveredURL != nil {
 			g.urlHover.HoveredURL = nil
-			g.screenDirty = true
+			g.render.Dirty = true
 		}
 		return
 	}
@@ -639,7 +675,7 @@ func (g *Game) updateURLHover(mx, my, pad int) {
 	if hit != g.urlHover.HoveredURL {
 		// Pointer comparison is sufficient — URLAt returns a pointer into urlMatches.
 		g.urlHover.HoveredURL = hit
-		g.screenDirty = true
+		g.render.Dirty = true
 	}
 }
 
@@ -665,7 +701,7 @@ func (g *Game) reloadConfig() {
 	g.buildPalette()
 	g.reloadVault()
 
-	g.screenDirty = true
+	g.render.Dirty = true
 	g.flashStatus("Config reloaded")
 }
 
@@ -770,7 +806,7 @@ func (g *Game) switchTheme(name string) {
 		}
 	}
 
-	g.screenDirty = true
+	g.render.Dirty = true
 	g.flashStatus("Theme: " + name)
 }
 
@@ -818,6 +854,6 @@ func (g *Game) adjustFontSize(delta float64) {
 		g.recomputeLayoutNode(t.Layout)
 	}
 	// activeLayout() reads directly from the tab — no cache refresh needed.
-	g.screenDirty = true
+	g.render.Dirty = true
 	g.flashStatus(fmt.Sprintf("Font size: %.0fpt", newSize))
 }

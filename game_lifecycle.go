@@ -21,10 +21,10 @@ func (g *Game) handleFocus() {
 	focused := ebiten.IsFocused()
 
 	// Idle suspension: reduce TPS after 5 seconds unfocused (when auto_idle is enabled).
-	if g.cfg.Performance.AutoIdle && !focused && !g.suspended && !g.unfocusedAt.IsZero() &&
-		time.Since(g.unfocusedAt) > unfocusSuspendDelay {
+	if g.cfg.Performance.AutoIdle && !focused && !g.wfocus.Suspended && !g.wfocus.UnfocusedAt.IsZero() &&
+		time.Since(g.wfocus.UnfocusedAt) > unfocusSuspendDelay {
 		ebiten.SetTPS(5)
-		g.suspended = true
+		g.wfocus.Suspended = true
 		for _, t := range g.tabMgr.Tabs {
 			for _, leaf := range t.Layout.Leaves() {
 				leaf.Pane.Term.SetPaused(true)
@@ -32,7 +32,7 @@ func (g *Game) handleFocus() {
 		}
 	}
 
-	if focused != g.prevFocused {
+	if focused != g.wfocus.PrevFocused {
 		if focused {
 			// Unsuspend, zero unfocusedAt, and force full repaint.
 			g.unsuspendAndRedraw()
@@ -66,9 +66,9 @@ func (g *Game) handleFocus() {
 			clearDockBadge()
 		} else {
 			// Record when focus was lost.
-			g.unfocusedAt = time.Now()
+			g.wfocus.UnfocusedAt = time.Now()
 		}
-		g.prevFocused = focused
+		g.wfocus.PrevFocused = focused
 		if g.activeFocused() != nil {
 			g.activeFocused().Term.SendFocusEvent(focused)
 		}
@@ -78,7 +78,7 @@ func (g *Game) handleFocus() {
 	// after sleep/wake (e.g. work machines with screen lock or MDM policies).
 	// If still suspended but the user interacts (click or keystroke), unsuspend
 	// immediately without waiting for a focus-state transition.
-	if g.suspended && (ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) ||
+	if g.wfocus.Suspended && (ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) ||
 		ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) ||
 		len(ebiten.AppendInputChars(nil)) > 0) {
 		g.unsuspendAndRedraw()
@@ -88,17 +88,17 @@ func (g *Game) handleFocus() {
 // unsuspendAndRedraw lifts idle suspension (if active) and forces a full repaint.
 // Called from handleFocus (focus-gain, wake notification, and emergency recovery).
 func (g *Game) unsuspendAndRedraw() {
-	if g.suspended {
+	if g.wfocus.Suspended {
 		ebiten.SetTPS(g.cfg.Performance.TPS)
-		g.suspended = false
+		g.wfocus.Suspended = false
 		for _, t := range g.tabMgr.Tabs {
 			for _, leaf := range t.Layout.Leaves() {
 				leaf.Pane.Term.SetPaused(false)
 			}
 		}
 	}
-	g.unfocusedAt = time.Time{}
-	g.screenDirty = true
+	g.wfocus.UnfocusedAt = time.Time{}
+	g.render.Dirty = true
 	g.renderer.SetLayoutDirty()
 	for _, t := range g.tabMgr.Tabs {
 		for _, leaf := range t.Layout.Leaves() {
@@ -156,7 +156,7 @@ func (g *Game) handleDroppedFiles() {
 		return
 	}
 	g.activeFocused().Term.SendBytes([]byte(text))
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // shellEscape wraps a path in single quotes for safe shell insertion.

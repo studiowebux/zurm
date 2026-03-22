@@ -12,105 +12,105 @@ func (g *Game) handleInput() {
 	// Must run before any early return so release is always detected.
 	metaNow := ebiten.IsKeyPressed(ebiten.KeyMeta)
 	if metaNow != g.input.PrevKeys[ebiten.KeyMeta] {
-		g.screenDirty = true
+		g.render.Dirty = true
 		g.input.PrevKeys[ebiten.KeyMeta] = metaNow
 	}
 
 	// Pane rename mode intercepts all input (highest priority).
 	if g.renamingPane() {
-		g.screenDirty = true
+		g.render.Dirty = true
 		g.handlePaneRenameInput()
 		return
 	}
 
 	// Tab rename mode intercepts all input.
 	if g.renamingTabIdx() >= 0 {
-		g.screenDirty = true
+		g.render.Dirty = true
 		g.handleRenameInput()
 		return
 	}
 
 	// Tab note edit mode intercepts all input.
 	if g.notingTabIdx() >= 0 {
-		g.screenDirty = true
+		g.render.Dirty = true
 		g.handleNoteInput()
 		return
 	}
 
 	// File explorer has second-highest priority so ESC always reaches it cleanly.
 	if g.explorer.State.Open {
-		g.screenDirty = true
+		g.render.Dirty = true
 		g.handleFileExplorerInput()
 		return
 	}
 
 	// When the confirm dialog is open, route input to confirm handling.
-	if g.confirmState.Open {
-		g.screenDirty = true
+	if g.overlays.Confirm.Open {
+		g.render.Dirty = true
 		g.handleConfirmInput()
 		return
 	}
 
 	// When the tab switcher is open, route all keyboard input to tab switcher handling.
-	if g.tabSwitcherState.Open {
-		g.screenDirty = true
+	if g.overlays.TabSwitcher.Open {
+		g.render.Dirty = true
 		g.handleTabSwitcherInput()
 		return
 	}
 
 	// When the tab search is open, route input to tab search handling.
-	if g.tabSearchState.Open {
-		g.screenDirty = true
+	if g.overlays.TabSearch.Open {
+		g.render.Dirty = true
 		g.handleTabSearchInput()
 		return
 	}
 
 	// pin mode: waiting for a home-row slot keypress after Cmd+Space.
 	if g.tabMgr.PinMode {
-		g.screenDirty = true
+		g.render.Dirty = true
 		g.handlePinInput()
 		return
 	}
 
 	// When the markdown viewer is open, route input to markdown viewer handling.
-	if g.mdViewerState.Open {
-		g.screenDirty = true
+	if g.overlays.MdViewer.Open {
+		g.render.Dirty = true
 		g.handleMarkdownViewerInput()
 		return
 	}
 
 	// When the URL input overlay is open, route input to URL input handling.
 	if g.llms.URLInput.Open {
-		g.screenDirty = true
+		g.render.Dirty = true
 		g.handleURLInputInput()
 		return
 	}
 
 	// When the overlay is open, route all keyboard input to overlay handling.
-	if g.overlayState.Open {
-		g.screenDirty = true
+	if g.overlays.Help.Open {
+		g.render.Dirty = true
 		g.handleOverlayInput()
 		return
 	}
 
 	// When the command palette is open, route input to palette handling.
 	if g.palette.State.Open {
-		g.screenDirty = true
+		g.render.Dirty = true
 		g.handlePaletteInput()
 		return
 	}
 
 	// When search is open, route input to search handling.
 	if g.search.State.Open {
-		g.screenDirty = true
+		g.render.Dirty = true
 		g.handleSearchInput()
 		return
 	}
 
 	// When the context menu is open, consume keyboard events for menu navigation
 	// and prevent them from reaching the PTY.
-	if g.menuState.Open {
-		g.screenDirty = true
+	if g.overlays.Menu.Open {
+		g.render.Dirty = true
 		g.handleMenuKeys()
 		return
 	}
@@ -211,7 +211,7 @@ func (g *Game) handleInput() {
 		g.activeFocused().Term.Buf.ResetView() // snap back to live output on keystroke
 		g.activeFocused().Term.Buf.ClearSelection()
 		g.activeFocused().Term.Buf.Unlock()
-		g.screenDirty = true
+		g.render.Dirty = true
 	}
 
 	// Vault suggestion update — extract current line from buffer and query vault.
@@ -308,8 +308,8 @@ func (g *Game) handleAppShortcut(key ebiten.Key, ctrl, shift, meta, alt bool) bo
 		}
 
 	case meta && key == ebiten.KeyI:
-		g.statsState.Open = !g.statsState.Open
-		if g.statsState.Open {
+		g.overlays.Stats.Open = !g.overlays.Stats.Open
+		if g.overlays.Stats.Open {
 			g.collectStats()
 			g.flashStatus("Stats: on")
 		} else {
@@ -336,7 +336,7 @@ func (g *Game) handleAppShortcut(key ebiten.Key, ctrl, shift, meta, alt bool) bo
 
 	case meta && shift && key == ebiten.KeyS:
 		g.screenshot.Pending = true
-		g.screenDirty = true
+		g.render.Dirty = true
 
 	case meta && shift && key == ebiten.KeyPeriod:
 		g.toggleRecording()
@@ -352,7 +352,7 @@ func (g *Game) handleAppShortcut(key ebiten.Key, ctrl, shift, meta, alt bool) bo
 		g.openTabSwitcher()
 	case meta && key == ebiten.KeyG:
 		g.tabMgr.PinMode = true
-		g.screenDirty = true
+		g.render.Dirty = true
 	case meta && key == ebiten.KeyT:
 		g.newTab()
 	case meta && shift && key == ebiten.KeyB:

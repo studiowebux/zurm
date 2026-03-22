@@ -16,7 +16,7 @@ import (
 // --- Tab context menu ---
 
 func (g *Game) openTabContextMenu(px, py int) {
-	if g.menuState.Open {
+	if g.overlays.Menu.Open {
 		g.renderer.ClearPaneCache()
 	}
 	physW := int(float64(g.winW) * g.dpi)
@@ -47,7 +47,7 @@ func (g *Game) openTabContextMenu(px, py int) {
 		{Label: "Close Tab", Shortcut: "Cmd+W", Action: g.closeActiveTab},
 	}
 	rect := g.renderer.BuildMenuRect(items, px, py, physW, physH)
-	g.menuState = renderer.MenuState{
+	g.overlays.Menu = renderer.MenuState{
 		Open:         true,
 		Items:        items,
 		Rect:         rect,
@@ -55,7 +55,7 @@ func (g *Game) openTabContextMenu(px, py int) {
 		SubParentIdx: -1,
 		SubHoverIdx:  -1,
 	}
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // --- Context menu ---
@@ -116,7 +116,7 @@ func (g *Game) buildContextMenu() []renderer.OverlayMenuItem {
 		{Label: "Rename Tab", Action: func() { g.startRenameTab(g.tabMgr.ActiveIdx) }},
 		{Label: "Edit Tab Note", Shortcut: "Cmd+Shift+N", Action: func() { g.startNoteEdit(g.tabMgr.ActiveIdx) }},
 		{Separator: true},
-		{Label: "Pin Mode", Shortcut: "Cmd+G", Action: func() { g.tabMgr.PinMode = true; g.statusBarState.PinMode = true }},
+		{Label: "Pin Mode", Shortcut: "Cmd+G", Action: func() { g.tabMgr.PinMode = true; g.status.Bar.PinMode = true }},
 		{Label: "Show Keybindings", Shortcut: "Cmd+/", Action: g.toggleOverlay},
 		{Label: "Command Palette", Shortcut: "Cmd+P", Action: g.openPalette},
 	}
@@ -125,14 +125,14 @@ func (g *Game) buildContextMenu() []renderer.OverlayMenuItem {
 // openContextMenu opens the context menu at physical pixel position (px, py).
 func (g *Game) openContextMenu(px, py int) {
 	// If menu was already open, the old pixels on offscreen must be erased.
-	if g.menuState.Open {
+	if g.overlays.Menu.Open {
 		g.renderer.ClearPaneCache()
 	}
 	physW := int(float64(g.winW) * g.dpi)
 	physH := int(float64(g.winH) * g.dpi)
 	items := g.buildContextMenu()
 	rect := g.renderer.BuildMenuRect(items, px, py, physW, physH)
-	g.menuState = renderer.MenuState{
+	g.overlays.Menu = renderer.MenuState{
 		Open:         true,
 		Items:        items,
 		Rect:         rect,
@@ -140,44 +140,44 @@ func (g *Game) openContextMenu(px, py int) {
 		SubParentIdx: -1,
 		SubHoverIdx:  -1,
 	}
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // closeMenu resets all menu state and forces pane pixels under the menu to be redrawn.
 func (g *Game) closeMenu() {
-	g.menuState = renderer.MenuState{}
+	g.overlays.Menu = renderer.MenuState{}
 	g.renderer.ClearPaneCache()
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // updateMenuHover computes which menu item is under the cursor at (px, py)
 // and updates submenu state accordingly.
 func (g *Game) updateMenuHover(px, py int) {
-	idx := g.renderer.MenuItemAt(&g.menuState, px, py)
-	g.menuState.HoverIdx = idx
+	idx := g.renderer.MenuItemAt(&g.overlays.Menu, px, py)
+	g.overlays.Menu.HoverIdx = idx
 
-	if idx >= 0 && len(g.menuState.Items[idx].Children) > 0 {
+	if idx >= 0 && len(g.overlays.Menu.Items[idx].Children) > 0 {
 		// Cursor on a parent item: open or refresh the submenu.
-		if !g.menuState.SubOpen || g.menuState.SubParentIdx != idx {
+		if !g.overlays.Menu.SubOpen || g.overlays.Menu.SubParentIdx != idx {
 			physW := int(float64(g.winW) * g.dpi)
 			physH := int(float64(g.winH) * g.dpi)
-			subRect := g.renderer.BuildSubRect(&g.menuState, idx, physW, physH)
-			g.menuState.SubOpen = true
-			g.menuState.SubItems = g.menuState.Items[idx].Children
-			g.menuState.SubRect = subRect
-			g.menuState.SubParentIdx = idx
-			g.menuState.SubHoverIdx = -1
+			subRect := g.renderer.BuildSubRect(&g.overlays.Menu, idx, physW, physH)
+			g.overlays.Menu.SubOpen = true
+			g.overlays.Menu.SubItems = g.overlays.Menu.Items[idx].Children
+			g.overlays.Menu.SubRect = subRect
+			g.overlays.Menu.SubParentIdx = idx
+			g.overlays.Menu.SubHoverIdx = -1
 		}
 		return
 	}
 
-	if g.menuState.SubOpen {
-		if image.Pt(px, py).In(g.menuState.SubRect) {
+	if g.overlays.Menu.SubOpen {
+		if image.Pt(px, py).In(g.overlays.Menu.SubRect) {
 			// Cursor moved into the submenu panel: update sub-hover.
-			g.menuState.SubHoverIdx = g.renderer.SubItemAt(&g.menuState, px, py)
+			g.overlays.Menu.SubHoverIdx = g.renderer.SubItemAt(&g.overlays.Menu, px, py)
 		} else if idx >= 0 {
 			// Cursor moved to a non-parent top-level item: close submenu.
-			g.menuState.SubOpen = false
+			g.overlays.Menu.SubOpen = false
 		}
 		// If idx == -1 (gap/padding), keep submenu visible.
 	}
@@ -203,33 +203,33 @@ func (g *Game) handleMenuKeys() {
 		if pressed && !wasPressed {
 			switch key {
 			case ebiten.KeyArrowUp:
-				if g.menuState.SubOpen {
-					g.menuState.SubHoverIdx = g.nextNonSep(g.menuState.SubItems, g.menuState.SubHoverIdx, -1)
+				if g.overlays.Menu.SubOpen {
+					g.overlays.Menu.SubHoverIdx = g.nextNonSep(g.overlays.Menu.SubItems, g.overlays.Menu.SubHoverIdx, -1)
 				} else {
-					g.menuState.HoverIdx = g.nextNonSep(g.menuState.Items, g.menuState.HoverIdx, -1)
+					g.overlays.Menu.HoverIdx = g.nextNonSep(g.overlays.Menu.Items, g.overlays.Menu.HoverIdx, -1)
 				}
 			case ebiten.KeyArrowDown:
-				if g.menuState.SubOpen {
-					g.menuState.SubHoverIdx = g.nextNonSep(g.menuState.SubItems, g.menuState.SubHoverIdx, +1)
+				if g.overlays.Menu.SubOpen {
+					g.overlays.Menu.SubHoverIdx = g.nextNonSep(g.overlays.Menu.SubItems, g.overlays.Menu.SubHoverIdx, +1)
 				} else {
-					g.menuState.HoverIdx = g.nextNonSep(g.menuState.Items, g.menuState.HoverIdx, +1)
+					g.overlays.Menu.HoverIdx = g.nextNonSep(g.overlays.Menu.Items, g.overlays.Menu.HoverIdx, +1)
 				}
 			case ebiten.KeyArrowRight:
-				if !g.menuState.SubOpen && g.menuState.HoverIdx >= 0 &&
-					len(g.menuState.Items[g.menuState.HoverIdx].Children) > 0 {
+				if !g.overlays.Menu.SubOpen && g.overlays.Menu.HoverIdx >= 0 &&
+					len(g.overlays.Menu.Items[g.overlays.Menu.HoverIdx].Children) > 0 {
 					physW := int(float64(g.winW) * g.dpi)
 					physH := int(float64(g.winH) * g.dpi)
-					idx := g.menuState.HoverIdx
-					subRect := g.renderer.BuildSubRect(&g.menuState, idx, physW, physH)
-					g.menuState.SubOpen = true
-					g.menuState.SubItems = g.menuState.Items[idx].Children
-					g.menuState.SubRect = subRect
-					g.menuState.SubParentIdx = idx
-					g.menuState.SubHoverIdx = g.nextNonSep(g.menuState.SubItems, -1, +1)
+					idx := g.overlays.Menu.HoverIdx
+					subRect := g.renderer.BuildSubRect(&g.overlays.Menu, idx, physW, physH)
+					g.overlays.Menu.SubOpen = true
+					g.overlays.Menu.SubItems = g.overlays.Menu.Items[idx].Children
+					g.overlays.Menu.SubRect = subRect
+					g.overlays.Menu.SubParentIdx = idx
+					g.overlays.Menu.SubHoverIdx = g.nextNonSep(g.overlays.Menu.SubItems, -1, +1)
 				}
 			case ebiten.KeyArrowLeft:
-				if g.menuState.SubOpen {
-					g.menuState.SubOpen = false
+				if g.overlays.Menu.SubOpen {
+					g.overlays.Menu.SubOpen = false
 				}
 			case ebiten.KeyEnter, ebiten.KeyNumpadEnter:
 				g.menuExecute()
@@ -241,16 +241,16 @@ func (g *Game) handleMenuKeys() {
 
 // menuExecute runs the action for the currently highlighted menu item.
 func (g *Game) menuExecute() {
-	if g.menuState.SubOpen && g.menuState.SubHoverIdx >= 0 {
-		item := g.menuState.SubItems[g.menuState.SubHoverIdx]
+	if g.overlays.Menu.SubOpen && g.overlays.Menu.SubHoverIdx >= 0 {
+		item := g.overlays.Menu.SubItems[g.overlays.Menu.SubHoverIdx]
 		if item.Action != nil {
 			g.closeMenu()
 			item.Action()
 		}
 		return
 	}
-	if g.menuState.HoverIdx >= 0 {
-		item := g.menuState.Items[g.menuState.HoverIdx]
+	if g.overlays.Menu.HoverIdx >= 0 {
+		item := g.overlays.Menu.Items[g.overlays.Menu.HoverIdx]
 		if item.Action != nil {
 			g.closeMenu()
 			item.Action()
@@ -295,15 +295,15 @@ func convertBindings(src []help.KeyBinding) []renderer.OverlayKeyBinding {
 
 // toggleOverlay opens the overlay if closed, closes it if open.
 func (g *Game) toggleOverlay() {
-	if g.overlayState.Open {
-		g.overlayState = renderer.OverlayState{}
+	if g.overlays.Help.Open {
+		g.overlays.Help = renderer.OverlayState{}
 	} else {
 		all := convertBindings(help.AllBindings())
-		g.overlayState = renderer.OverlayState{Open: true, AllBindings: all, FilteredBindings: all}
+		g.overlays.Help = renderer.OverlayState{Open: true, AllBindings: all, FilteredBindings: all}
 		g.closeMenu()
 		g.closePalette()
 	}
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // handleOverlayInput processes keyboard input while the overlay is open.
@@ -316,13 +316,13 @@ func (g *Game) handleOverlayInput() {
 	// ESC: clear search query if non-empty, otherwise close. Uses inpututil to
 	// catch sub-frame taps that polling misses.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		if g.overlayState.SearchQuery != "" {
-			g.overlayState.SearchQuery = ""
-			g.overlayState.ScrollOffset = 0
+		if g.overlays.Help.SearchQuery != "" {
+			g.overlays.Help.SearchQuery = ""
+			g.overlays.Help.ScrollOffset = 0
 		} else {
-			g.overlayState = renderer.OverlayState{}
+			g.overlays.Help = renderer.OverlayState{}
 		}
-		g.screenDirty = true
+		g.render.Dirty = true
 		g.input.PrevKeys[ebiten.KeyEscape] = true
 		return
 	}
@@ -335,49 +335,49 @@ func (g *Game) handleOverlayInput() {
 		ebiten.KeyPageUp,
 		ebiten.KeyPageDown,
 	}
-	prevQuery := g.overlayState.SearchQuery
+	prevQuery := g.overlays.Help.SearchQuery
 	for _, key := range scrollKeys {
 		pressed := ebiten.IsKeyPressed(key)
 		wasPressed := g.input.PrevKeys[key]
 		if pressed && !wasPressed {
 			switch {
 			case key == ebiten.KeySlash && meta:
-				g.overlayState = renderer.OverlayState{}
+				g.overlays.Help = renderer.OverlayState{}
 			case key == ebiten.KeyArrowUp:
-				g.overlayState.ScrollOffset -= g.overlayState.RowH
+				g.overlays.Help.ScrollOffset -= g.overlays.Help.RowH
 			case key == ebiten.KeyArrowDown:
-				g.overlayState.ScrollOffset += g.overlayState.RowH
+				g.overlays.Help.ScrollOffset += g.overlays.Help.RowH
 			case key == ebiten.KeyPageUp:
-				g.overlayState.ScrollOffset -= 10 * g.overlayState.RowH
+				g.overlays.Help.ScrollOffset -= 10 * g.overlays.Help.RowH
 			case key == ebiten.KeyPageDown:
-				g.overlayState.ScrollOffset += 10 * g.overlayState.RowH
+				g.overlays.Help.ScrollOffset += 10 * g.overlays.Help.RowH
 			}
 		}
 		g.input.PrevKeys[key] = pressed
 	}
 	g.input.PrevKeys[ebiten.KeyMeta] = meta
 
-	ti := &TextInput{Text: g.overlayState.SearchQuery, CursorPos: g.overlayState.SearchCursorPos}
+	ti := &TextInput{Text: g.overlays.Help.SearchQuery, CursorPos: g.overlays.Help.SearchCursorPos}
 	ti.Update(&g.repeats.Overlay, meta, alt)
-	g.overlayState.SearchQuery = ti.Text
-	g.overlayState.SearchCursorPos = ti.CursorPos
+	g.overlays.Help.SearchQuery = ti.Text
+	g.overlays.Help.SearchCursorPos = ti.CursorPos
 
 	// Reset scroll and re-filter when search query changes.
-	if g.overlayState.SearchQuery != prevQuery {
-		g.overlayState.ScrollOffset = 0
-		if g.overlayState.SearchQuery == "" {
-			g.overlayState.FilteredBindings = g.overlayState.AllBindings
+	if g.overlays.Help.SearchQuery != prevQuery {
+		g.overlays.Help.ScrollOffset = 0
+		if g.overlays.Help.SearchQuery == "" {
+			g.overlays.Help.FilteredBindings = g.overlays.Help.AllBindings
 		} else {
-			g.overlayState.FilteredBindings = convertBindings(help.FilterBindings(g.overlayState.SearchQuery))
+			g.overlays.Help.FilteredBindings = convertBindings(help.FilterBindings(g.overlays.Help.SearchQuery))
 		}
 	}
 
 	// Clamp scroll offset.
-	if g.overlayState.ScrollOffset < 0 {
-		g.overlayState.ScrollOffset = 0
+	if g.overlays.Help.ScrollOffset < 0 {
+		g.overlays.Help.ScrollOffset = 0
 	}
-	if g.overlayState.ScrollOffset > g.overlayState.MaxScroll {
-		g.overlayState.ScrollOffset = g.overlayState.MaxScroll
+	if g.overlays.Help.ScrollOffset > g.overlays.Help.MaxScroll {
+		g.overlays.Help.ScrollOffset = g.overlays.Help.MaxScroll
 	}
 }
 
@@ -386,17 +386,17 @@ func (g *Game) handleOverlayInput() {
 // openPalette opens the command palette, closing any conflicting surfaces.
 func (g *Game) openPalette() {
 	g.palette.Open()
-	g.overlayState = renderer.OverlayState{}
+	g.overlays.Help = renderer.OverlayState{}
 	g.closeMenu()
 	g.input.PrevKeys[ebiten.KeyArrowUp] = ebiten.IsKeyPressed(ebiten.KeyArrowUp)
 	g.input.PrevKeys[ebiten.KeyArrowDown] = ebiten.IsKeyPressed(ebiten.KeyArrowDown)
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // closePalette closes the command palette.
 func (g *Game) closePalette() {
 	g.palette.Close()
-	g.screenDirty = true
+	g.render.Dirty = true
 }
 
 // buildPalette constructs the parallel entries and actions slices for the command palette.
@@ -471,7 +471,7 @@ func (g *Game) buildPalette() {
 		// File Explorer
 		g.openFileExplorer,
 		// Pins
-		func() { g.tabMgr.PinMode = true; g.statusBarState.PinMode = true },
+		func() { g.tabMgr.PinMode = true; g.status.Bar.PinMode = true },
 		// Tab Switcher
 		g.openTabSwitcher,
 		// Tab Search
@@ -489,8 +489,8 @@ func (g *Game) buildPalette() {
 		g.installShellHooks,
 		// Stats
 		func() {
-			g.statsState.Open = !g.statsState.Open
-			if g.statsState.Open {
+			g.overlays.Stats.Open = !g.overlays.Stats.Open
+			if g.overlays.Stats.Open {
 				g.collectStats()
 				g.flashStatus("Stats: on")
 			} else {
@@ -507,7 +507,7 @@ func (g *Game) buildPalette() {
 		g.splitVServer,
 		g.attachServerSession,
 		// Recording
-		func() { g.screenshot.Pending = true; g.screenDirty = true },
+		func() { g.screenshot.Pending = true; g.render.Dirty = true },
 		g.toggleRecording,
 		// Help
 		g.toggleOverlay,
@@ -609,9 +609,9 @@ func (g *Game) handlePaletteInput() {
 // showConfirm opens the close-confirmation dialog with the given message and
 // registers the action to execute if the user confirms.
 func (g *Game) showConfirm(msg string, action func()) {
-	g.confirmState = renderer.ConfirmState{Open: true, Message: msg}
-	g.confirmPendingAction = action
-	g.screenDirty = true
+	g.overlays.Confirm = renderer.ConfirmState{Open: true, Message: msg}
+	g.overlays.ConfirmAction = action
+	g.render.Dirty = true
 }
 
 // handleConfirmInput processes keyboard input while the confirm dialog is open.
@@ -619,10 +619,10 @@ func (g *Game) showConfirm(msg string, action func()) {
 func (g *Game) handleConfirmInput() {
 	// inpututil.IsKeyJustPressed catches sub-frame taps that polling misses.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) || inpututil.IsKeyJustPressed(ebiten.KeyN) {
-		g.confirmState = renderer.ConfirmState{}
-		g.confirmPendingAction = nil
+		g.overlays.Confirm = renderer.ConfirmState{}
+		g.overlays.ConfirmAction = nil
 		g.input.PrevKeys[ebiten.KeyEscape] = true
-		g.screenDirty = true
+		g.render.Dirty = true
 		return
 	}
 
@@ -633,12 +633,12 @@ func (g *Game) handleConfirmInput() {
 		was := g.input.PrevKeys[key]
 		g.input.PrevKeys[key] = pressed
 		if pressed && !was {
-			if g.confirmPendingAction != nil {
-				g.confirmPendingAction()
+			if g.overlays.ConfirmAction != nil {
+				g.overlays.ConfirmAction()
 			}
-			g.confirmState = renderer.ConfirmState{}
-			g.confirmPendingAction = nil
-			g.screenDirty = true
+			g.overlays.Confirm = renderer.ConfirmState{}
+			g.overlays.ConfirmAction = nil
+			g.render.Dirty = true
 			return
 		}
 	}

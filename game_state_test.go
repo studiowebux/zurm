@@ -21,14 +21,14 @@ func makeOverlayTestGame() *Game {
 
 func TestOverlay_PaletteClosesMenu(t *testing.T) {
 	g := makeOverlayTestGame()
-	g.menuState = renderer.MenuState{Open: true}
+	g.overlays.Menu = renderer.MenuState{Open: true}
 
 	// Simulate what openPalette does to overlay state (without calling renderer)
 	g.palette.Open()
-	g.overlayState = renderer.OverlayState{}
-	g.menuState = renderer.MenuState{} // closeMenu sets this
+	g.overlays.Help = renderer.OverlayState{}
+	g.overlays.Menu = renderer.MenuState{} // closeMenu sets this
 
-	if g.menuState.Open {
+	if g.overlays.Menu.Open {
 		t.Error("opening palette should close menu")
 	}
 	if !g.palette.State.Open {
@@ -38,12 +38,12 @@ func TestOverlay_PaletteClosesMenu(t *testing.T) {
 
 func TestOverlay_PaletteClosesOverlay(t *testing.T) {
 	g := makeOverlayTestGame()
-	g.overlayState = renderer.OverlayState{Open: true}
+	g.overlays.Help = renderer.OverlayState{Open: true}
 
 	g.palette.Open()
-	g.overlayState = renderer.OverlayState{}
+	g.overlays.Help = renderer.OverlayState{}
 
-	if g.overlayState.Open {
+	if g.overlays.Help.Open {
 		t.Error("opening palette should close help overlay")
 	}
 }
@@ -53,12 +53,12 @@ func TestOverlay_OverlayClosesPalette(t *testing.T) {
 	g.palette.State.Open = true
 
 	g.palette.Close()
-	g.overlayState = renderer.OverlayState{Open: true}
+	g.overlays.Help = renderer.OverlayState{Open: true}
 
 	if g.palette.State.Open {
 		t.Error("opening overlay should close palette")
 	}
-	if !g.overlayState.Open {
+	if !g.overlays.Help.Open {
 		t.Error("overlay should be open")
 	}
 }
@@ -66,15 +66,15 @@ func TestOverlay_OverlayClosesPalette(t *testing.T) {
 func TestOverlay_ShowConfirmTakesPriority(t *testing.T) {
 	g := makeOverlayTestGame()
 	g.palette.State.Open = true
-	g.overlayState = renderer.OverlayState{Open: true}
+	g.overlays.Help = renderer.OverlayState{Open: true}
 
 	g.showConfirm("test?", func() {})
 
-	if !g.confirmState.Open {
+	if !g.overlays.Confirm.Open {
 		t.Error("confirm dialog should be open")
 	}
-	if g.confirmState.Message != "test?" {
-		t.Errorf("confirm message = %q, want %q", g.confirmState.Message, "test?")
+	if g.overlays.Confirm.Message != "test?" {
+		t.Errorf("confirm message = %q, want %q", g.overlays.Confirm.Message, "test?")
 	}
 }
 
@@ -84,14 +84,14 @@ func TestOverlay_ConfirmDismissClears(t *testing.T) {
 	g.showConfirm("test?", func() { called = true })
 
 	// Simulate confirm
-	g.confirmPendingAction()
-	g.confirmState = renderer.ConfirmState{}
-	g.confirmPendingAction = nil
+	g.overlays.ConfirmAction()
+	g.overlays.Confirm = renderer.ConfirmState{}
+	g.overlays.ConfirmAction = nil
 
 	if !called {
 		t.Error("confirm action should have been called")
 	}
-	if g.confirmState.Open {
+	if g.overlays.Confirm.Open {
 		t.Error("confirm should be closed after action")
 	}
 }
@@ -101,41 +101,41 @@ func TestOverlay_ConfirmCancelClears(t *testing.T) {
 	g.showConfirm("test?", func() { t.Error("should not be called on cancel") })
 
 	// Simulate cancel
-	g.confirmState = renderer.ConfirmState{}
-	g.confirmPendingAction = nil
+	g.overlays.Confirm = renderer.ConfirmState{}
+	g.overlays.ConfirmAction = nil
 
-	if g.confirmState.Open {
+	if g.overlays.Confirm.Open {
 		t.Error("confirm should be closed after cancel")
 	}
 }
 
 func TestOverlay_TabSwitcherAndSearchMutualExclusion(t *testing.T) {
 	g := makeOverlayTestGame()
-	g.tabSwitcherState = renderer.TabSwitcherState{Open: true}
+	g.overlays.TabSwitcher = renderer.TabSwitcherState{Open: true}
 
 	// Opening tab search should be independent (both can't be open in practice,
 	// but the state structs are independent — input routing handles priority)
-	g.tabSearchState = renderer.TabSearchState{Open: true}
-	g.tabSwitcherState = renderer.TabSwitcherState{} // simulates what openTabSearch does
+	g.overlays.TabSearch = renderer.TabSearchState{Open: true}
+	g.overlays.TabSwitcher = renderer.TabSwitcherState{} // simulates what openTabSearch does
 
-	if g.tabSwitcherState.Open {
+	if g.overlays.TabSwitcher.Open {
 		t.Error("tab switcher should be closed when tab search opens")
 	}
-	if !g.tabSearchState.Open {
+	if !g.overlays.TabSearch.Open {
 		t.Error("tab search should be open")
 	}
 }
 
 func TestOverlay_StatsCoexistsWithOthers(t *testing.T) {
 	g := makeOverlayTestGame()
-	g.statsState = renderer.StatsState{Open: true}
-	g.overlayState = renderer.OverlayState{Open: true}
+	g.overlays.Stats = renderer.StatsState{Open: true}
+	g.overlays.Help = renderer.OverlayState{Open: true}
 
 	// Stats is non-modal — both can be open
-	if !g.statsState.Open {
+	if !g.overlays.Stats.Open {
 		t.Error("stats should remain open")
 	}
-	if !g.overlayState.Open {
+	if !g.overlays.Help.Open {
 		t.Error("overlay should remain open alongside stats")
 	}
 }
@@ -147,13 +147,13 @@ func TestFlashStatus_SetsMessageAndExpiry(t *testing.T) {
 	before := time.Now()
 	g.flashStatus("hello")
 
-	if g.statusBarState.FlashMessage != "hello" {
-		t.Errorf("FlashMessage = %q, want %q", g.statusBarState.FlashMessage, "hello")
+	if g.status.Bar.FlashMessage != "hello" {
+		t.Errorf("FlashMessage = %q, want %q", g.status.Bar.FlashMessage, "hello")
 	}
-	if g.flashExpiry.Before(before) {
+	if g.status.FlashExpiry.Before(before) {
 		t.Error("flashExpiry should be in the future")
 	}
-	if g.flashExpiry.Sub(before) < 2*time.Second {
+	if g.status.FlashExpiry.Sub(before) < 2*time.Second {
 		t.Error("flashExpiry should be ~3 seconds from now")
 	}
 }
@@ -163,12 +163,12 @@ func TestFlashStatus_ClearedAfterExpiry(t *testing.T) {
 	g.flashStatus("temp")
 
 	// Simulate expiry
-	g.flashExpiry = time.Now().Add(-1 * time.Second)
+	g.status.FlashExpiry = time.Now().Add(-1 * time.Second)
 
-	if !time.Now().After(g.flashExpiry) {
+	if !time.Now().After(g.status.FlashExpiry) {
 		t.Error("should be past expiry")
 	}
-	// The game loop checks: if time.Now().After(g.flashExpiry) { clear }
+	// The game loop checks: if time.Now().After(g.status.FlashExpiry) { clear }
 	// We verify the condition is met
 }
 
@@ -177,20 +177,20 @@ func TestBellDebounce(t *testing.T) {
 
 	// First bell — should fire (lastBellSound is zero)
 	now := time.Now()
-	if now.Sub(g.lastBellSound) < bellDebounce {
+	if now.Sub(g.status.LastBell) < bellDebounce {
 		t.Error("first bell should not be debounced")
 	}
-	g.lastBellSound = now
+	g.status.LastBell = now
 
 	// Second bell within debounce — should be suppressed
 	soon := now.Add(100 * time.Millisecond)
-	if soon.Sub(g.lastBellSound) >= bellDebounce {
+	if soon.Sub(g.status.LastBell) >= bellDebounce {
 		t.Error("rapid bell should be debounced")
 	}
 
 	// Third bell after debounce — should fire
 	later := now.Add(bellDebounce + time.Millisecond)
-	if later.Sub(g.lastBellSound) < bellDebounce {
+	if later.Sub(g.status.LastBell) < bellDebounce {
 		t.Error("bell after debounce period should fire")
 	}
 }
@@ -235,41 +235,41 @@ func TestWindowFocus_UnfocusedSetsTimestamp(t *testing.T) {
 
 	// Simulate losing focus
 	now := time.Now()
-	g.unfocusedAt = now
+	g.wfocus.UnfocusedAt = now
 
-	if g.unfocusedAt.IsZero() {
+	if g.wfocus.UnfocusedAt.IsZero() {
 		t.Error("unfocusedAt should be set")
 	}
 }
 
 func TestWindowFocus_SuspendAfterDelay(t *testing.T) {
 	g := makeOverlayTestGame()
-	g.unfocusedAt = time.Now().Add(-unfocusSuspendDelay - time.Second)
+	g.wfocus.UnfocusedAt = time.Now().Add(-unfocusSuspendDelay - time.Second)
 
 	// Check condition: enough time has passed
-	if time.Since(g.unfocusedAt) < unfocusSuspendDelay {
+	if time.Since(g.wfocus.UnfocusedAt) < unfocusSuspendDelay {
 		t.Error("should have exceeded suspend delay")
 	}
 
-	g.suspended = true
-	if !g.suspended {
+	g.wfocus.Suspended = true
+	if !g.wfocus.Suspended {
 		t.Error("should be suspended")
 	}
 }
 
 func TestWindowFocus_ResumeOnFocus(t *testing.T) {
 	g := makeOverlayTestGame()
-	g.suspended = true
-	g.unfocusedAt = time.Now().Add(-10 * time.Second)
+	g.wfocus.Suspended = true
+	g.wfocus.UnfocusedAt = time.Now().Add(-10 * time.Second)
 
 	// Simulate focus regain
-	g.suspended = false
-	g.unfocusedAt = time.Time{}
+	g.wfocus.Suspended = false
+	g.wfocus.UnfocusedAt = time.Time{}
 
-	if g.suspended {
+	if g.wfocus.Suspended {
 		t.Error("should not be suspended after focus regain")
 	}
-	if !g.unfocusedAt.IsZero() {
+	if !g.wfocus.UnfocusedAt.IsZero() {
 		t.Error("unfocusedAt should be zero after focus regain")
 	}
 }
@@ -293,17 +293,17 @@ func TestWindowFocus_FocusRegainClearsInputState(t *testing.T) {
 func TestRenderState_DirtyFlag(t *testing.T) {
 	g := makeOverlayTestGame()
 
-	if g.screenDirty {
+	if g.render.Dirty {
 		t.Error("should start clean")
 	}
 
-	g.screenDirty = true
-	if !g.screenDirty {
+	g.render.Dirty = true
+	if !g.render.Dirty {
 		t.Error("should be dirty after set")
 	}
 
-	g.screenDirty = false
-	if g.screenDirty {
+	g.render.Dirty = false
+	if g.render.Dirty {
 		t.Error("should be clean after clear")
 	}
 }
@@ -312,12 +312,12 @@ func TestRenderState_NeedsRenderOnDirty(t *testing.T) {
 	g := makeOverlayTestGame()
 	g.cfg = &config.Config{}
 
-	g.screenDirty = true
+	g.render.Dirty = true
 	if !g.needsRender() {
 		t.Error("needsRender should return true when dirty")
 	}
 
-	g.screenDirty = false
+	g.render.Dirty = false
 	if g.needsRender() {
 		t.Error("needsRender should return false when clean (no PTY change)")
 	}
@@ -327,7 +327,7 @@ func TestRenderState_NeedsRenderOnClockTick(t *testing.T) {
 	g := makeOverlayTestGame()
 	g.cfg = &config.Config{}
 	g.cfg.StatusBar.ShowClock = true
-	g.lastClockSec = time.Now().Unix() - 2 // 2 seconds ago
+	g.render.LastClock = time.Now().Unix() - 2 // 2 seconds ago
 
 	if !g.needsRender() {
 		t.Error("needsRender should return true when clock second changed")
@@ -336,13 +336,13 @@ func TestRenderState_NeedsRenderOnClockTick(t *testing.T) {
 
 func TestRenderState_DrawClearsDirty(t *testing.T) {
 	g := makeOverlayTestGame()
-	g.screenDirty = true
+	g.render.Dirty = true
 
 	// Simulate what Draw does after rendering
-	g.screenDirty = false
-	g.lastClockSec = time.Now().Unix()
+	g.render.Dirty = false
+	g.render.LastClock = time.Now().Unix()
 
-	if g.screenDirty {
+	if g.render.Dirty {
 		t.Error("dirty should be cleared after Draw")
 	}
 }
