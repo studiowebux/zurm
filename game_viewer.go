@@ -171,7 +171,7 @@ func (g *Game) startLLMSFetch(domain string) {
 	if g.llms.FetchCancel != nil {
 		g.llms.FetchCancel()
 	}
-	ctx, cancel := context.WithTimeout(g.ctx, llmsFetchTimeout)
+	ctx, cancel := context.WithTimeout(g.ctx, llmsFetchTimeout) // #nosec G118 — cancel stored in g.llms.FetchCancel, called on ESC or new fetch
 	g.llms.FetchCancel = cancel
 
 	g.llms.URLInput.Loading = true
