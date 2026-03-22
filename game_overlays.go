@@ -457,13 +457,7 @@ func (g *Game) buildPalette() {
 		g.copySelection,
 		g.handlePaste,
 		// Search
-		func() {
-			g.search.Open()
-			g.screenDirty = true
-			if g.focused != nil {
-				g.focused.Term.Buf.BumpRenderGen()
-			}
-		},
+		g.openSearchOverlay,
 		// File Explorer
 		g.openFileExplorer,
 		// Pins
@@ -540,10 +534,10 @@ func (g *Game) handlePaletteInput() {
 	// Arrow keys with OS-style repeat (delay then interval).
 	upPressed := ebiten.IsKeyPressed(ebiten.KeyArrowUp)
 	downPressed := ebiten.IsKeyPressed(ebiten.KeyArrowDown)
-	if g.palette.UpdateRepeat(ebiten.KeyArrowUp, upPressed, g.prevKeys[ebiten.KeyArrowUp], now) && g.palette.State.Cursor > 0 {
+	if g.palette.repeat.Update(ebiten.KeyArrowUp, upPressed, g.prevKeys[ebiten.KeyArrowUp], now) && g.palette.State.Cursor > 0 {
 		g.palette.State.Cursor--
 	}
-	if g.palette.UpdateRepeat(ebiten.KeyArrowDown, downPressed, g.prevKeys[ebiten.KeyArrowDown], now) && g.palette.State.Cursor < len(filtered)-1 {
+	if g.palette.repeat.Update(ebiten.KeyArrowDown, downPressed, g.prevKeys[ebiten.KeyArrowDown], now) && g.palette.State.Cursor < len(filtered)-1 {
 		g.palette.State.Cursor++
 	}
 	g.prevKeys[ebiten.KeyArrowUp] = upPressed

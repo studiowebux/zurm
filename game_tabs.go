@@ -268,10 +268,7 @@ func (g *Game) switchTabNoHistory(i int) {
 	g.statusBarState.ForegroundProc = ""
 	g.focused.Term.RefreshForeground()
 	if g.search.State.Open {
-		g.search.Close()
-		if g.focused != nil {
-			g.focused.Term.Buf.BumpRenderGen()
-		}
+		g.closeSearchOverlay()
 	}
 	g.screenDirty = true
 }

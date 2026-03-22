@@ -246,11 +246,7 @@ func (g *Game) handleInput() {
 
 			case meta && key == ebiten.KeyF:
 				// Cmd+F — open in-buffer search.
-				g.search.Open()
-				g.screenDirty = true
-				if g.focused != nil {
-					g.focused.Term.Buf.BumpRenderGen()
-				}
+				g.openSearchOverlay()
 
 			case meta && !shift && key == ebiten.KeyB:
 				// Cmd+B — toggle command blocks.

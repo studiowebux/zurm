@@ -143,6 +143,24 @@ func (sc *SearchController) Prev(buf *terminal.ScreenBuffer) bool {
 	return true
 }
 
+// openSearchOverlay opens the search bar and marks the screen dirty.
+func (g *Game) openSearchOverlay() {
+	g.search.Open()
+	g.screenDirty = true
+	if g.focused != nil {
+		g.focused.Term.Buf.BumpRenderGen()
+	}
+}
+
+// closeSearchOverlay closes the search bar, clears state, and marks the screen dirty.
+func (g *Game) closeSearchOverlay() {
+	g.search.Close()
+	g.screenDirty = true
+	if g.focused != nil {
+		g.focused.Term.Buf.BumpRenderGen()
+	}
+}
+
 // handleSearchInput routes keyboard events while the search bar is open.
 // This stays on Game because it accesses prevKeys, clipboard, and TextInput.
 func (g *Game) handleSearchInput() {
@@ -151,11 +169,7 @@ func (g *Game) handleSearchInput() {
 
 	// inpututil.IsKeyJustPressed catches sub-frame taps that polling misses.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		g.search.Close()
-		g.screenDirty = true
-		if g.focused != nil {
-			g.focused.Term.Buf.BumpRenderGen()
-		}
+		g.closeSearchOverlay()
 		g.prevKeys[ebiten.KeyEscape] = true
 		return
 	}

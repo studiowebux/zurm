@@ -1,9 +1,6 @@
 package main
 
 import (
-	"time"
-
-	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/studiowebux/zurm/fileexplorer"
 	"github.com/studiowebux/zurm/renderer"
 )
@@ -14,10 +11,7 @@ type ExplorerController struct {
 	State renderer.FileExplorerState
 
 	// Key repeat for arrow navigation.
-	repeatKey    ebiten.Key
-	repeatActive bool
-	repeatStart  time.Time
-	repeatLast   time.Time
+	repeat KeyRepeatHandler
 
 	// Text input repeat for rename/search/new fields.
 	inputRepeat TextInputRepeat
@@ -31,31 +25,6 @@ func NewExplorerController() *ExplorerController {
 // Close deactivates the explorer and clears state.
 func (ec *ExplorerController) Close() {
 	ec.State = renderer.FileExplorerState{}
-}
-
-// UpdateRepeat implements OS-style key repeat for explorer arrow keys.
-// Returns true when the key should fire (initial press or repeat tick).
-func (ec *ExplorerController) UpdateRepeat(key ebiten.Key, pressed, wasPressed bool, now time.Time) bool {
-	if !pressed {
-		if ec.repeatActive && ec.repeatKey == key {
-			ec.repeatActive = false
-		}
-		return false
-	}
-	if !wasPressed {
-		ec.repeatKey = key
-		ec.repeatActive = true
-		ec.repeatStart = now
-		ec.repeatLast = now
-		return true
-	}
-	if ec.repeatActive && ec.repeatKey == key &&
-		now.Sub(ec.repeatStart) >= keyRepeatDelay &&
-		now.Sub(ec.repeatLast) >= keyRepeatInterval {
-		ec.repeatLast = now
-		return true
-	}
-	return false
 }
 
 // Move moves the file explorer cursor by delta (-1 = up, +1 = down).
@@ -79,7 +48,6 @@ func (ec *ExplorerController) Move(delta int) {
 		if currentFilterIdx >= 0 && next >= 0 && next < len(st.FilteredIndices) {
 			st.Cursor = st.FilteredIndices[next]
 		} else if currentFilterIdx == -1 {
-			// Not on a filtered item — jump to first (down) or last (up).
 			if delta > 0 {
 				st.Cursor = st.FilteredIndices[0]
 			} else {
@@ -102,7 +70,6 @@ func (ec *ExplorerController) EnsureVisible() {
 		return
 	}
 
-	// Calculate the visual row index based on filtering.
 	visualIdx := st.Cursor
 	if len(st.SearchResults) > 0 {
 		// cursor is already the visual index for search results
@@ -129,12 +96,10 @@ func (ec *ExplorerController) EnsureVisible() {
 }
 
 // ReloadTree rebuilds the entry list from the current root.
-// It preserves: scroll position, cursor (by path), and the expanded state of
-// every directory that was open before the reload.
+// Preserves scroll position, cursor (by path), and expanded directory state.
 func (ec *ExplorerController) ReloadTree() {
 	st := &ec.State
 
-	// Snapshot state before rebuild.
 	var cursorPath string
 	if st.Cursor >= 0 && st.Cursor < len(st.Entries) {
 		cursorPath = st.Entries[st.Cursor].Path
@@ -151,7 +116,6 @@ func (ec *ExplorerController) ReloadTree() {
 		return
 	}
 
-	// Replay expansions.
 	for i := 0; i < len(entries); i++ {
 		if entries[i].IsDir && expandedPaths[entries[i].Path] {
 			if expanded, err := fileexplorer.ExpandAt(entries, i); err == nil {
@@ -160,7 +124,6 @@ func (ec *ExplorerController) ReloadTree() {
 		}
 	}
 
-	// Restore cursor to the same path; fall back to 0 if gone.
 	cursor := 0
 	if cursorPath != "" {
 		if idx := fileexplorer.FindIdx(entries, cursorPath); idx >= 0 {

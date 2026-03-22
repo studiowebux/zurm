@@ -42,11 +42,7 @@ func (g *Game) openFileExplorer() {
 	g.closePalette()
 	g.overlayState = renderer.OverlayState{}
 	g.closeMenu()
-	g.search.Close()
-	g.screenDirty = true
-	if g.focused != nil {
-		g.focused.Term.Buf.BumpRenderGen()
-	}
+	g.closeSearchOverlay()
 
 	// Reset prevKeys for all explorer-relevant keys to the CURRENT pressed state.
 	// This prevents stale "was pressed" state from prior handlers causing missed
@@ -54,7 +50,7 @@ func (g *Game) openFileExplorer() {
 	for _, k := range explorerInputKeys {
 		g.prevKeys[k] = ebiten.IsKeyPressed(k)
 	}
-	g.explorer.repeatActive = false
+	g.explorer.repeat.Reset()
 	g.screenDirty = true
 }
 
@@ -136,10 +132,10 @@ func (g *Game) handleFileExplorerInput() {
 	now := time.Now()
 	upPressed := ebiten.IsKeyPressed(ebiten.KeyArrowUp)
 	downPressed := ebiten.IsKeyPressed(ebiten.KeyArrowDown)
-	if g.explorer.UpdateRepeat(ebiten.KeyArrowUp, upPressed, g.prevKeys[ebiten.KeyArrowUp], now) {
+	if g.explorer.repeat.Update(ebiten.KeyArrowUp, upPressed, g.prevKeys[ebiten.KeyArrowUp], now) {
 		g.explorer.Move(-1)
 	}
-	if g.explorer.UpdateRepeat(ebiten.KeyArrowDown, downPressed, g.prevKeys[ebiten.KeyArrowDown], now) {
+	if g.explorer.repeat.Update(ebiten.KeyArrowDown, downPressed, g.prevKeys[ebiten.KeyArrowDown], now) {
 		g.explorer.Move(1)
 	}
 	g.prevKeys[ebiten.KeyArrowUp] = upPressed

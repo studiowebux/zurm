@@ -5,6 +5,8 @@ import (
 	"github.com/studiowebux/zurm/tab"
 )
 
+const maxFocusHistory = 50
+
 // TabManager owns the tab slice, active index, focus history, drag state,
 // and pin mode. Game holds a *TabManager and delegates tab operations to it.
 type TabManager struct {
@@ -140,7 +142,7 @@ func (tm *TabManager) PushFocus(focused *pane.Pane) {
 		return
 	}
 	tm.FocusHistory = append(tm.FocusHistory, e)
-	if len(tm.FocusHistory) > 50 {
+	if len(tm.FocusHistory) > maxFocusHistory {
 		tm.FocusHistory = tm.FocusHistory[1:]
 	}
 }
