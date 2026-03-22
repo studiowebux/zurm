@@ -20,6 +20,15 @@ import (
 	"github.com/studiowebux/zurm/terminal"
 )
 
+const (
+	viewerPanelWidthPct = 80          // panel width as % of window
+	viewerMinWrapCols   = 40          // minimum columns for word wrap
+	viewerPageScrollH   = 10          // page scroll multiplier (in row heights)
+	viewerHalfPageH     = 15          // ctrl+D/U scroll multiplier (in row heights)
+	viewerGGTimeout     = 500 * time.Millisecond // gg double-tap window
+	viewerMaxHTTPBody   = 10 << 20    // 10 MB cap on HTTP response bodies
+)
+
 // llmsFetchResult is the result of an async llms.txt HTTP fetch.
 // Both files are fetched in parallel; either may be empty if unavailable.
 type llmsFetchResult struct {
@@ -54,11 +63,11 @@ func (g *Game) openMarkdownViewerWithContent(content, title string) {
 	// Derive wrap columns from the actual panel pixel width and cell width.
 	// Panel is 80% of window width; subtract padding (2 * cellW) and scrollbar (4px).
 	physW := int(float64(g.winW) * g.dpi)
-	panelW := physW * 80 / 100
+	panelW := physW * viewerPanelWidthPct / 100
 	cw := g.font.CellW
 	wrapCols := (panelW - 2*cw - 4) / cw
-	if wrapCols < 40 {
-		wrapCols = 40
+	if wrapCols < viewerMinWrapCols {
+		wrapCols = viewerMinWrapCols
 	}
 
 	lines := convertMdLines(markdown.Parse(content, wrapCols))
@@ -159,7 +168,7 @@ func (g *Game) startLLMSFetch(domain string) {
 			if resp.StatusCode != http.StatusOK {
 				return partial{}
 			}
-			body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 10 MB cap
+			body, err := io.ReadAll(io.LimitReader(resp.Body, viewerMaxHTTPBody))
 			if err != nil {
 				return partial{}
 			}
@@ -421,9 +430,9 @@ func (g *Game) handleMarkdownViewerInput() {
 		case ebiten.KeyArrowDown, ebiten.KeyJ:
 			g.mdViewerState.ScrollOffset += rowH
 		case ebiten.KeyPageUp:
-			g.mdViewerState.ScrollOffset -= 10 * rowH
+			g.mdViewerState.ScrollOffset -= viewerPageScrollH * rowH
 		case ebiten.KeyPageDown:
-			g.mdViewerState.ScrollOffset += 10 * rowH
+			g.mdViewerState.ScrollOffset += viewerPageScrollH * rowH
 		case ebiten.KeyHome:
 			g.mdViewerState.ScrollOffset = 0
 		case ebiten.KeyEnd:
@@ -435,11 +444,11 @@ func (g *Game) handleMarkdownViewerInput() {
 	// Vim motions: gg (top), G (bottom), Ctrl+d (half-page down), Ctrl+u (half-page up).
 	ctrl := ebiten.IsKeyPressed(ebiten.KeyControl)
 	if ctrl && inpututil.IsKeyJustPressed(ebiten.KeyD) {
-		g.mdViewerState.ScrollOffset += 15 * rowH
+		g.mdViewerState.ScrollOffset += viewerHalfPageH * rowH
 		g.screenDirty = true
 	}
 	if ctrl && inpututil.IsKeyJustPressed(ebiten.KeyU) {
-		g.mdViewerState.ScrollOffset -= 15 * rowH
+		g.mdViewerState.ScrollOffset -= viewerHalfPageH * rowH
 		g.screenDirty = true
 	}
 	if !ctrl && inpututil.IsKeyJustPressed(ebiten.KeyG) {
@@ -450,7 +459,7 @@ func (g *Game) handleMarkdownViewerInput() {
 		} else {
 			// gg detection: two 'g' presses within 500ms.
 			now := time.Now()
-			if now.Sub(g.mdViewerLastG) < 500*time.Millisecond {
+			if now.Sub(g.mdViewerLastG) < viewerGGTimeout {
 				g.mdViewerState.ScrollOffset = 0
 				g.screenDirty = true
 				g.mdViewerLastG = time.Time{} // reset

@@ -25,6 +25,12 @@ func (g *Game) handleMouse() {
 	rightPressed := ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight)
 	rightWas := g.prevMouseButtons[ebiten.MouseButtonRight]
 
+	// Update previous button state on every exit path.
+	defer func() {
+		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
+		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
+	}()
+
 	// Any mouse button state change or scroll makes the frame dirty.
 	if leftPressed != leftWas || rightPressed != rightWas {
 		g.screenDirty = true
@@ -92,8 +98,6 @@ func (g *Game) handleMouse() {
 				}
 				g.flashStatus(label)
 			}
-			g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-			g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 			return
 		}
 	}
@@ -103,8 +107,6 @@ func (g *Game) handleMouse() {
 		if leftPressed && !leftWas {
 			g.closePalette()
 		}
-		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 		return
 	}
 
@@ -136,8 +138,6 @@ func (g *Game) handleMouse() {
 				g.closeFileExplorer()
 			}
 		}
-		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 		return
 	}
 
@@ -156,16 +156,12 @@ func (g *Game) handleMouse() {
 		if leftPressed && !leftWas {
 			g.overlayState = renderer.OverlayState{}
 		}
-		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 		return
 	}
 
 	// ? button in status bar toggles the keybinding overlay.
 	if leftPressed && !leftWas && image.Pt(mx, my).In(g.statusBarState.HelpBtnRect) {
 		g.toggleOverlay()
-		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 		return
 	}
 
@@ -175,8 +171,6 @@ func (g *Game) handleMouse() {
 			g.tabSwitcherState.Open = false
 			g.screenDirty = true
 		}
-		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 		return
 	}
 
@@ -185,8 +179,6 @@ func (g *Game) handleMouse() {
 		if leftPressed && !leftWas {
 			g.closeTabSearch()
 		}
-		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 		return
 	}
 
@@ -223,8 +215,6 @@ func (g *Game) handleMouse() {
 			g.openContextMenu(mx, my)
 		}
 
-		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 		return
 	}
 
@@ -261,8 +251,6 @@ func (g *Game) handleMouse() {
 					g.tabMgr.DragFromIdx = overIdx
 				}
 			}
-			g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-			g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 			g.screenDirty = true
 			return
 		}
@@ -270,8 +258,6 @@ func (g *Game) handleMouse() {
 		// End tab drag on release.
 		if g.tabMgr.Dragging && !leftPressed {
 			g.tabMgr.Dragging = false
-			g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-			g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 			return
 		}
 
@@ -305,8 +291,6 @@ func (g *Game) handleMouse() {
 			// Right-click in tab bar → show tab context menu.
 			g.openTabContextMenu(mx, my)
 		}
-		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 		return
 	}
 
@@ -324,8 +308,6 @@ func (g *Game) handleMouse() {
 	// Right-click opens context menu regardless of PTY mouse mode.
 	if rightPressed && !rightWas && g.cfg.Help.ContextMenu {
 		g.openContextMenu(mx, my)
-		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 		return
 	}
 
@@ -339,8 +321,6 @@ func (g *Game) handleMouse() {
 		} else {
 			g.divDrag.End()
 		}
-		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 		return
 	}
 
@@ -348,8 +328,6 @@ func (g *Game) handleMouse() {
 	if leftPressed && !leftWas && !g.zoomed {
 		if split := g.layout.SplitAt(mx, my, 4); split != nil {
 			g.divDrag.Start(split)
-			g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-			g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 			return
 		}
 	}
@@ -359,8 +337,6 @@ func (g *Game) handleMouse() {
 	if leftPressed && !leftWas && !g.zoomed {
 		if clicked := g.layout.PaneAt(mx, my); clicked != nil && clicked != g.focused {
 			g.setFocus(clicked)
-			g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-			g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 			return
 		}
 	}
@@ -371,13 +347,9 @@ func (g *Game) handleMouse() {
 		now := time.Now()
 		if now.Sub(g.lastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
 			g.startRenamePane()
-			g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-			g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 			return
 		}
 		g.lastClickTime = now
-		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 		return
 	}
 
@@ -410,8 +382,6 @@ func (g *Game) handleMouse() {
 				if err := exec.Command("open", g.hoveredURL.Text).Start(); err != nil { // #nosec G204 — opens user-visible URL in default browser
 				log.Printf("open URL failed: %v", err)
 			}
-				g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-				g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 				return
 			}
 		}
@@ -431,8 +401,6 @@ func (g *Game) handleMouse() {
 				g.focused.Term.Buf.BumpRenderGen()
 			}
 			g.focused.Term.Buf.Unlock()
-			g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-			g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 			return
 		}
 
@@ -518,8 +486,6 @@ func (g *Game) handleMouse() {
 			}
 		}
 
-		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 		return
 	}
 

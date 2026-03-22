@@ -499,23 +499,6 @@ func Load() (*Config, error) {
 	return &cfg, nil
 }
 
-// Reload re-reads config.toml without writing defaults on missing file.
-// Returns nil config if the file does not exist.
-func Reload() (*Config, error) {
-	dir := ConfigDir()
-	if dir == "" {
-		return nil, fmt.Errorf("config reload: cannot resolve home directory")
-	}
-	path := filepath.Join(dir, "config.toml")
-
-	cfg := Defaults
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
-		return nil, fmt.Errorf("config reload: %w", err)
-	}
-	resolveShell(&cfg)
-	return &cfg, nil
-}
-
 // LoadWithMeta re-reads config.toml and returns the TOML MetaData alongside
 // the config. MetaData.IsDefined tracks which keys the user explicitly set,
 // needed for theme merge (user-explicit colors override theme colors).
