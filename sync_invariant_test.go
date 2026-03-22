@@ -7,21 +7,25 @@ import (
 	"github.com/studiowebux/zurm/tab"
 )
 
-// assertSyncInvariant verifies that g.layout and g.focused match the active tab.
+// assertSyncInvariant verifies that activeLayout()/activeFocused() return
+// consistent values from the active tab.
 func assertSyncInvariant(t *testing.T, g *Game, label string) {
 	t.Helper()
 	if g.tabMgr.ActiveIdx < 0 || g.tabMgr.ActiveIdx >= len(g.tabMgr.Tabs) {
-		if g.layout != nil {
-			t.Errorf("%s: no active tab but layout != nil", label)
+		if g.activeLayout() != nil {
+			t.Errorf("%s: no active tab but activeLayout() != nil", label)
+		}
+		if g.activeFocused() != nil {
+			t.Errorf("%s: no active tab but activeFocused() != nil", label)
 		}
 		return
 	}
 	active := g.tabMgr.Tabs[g.tabMgr.ActiveIdx]
-	if g.layout != active.Layout {
-		t.Errorf("%s: layout mismatch — g.layout=%p, active.Layout=%p", label, g.layout, active.Layout)
+	if g.activeLayout() != active.Layout {
+		t.Errorf("%s: layout mismatch — activeLayout()=%p, active.Layout=%p", label, g.activeLayout(), active.Layout)
 	}
-	if g.focused != active.Focused {
-		t.Errorf("%s: focused mismatch — g.focused=%p, active.Focused=%p", label, g.focused, active.Focused)
+	if g.activeFocused() != active.Focused {
+		t.Errorf("%s: focused mismatch — activeFocused()=%p, active.Focused=%p", label, g.activeFocused(), active.Focused)
 	}
 }
 
@@ -42,14 +46,7 @@ func makeTestGame(tabs ...*tab.Tab) *Game {
 	for _, t := range tabs {
 		tm.Add(t)
 	}
-	g := &Game{
-		tabMgr: tm,
-	}
-	if len(tabs) > 0 {
-		g.layout = tabs[0].Layout
-		g.focused = tabs[0].Focused
-	}
-	return g
+	return &Game{tabMgr: tm}
 }
 
 // --- syncActive ---
@@ -138,7 +135,7 @@ func TestSyncActive_AfterRemoveLastTab(t *testing.T) {
 
 // --- updateLayout ---
 
-func TestUpdateLayout_SyncsGameAndTab(t *testing.T) {
+func TestUpdateLayout_SyncsTab(t *testing.T) {
 	t1 := makeTestTab("tab1")
 	g := makeTestGame(t1)
 
@@ -148,8 +145,8 @@ func TestUpdateLayout_SyncsGameAndTab(t *testing.T) {
 
 	g.updateLayout(newLayout)
 
-	if g.layout != newLayout {
-		t.Error("g.layout should point to new layout")
+	if g.activeLayout() != newLayout {
+		t.Error("activeLayout() should return new layout")
 	}
 	if g.tabMgr.Tabs[0].Layout != newLayout {
 		t.Error("tab.Layout should point to new layout")
@@ -162,8 +159,9 @@ func TestUpdateLayout_NoTabsSafe(t *testing.T) {
 
 	// Should not panic with empty tabs
 	g.updateLayout(newLayout)
-	if g.layout != newLayout {
-		t.Error("g.layout should be updated even with no tabs")
+	// No active tab — activeLayout() returns nil regardless
+	if g.activeLayout() != nil {
+		t.Error("activeLayout() should be nil with no tabs")
 	}
 }
 
@@ -264,24 +262,19 @@ func TestSetFocusUpdatesTab(t *testing.T) {
 		Right: pane.NewLeaf(p2),
 		Ratio: 0.5,
 	}
-	tab := &tab.Tab{Layout: layout, Focused: p1}
+	tb := &tab.Tab{Layout: layout, Focused: p1}
 
 	tm := NewTabManager()
-	tm.Add(tab)
-	g := &Game{
-		tabMgr: tm,
-		layout: layout,
-		focused: p1,
-	}
+	tm.Add(tb)
+	g := &Game{tabMgr: tm}
 
-	// Directly update focused and tab — this is what setFocusNoHistory does
-	g.focused = p2
-	g.tabMgr.Tabs[0].Focused = p2
+	// Use setActiveFocused — this is what setFocusNoHistory does
+	g.setActiveFocused(p2)
 
 	assertSyncInvariant(t, g, "after focus change to pane2")
 
-	if g.focused.CustomName != "pane2" {
-		t.Errorf("focused = %q, want pane2", g.focused.CustomName)
+	if g.activeFocused().CustomName != "pane2" {
+		t.Errorf("focused = %q, want pane2", g.activeFocused().CustomName)
 	}
 }
 

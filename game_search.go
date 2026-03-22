@@ -147,8 +147,8 @@ func (sc *SearchController) Prev(buf *terminal.ScreenBuffer) bool {
 func (g *Game) openSearchOverlay() {
 	g.search.Open()
 	g.screenDirty = true
-	if g.focused != nil {
-		g.focused.Term.Buf.BumpRenderGen()
+	if g.activeFocused() != nil {
+		g.activeFocused().Term.Buf.BumpRenderGen()
 	}
 }
 
@@ -156,8 +156,8 @@ func (g *Game) openSearchOverlay() {
 func (g *Game) closeSearchOverlay() {
 	g.search.Close()
 	g.screenDirty = true
-	if g.focused != nil {
-		g.focused.Term.Buf.BumpRenderGen()
+	if g.activeFocused() != nil {
+		g.activeFocused().Term.Buf.BumpRenderGen()
 	}
 }
 
@@ -180,8 +180,8 @@ func (g *Game) handleSearchInput() {
 		wasPressed := g.input.PrevKeys[key]
 		if pressed && !wasPressed {
 			var buf *terminal.ScreenBuffer
-			if g.focused != nil {
-				buf = g.focused.Term.Buf
+			if g.activeFocused() != nil {
+				buf = g.activeFocused().Term.Buf
 			}
 			if key == ebiten.KeyArrowDown {
 				if g.search.Next(buf) {

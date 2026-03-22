@@ -70,10 +70,10 @@ func (g *Game) buildContextMenu() []renderer.OverlayMenuItem {
 			{Label: "Split Horizontal", Shortcut: "Cmd+D", Action: g.splitH},
 			{Label: "Split Vertical", Shortcut: "Cmd+Shift+D", Action: g.splitV},
 			{Label: "Close Pane", Shortcut: "Cmd+W", Action: func() {
-				if len(g.layout.Leaves()) <= 1 {
+				if len(g.activeLayout().Leaves()) <= 1 {
 					g.closeActiveTab()
 				} else {
-					g.closePane(g.focused)
+					g.closePane(g.activeFocused())
 				}
 			}},
 			{Label: "Rename Pane", Action: g.startRenamePane},
@@ -93,23 +93,23 @@ func (g *Game) buildContextMenu() []renderer.OverlayMenuItem {
 				if half < 1 {
 					half = 1
 				}
-				g.focused.Term.Buf.Lock()
-				g.focused.Term.Buf.ScrollViewUp(half)
-				g.focused.Term.Buf.Unlock()
+				g.activeFocused().Term.Buf.Lock()
+				g.activeFocused().Term.Buf.ScrollViewUp(half)
+				g.activeFocused().Term.Buf.Unlock()
 			}},
 			{Label: "Scroll Down", Shortcut: "Shift+PgDn", Action: func() {
 				half := g.cfg.Window.Rows / 2
 				if half < 1 {
 					half = 1
 				}
-				g.focused.Term.Buf.Lock()
-				g.focused.Term.Buf.ScrollViewDown(half)
-				g.focused.Term.Buf.Unlock()
+				g.activeFocused().Term.Buf.Lock()
+				g.activeFocused().Term.Buf.ScrollViewDown(half)
+				g.activeFocused().Term.Buf.Unlock()
 			}},
 			{Label: "Clear Scrollback", Shortcut: "Cmd+K", Action: func() {
-				g.focused.Term.Buf.Lock()
-				g.focused.Term.Buf.ClearScrollback()
-				g.focused.Term.Buf.Unlock()
+				g.activeFocused().Term.Buf.Lock()
+				g.activeFocused().Term.Buf.ClearScrollback()
+				g.activeFocused().Term.Buf.Unlock()
 			}},
 		}},
 		{Separator: true},
@@ -436,32 +436,32 @@ func (g *Game) buildPalette() {
 		g.startRenamePane,
 		// Scroll
 		func() {
-			if g.focused == nil {
+			if g.activeFocused() == nil {
 				return
 			}
-			g.focused.Term.Buf.Lock()
-			vo := g.focused.Term.Buf.ViewOffset - g.focused.Rows/2
+			g.activeFocused().Term.Buf.Lock()
+			vo := g.activeFocused().Term.Buf.ViewOffset - g.activeFocused().Rows/2
 			if vo < 0 {
 				vo = 0
 			}
-			g.focused.Term.Buf.SetViewOffset(vo)
-			g.focused.Term.Buf.Unlock()
+			g.activeFocused().Term.Buf.SetViewOffset(vo)
+			g.activeFocused().Term.Buf.Unlock()
 		},
 		func() {
-			if g.focused == nil {
+			if g.activeFocused() == nil {
 				return
 			}
-			g.focused.Term.Buf.Lock()
-			g.focused.Term.Buf.SetViewOffset(g.focused.Term.Buf.ViewOffset + g.focused.Rows/2)
-			g.focused.Term.Buf.Unlock()
+			g.activeFocused().Term.Buf.Lock()
+			g.activeFocused().Term.Buf.SetViewOffset(g.activeFocused().Term.Buf.ViewOffset + g.activeFocused().Rows/2)
+			g.activeFocused().Term.Buf.Unlock()
 		},
 		func() {
-			if g.focused == nil {
+			if g.activeFocused() == nil {
 				return
 			}
-			g.focused.Term.Buf.Lock()
-			g.focused.Term.Buf.ClearScrollback()
-			g.focused.Term.Buf.Unlock()
+			g.activeFocused().Term.Buf.Lock()
+			g.activeFocused().Term.Buf.ClearScrollback()
+			g.activeFocused().Term.Buf.Unlock()
 		},
 		// Copy / Paste
 		g.copySelection,

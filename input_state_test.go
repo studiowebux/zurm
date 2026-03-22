@@ -360,132 +360,71 @@ func TestScrollAccumulation_NegativeDirection(t *testing.T) {
 // --- Click Detection Pattern ---
 // Tests the double/triple click detection pattern used in handleMouseSelection.
 
-func TestClickDetection_SingleClick(t *testing.T) {
-	var clickCount int
-	var lastTime time.Time
-	var lastRow, lastCol int
-	dcMs := 300 * time.Millisecond
-
-	// First click at (5, 10)
-	now := time.Now()
-	row, col := 5, 10
+// simulateClick applies the click-detection logic and returns the updated state.
+func simulateClick(row, col int, now time.Time, lastRow, lastCol int, lastTime time.Time, count int, timeout time.Duration) (int, int, time.Time, int) {
 	sameCell := row == lastRow && col == lastCol
-	if sameCell && now.Sub(lastTime) <= dcMs {
-		clickCount++
+	if sameCell && now.Sub(lastTime) <= timeout {
+		count++
 	} else {
-		clickCount = 1
+		count = 1
 	}
-	lastTime = now
-	lastRow = row
-	lastCol = col
+	return row, col, now, count
+}
 
-	if clickCount != 1 {
-		t.Errorf("first click: count = %d, want 1", clickCount)
+func TestClickDetection_SingleClick(t *testing.T) {
+	timeout := 300 * time.Millisecond
+	now := time.Now()
+	_, _, _, count := simulateClick(5, 10, now, 0, 0, time.Time{}, 0, timeout)
+	if count != 1 {
+		t.Errorf("first click: count = %d, want 1", count)
 	}
 }
 
 func TestClickDetection_DoubleClick(t *testing.T) {
-	var clickCount int
-	var lastTime time.Time
-	var lastRow, lastCol int
-	dcMs := 300 * time.Millisecond
-
-	// First click
+	timeout := 300 * time.Millisecond
 	now := time.Now()
-	clickCount = 1
-	lastTime = now
-	lastRow = 5
-	lastCol = 10
 
-	// Second click — same cell, within timeout
-	now = now.Add(100 * time.Millisecond)
-	sameCell := 5 == lastRow && 10 == lastCol
-	if sameCell && now.Sub(lastTime) <= dcMs {
-		clickCount++
-	} else {
-		clickCount = 1
-	}
-	lastTime = now
+	r, c, lt, count := simulateClick(5, 10, now, 0, 0, time.Time{}, 0, timeout)
+	_, _, _, count = simulateClick(5, 10, now.Add(100*time.Millisecond), r, c, lt, count, timeout)
 
-	if clickCount != 2 {
-		t.Errorf("double click: count = %d, want 2", clickCount)
+	if count != 2 {
+		t.Errorf("double click: count = %d, want 2", count)
 	}
 }
 
 func TestClickDetection_TripleClick(t *testing.T) {
-	var clickCount int
-	var lastTime time.Time
-	var lastRow, lastCol int
-	dcMs := 300 * time.Millisecond
-
+	timeout := 300 * time.Millisecond
 	now := time.Now()
-	lastRow, lastCol = 5, 10
 
-	// Three rapid clicks on same cell
-	for i := 0; i < 3; i++ {
-		sameCell := 5 == lastRow && 10 == lastCol
-		if i > 0 && sameCell && now.Sub(lastTime) <= dcMs {
-			clickCount++
-		} else {
-			clickCount = 1
-		}
-		lastTime = now
-		now = now.Add(50 * time.Millisecond)
-	}
+	r, c, lt, count := simulateClick(5, 10, now, 0, 0, time.Time{}, 0, timeout)
+	r, c, lt, count = simulateClick(5, 10, now.Add(50*time.Millisecond), r, c, lt, count, timeout)
+	_, _, _, count = simulateClick(5, 10, now.Add(100*time.Millisecond), r, c, lt, count, timeout)
 
-	if clickCount != 3 {
-		t.Errorf("triple click: count = %d, want 3", clickCount)
+	if count != 3 {
+		t.Errorf("triple click: count = %d, want 3", count)
 	}
 }
 
 func TestClickDetection_DifferentCellResets(t *testing.T) {
-	var clickCount int
-	var lastTime time.Time
-	var lastRow, lastCol int
-	dcMs := 300 * time.Millisecond
-
-	// First click at (5, 10)
+	timeout := 300 * time.Millisecond
 	now := time.Now()
-	clickCount = 1
-	lastTime = now
-	lastRow, lastCol = 5, 10
 
-	// Second click at different cell — resets
-	now = now.Add(50 * time.Millisecond)
-	sameCell := 6 == lastRow && 10 == lastCol
-	if sameCell && now.Sub(lastTime) <= dcMs {
-		clickCount++
-	} else {
-		clickCount = 1
-	}
+	r, c, lt, count := simulateClick(5, 10, now, 0, 0, time.Time{}, 0, timeout)
+	_, _, _, count = simulateClick(6, 10, now.Add(50*time.Millisecond), r, c, lt, count, timeout)
 
-	if clickCount != 1 {
-		t.Errorf("different cell: count = %d, want 1 (reset)", clickCount)
+	if count != 1 {
+		t.Errorf("different cell: count = %d, want 1 (reset)", count)
 	}
 }
 
 func TestClickDetection_TimeoutResets(t *testing.T) {
-	var clickCount int
-	var lastTime time.Time
-	var lastRow, lastCol int
-	dcMs := 300 * time.Millisecond
-
-	// First click
+	timeout := 300 * time.Millisecond
 	now := time.Now()
-	clickCount = 1
-	lastTime = now
-	lastRow, lastCol = 5, 10
 
-	// Second click — same cell but too late
-	now = now.Add(500 * time.Millisecond)
-	sameCell := 5 == lastRow && 10 == lastCol
-	if sameCell && now.Sub(lastTime) <= dcMs {
-		clickCount++
-	} else {
-		clickCount = 1
-	}
+	r, c, lt, count := simulateClick(5, 10, now, 0, 0, time.Time{}, 0, timeout)
+	_, _, _, count = simulateClick(5, 10, now.Add(500*time.Millisecond), r, c, lt, count, timeout)
 
-	if clickCount != 1 {
-		t.Errorf("timeout: count = %d, want 1 (reset)", clickCount)
+	if count != 1 {
+		t.Errorf("timeout: count = %d, want 1 (reset)", count)
 	}
 }

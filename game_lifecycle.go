@@ -69,8 +69,8 @@ func (g *Game) handleFocus() {
 			g.unfocusedAt = time.Now()
 		}
 		g.prevFocused = focused
-		if g.focused != nil {
-			g.focused.Term.SendFocusEvent(focused)
+		if g.activeFocused() != nil {
+			g.activeFocused().Term.SendFocusEvent(focused)
 		}
 	}
 
@@ -152,10 +152,10 @@ func (g *Game) handleDroppedFiles() {
 		return
 	}
 	text := strings.Join(paths, " ")
-	if g.focused == nil {
+	if g.activeFocused() == nil {
 		return
 	}
-	g.focused.Term.SendBytes([]byte(text))
+	g.activeFocused().Term.SendBytes([]byte(text))
 	g.screenDirty = true
 }
 

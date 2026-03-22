@@ -111,10 +111,8 @@ type Game struct {
 
 	tabMgr *TabManager
 
-	// Convenience pointers into tabMgr.Tabs[tabMgr.ActiveIdx] — kept in sync via
-	// updateLayout / setFocus / syncActive.
-	layout  *pane.LayoutNode
-	focused *pane.Pane
+	// layout and focused are computed on-demand from tabMgr via activeLayout()/activeFocused().
+	// No cached pointers — eliminates the sync invariant entirely.
 
 	renderer *renderer.Renderer
 	font     *renderer.FontRenderer
@@ -214,8 +212,6 @@ type Game struct {
 	// llms.txt browser state (Cmd+L).
 	llms llmsState
 
-	// Key repeat state for URL input text field.
-	urlRepeat TextInputRepeat
 
 	// Command vault — encrypted history with ghost text suggestions.
 	vlt vaultState
@@ -452,8 +448,6 @@ func main() {
 	game := &Game{
 		ctx:              ctx,
 		cancel:           cancel,
-		layout:           initialTabs[initialActive].Layout,
-		focused:          initialTabs[initialActive].Focused,
 		renderer:         rend,
 		font:             fontR,
 		cfg:              cfg,
@@ -569,7 +563,7 @@ func (g *Game) Update() error {
 
 	// Expire visual bell flashes — keep redrawing while any pane is flashing.
 	now := time.Now()
-	for _, leaf := range g.layout.Leaves() {
+	for _, leaf := range g.activeLayout().Leaves() {
 		if !leaf.Pane.BellUntil.IsZero() {
 			if now.After(leaf.Pane.BellUntil) {
 				leaf.Pane.BellUntil = time.Time{}
@@ -610,7 +604,7 @@ func (g *Game) Update() error {
 
 	// Update cursor blink for all panes in the active tab.
 	// Update() returns true when blinkOn toggles — mark dirty so the frame redraws.
-	for _, leaf := range g.layout.Leaves() {
+	for _, leaf := range g.activeLayout().Leaves() {
 		if leaf.Pane.Term.Cursor.Update() {
 			g.screenDirty = true
 			// Bump per-pane gen so the pane-skip logic redraws the cursor row.
@@ -632,13 +626,13 @@ func (g *Game) Update() error {
 	// Check for dead panes (non-blocking). Close at most one per frame to avoid
 	// nil-dereffing g.layout or g.focused after a close mutates both.
 	closedDead := false
-	for _, leaf := range g.layout.Leaves() {
+	for _, leaf := range g.activeLayout().Leaves() {
 		if closedDead {
 			break
 		}
 		select {
 		case <-leaf.Pane.Term.Dead():
-			if len(g.layout.Leaves()) <= 1 {
+			if len(g.activeLayout().Leaves()) <= 1 {
 				g.closeActiveTab()
 			} else {
 				g.closePane(leaf.Pane)
@@ -668,21 +662,21 @@ func (g *Game) Update() error {
 	g.drainForeground()
 	g.drainShellIntegration()
 	g.pollStatusOnOutput()
-	if g.focused != nil {
-		if g.search.Recompute(g.focused.Term.Buf) {
+	if g.activeFocused() != nil {
+		if g.search.Recompute(g.activeFocused().Term.Buf) {
 			g.screenDirty = true
 		}
 	}
 
-	for _, leaf := range g.layout.Leaves() {
+	for _, leaf := range g.activeLayout().Leaves() {
 		leaf.Pane.Term.SendCPRResponse()
 		leaf.Pane.Term.SendDA1Response()
 		leaf.Pane.Term.SendDA2Response()
 		leaf.Pane.Term.SendPendingResponses()
 		leaf.Pane.Term.SyncCursorStyle()
 	}
-	if g.focused != nil {
-		g.focused.Term.SendClipboardResponses()
+	if g.activeFocused() != nil {
+		g.activeFocused().Term.SendClipboardResponses()
 	}
 
 	return nil
@@ -747,7 +741,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.statusBarState.Zoomed = g.zoomed
 	g.statusBarState.PinMode = g.tabMgr.PinMode
 	g.statusBarState.BlocksEnabled = g.blocksEnabled
-	g.statusBarState.ServerSession = g.focused != nil && g.focused.ServerSessionID != ""
+	g.statusBarState.ServerSession = g.activeFocused() != nil && g.activeFocused().ServerSessionID != ""
 	var srvCount int
 	for _, t := range g.tabMgr.Tabs {
 		for _, leaf := range t.Layout.Leaves() {
@@ -757,13 +751,13 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		}
 	}
 	g.statusBarState.ServerSessionCount = srvCount
-	if g.focused != nil {
-		g.focused.Term.Buf.RLock()
-		g.statusBarState.ScrollOffset = g.focused.Term.Buf.ViewOffset
+	if g.activeFocused() != nil {
+		g.activeFocused().Term.Buf.RLock()
+		g.statusBarState.ScrollOffset = g.activeFocused().Term.Buf.ViewOffset
 		if g.blocksEnabled {
-			g.statusBarState.BlockCount = len(g.focused.Term.Buf.Blocks)
+			g.statusBarState.BlockCount = len(g.activeFocused().Term.Buf.Blocks)
 		}
-		g.focused.Term.Buf.RUnlock()
+		g.activeFocused().Term.Buf.RUnlock()
 	}
 	// Snapshot renderSeq BEFORE DrawAll so that any PTY output arriving
 	// during rendering (e.g. shell responds to resize) bumps the seq above
@@ -785,7 +779,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		Screen:         screen,
 		Tabs:           g.tabMgr.Tabs,
 		ActiveTab:      g.tabMgr.ActiveIdx,
-		Focused:        g.focused,
+		Focused:        g.activeFocused(),
 		Zoomed:         g.zoomed,
 		Menu:           &g.menuState,
 		Overlay:        &g.overlayState,
@@ -835,22 +829,43 @@ func (g *Game) Layout(outsideW, outsideH int) (int, int) {
 	return int(float64(outsideW) * g.dpi), int(float64(outsideH) * g.dpi)
 }
 
-// syncActive loads g.layout and g.focused from the active tab.
-func (g *Game) syncActive() {
-	if g.tabMgr.ActiveIdx >= len(g.tabMgr.Tabs) {
-		return
+// activeLayout returns the layout tree of the active tab, or nil if no tabs exist.
+func (g *Game) activeLayout() *pane.LayoutNode {
+	if t := g.tabMgr.Active(); t != nil {
+		return t.Layout
 	}
-	t := g.tabMgr.Tabs[g.tabMgr.ActiveIdx]
-	g.layout = t.Layout
-	g.focused = t.Focused
+	return nil
 }
 
-// updateLayout writes a new layout to both g.layout and the active tab.
-func (g *Game) updateLayout(n *pane.LayoutNode) {
-	g.layout = n
-	if g.tabMgr.ActiveIdx >= 0 && g.tabMgr.ActiveIdx < len(g.tabMgr.Tabs) {
-		g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Layout = n
+// activeFocused returns the focused pane of the active tab, or nil if no tabs exist.
+func (g *Game) activeFocused() *pane.Pane {
+	if t := g.tabMgr.Active(); t != nil {
+		return t.Focused
 	}
+	return nil
+}
+
+// setActiveLayout writes a new layout to the active tab.
+func (g *Game) setActiveLayout(n *pane.LayoutNode) {
+	if t := g.tabMgr.Active(); t != nil {
+		t.Layout = n
+	}
+}
+
+// setActiveFocused writes the focused pane to the active tab.
+func (g *Game) setActiveFocused(p *pane.Pane) {
+	if t := g.tabMgr.Active(); t != nil {
+		t.Focused = p
+	}
+}
+
+// syncActive is a no-op — layout and focused are now computed on-demand.
+// Kept temporarily so callers compile; will be removed in a follow-up.
+func (g *Game) syncActive() {}
+
+// updateLayout writes a new layout to the active tab.
+func (g *Game) updateLayout(n *pane.LayoutNode) {
+	g.setActiveLayout(n)
 }
 
 // restoreTabWithLayout creates a new tab with the saved pane layout restored.

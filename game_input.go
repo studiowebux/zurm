@@ -115,7 +115,7 @@ func (g *Game) handleInput() {
 		return
 	}
 
-	if g.focused == nil {
+	if g.activeFocused() == nil {
 		return
 	}
 
@@ -133,9 +133,9 @@ func (g *Game) handleInput() {
 	}
 	// Block scrollback when alternate screen is active — TUI apps (Claude Code,
 	// nvim, htop) own the full viewport and scrollback makes no sense.
-	g.focused.Term.Buf.RLock()
-	altActive := g.focused.Term.Buf.IsAltActive()
-	g.focused.Term.Buf.RUnlock()
+	g.activeFocused().Term.Buf.RLock()
+	altActive := g.activeFocused().Term.Buf.IsAltActive()
+	g.activeFocused().Term.Buf.RUnlock()
 
 	// keyScrolled is true only when an explicit keyboard scroll key (PageUp/Down/Ctrl+K)
 	// was pressed. This causes an early return to prevent the key from leaking into the
@@ -149,20 +149,20 @@ func (g *Game) handleInput() {
 			}
 			switch {
 			case key == ebiten.KeyPageUp:
-				g.focused.Term.Buf.Lock()
-				g.focused.Term.Buf.ScrollViewUp(halfPage)
-				g.focused.Term.Buf.Unlock()
+				g.activeFocused().Term.Buf.Lock()
+				g.activeFocused().Term.Buf.ScrollViewUp(halfPage)
+				g.activeFocused().Term.Buf.Unlock()
 				keyScrolled = true
 			case key == ebiten.KeyPageDown:
-				g.focused.Term.Buf.Lock()
-				g.focused.Term.Buf.ScrollViewDown(halfPage)
-				g.focused.Term.Buf.Unlock()
+				g.activeFocused().Term.Buf.Lock()
+				g.activeFocused().Term.Buf.ScrollViewDown(halfPage)
+				g.activeFocused().Term.Buf.Unlock()
 				keyScrolled = true
 			case (meta || ctrl) && key == ebiten.KeyK:
-				g.focused.Term.Buf.Lock()
-				g.focused.Term.Buf.ClearScrollback()
-				g.focused.Term.Buf.ClearSelection()
-				g.focused.Term.Buf.Unlock()
+				g.activeFocused().Term.Buf.Lock()
+				g.activeFocused().Term.Buf.ClearScrollback()
+				g.activeFocused().Term.Buf.ClearSelection()
+				g.activeFocused().Term.Buf.Unlock()
 				keyScrolled = true
 			}
 		}
@@ -170,9 +170,9 @@ func (g *Game) handleInput() {
 
 	_, wy := ebiten.Wheel()
 	if wy != 0 {
-		g.focused.Term.Buf.RLock()
-		mouseMode := g.focused.Term.Buf.MouseMode
-		g.focused.Term.Buf.RUnlock()
+		g.activeFocused().Term.Buf.RLock()
+		mouseMode := g.activeFocused().Term.Buf.MouseMode
+		g.activeFocused().Term.Buf.RUnlock()
 		if mouseMode == 0 && !altActive {
 			// Accumulate fractional trackpad deltas — int truncation drops sub-pixel
 			// input and makes smooth-scroll feel janky.
@@ -180,13 +180,13 @@ func (g *Game) handleInput() {
 			lines := int(g.input.ScrollAccum)
 			if lines != 0 {
 				g.input.ScrollAccum -= float64(lines)
-				g.focused.Term.Buf.Lock()
+				g.activeFocused().Term.Buf.Lock()
 				if lines > 0 {
-					g.focused.Term.Buf.ScrollViewUp(lines)
+					g.activeFocused().Term.Buf.ScrollViewUp(lines)
 				} else {
-					g.focused.Term.Buf.ScrollViewDown(-lines)
+					g.activeFocused().Term.Buf.ScrollViewDown(-lines)
 				}
-				g.focused.Term.Buf.Unlock()
+				g.activeFocused().Term.Buf.Unlock()
 				// Do NOT set keyScrolled here. Trackpad momentum keeps wy non-zero
 				// for several frames after the finger lifts; suppressing keyboard input
 				// during that window causes keystrokes to be silently dropped.
@@ -207,10 +207,10 @@ func (g *Game) handleInput() {
 	}
 
 	if sentToPTY {
-		g.focused.Term.Buf.Lock()
-		g.focused.Term.Buf.ResetView() // snap back to live output on keystroke
-		g.focused.Term.Buf.ClearSelection()
-		g.focused.Term.Buf.Unlock()
+		g.activeFocused().Term.Buf.Lock()
+		g.activeFocused().Term.Buf.ResetView() // snap back to live output on keystroke
+		g.activeFocused().Term.Buf.ClearSelection()
+		g.activeFocused().Term.Buf.Unlock()
 		g.screenDirty = true
 	}
 
@@ -221,7 +221,7 @@ func (g *Game) handleInput() {
 		now := time.Now()
 		if now.Sub(g.input.PtyRepeat.start) >= keyRepeatDelay && now.Sub(g.input.PtyRepeat.last) >= keyRepeatInterval {
 			if g.input.RepeatSeq != nil {
-				g.focused.Term.SendBytes(g.input.RepeatSeq)
+				g.activeFocused().Term.SendBytes(g.input.RepeatSeq)
 			}
 			g.input.PtyRepeat.last = now
 		}
@@ -244,11 +244,11 @@ func (g *Game) handleInputKeys(ctrl, shift, meta, alt bool) bool {
 		for _, r := range runes {
 			if alt {
 				if seq := terminal.MetaFromChar(r); seq != nil {
-					g.focused.Term.SendBytes(seq)
+					g.activeFocused().Term.SendBytes(seq)
 					sentToPTY = true
 				}
 			} else {
-				g.focused.Term.SendBytes([]byte(string(r)))
+				g.activeFocused().Term.SendBytes([]byte(string(r)))
 				sentToPTY = true
 			}
 		}
@@ -399,25 +399,25 @@ func (g *Game) handleAppShortcut(key ebiten.Key, ctrl, shift, meta, alt bool) bo
 		g.splitH()
 	case meta && key == ebiten.KeyW:
 		if g.cfg.Help.CloseConfirm {
-			if len(g.layout.Leaves()) <= 1 {
+			if len(g.activeLayout().Leaves()) <= 1 {
 				g.showConfirm("Close tab?", g.closeActiveTab)
 			} else {
-				pane := g.focused
+				pane := g.activeFocused()
 				g.showConfirm("Close pane?", func() { g.closePane(pane) })
 			}
 		} else {
-			if len(g.layout.Leaves()) <= 1 {
+			if len(g.activeLayout().Leaves()) <= 1 {
 				g.closeActiveTab()
 			} else {
-				g.closePane(g.focused)
+				g.closePane(g.activeFocused())
 			}
 		}
 	case meta && key == ebiten.KeyBracketLeft:
-		if p := g.layout.PrevLeaf(g.focused); p != nil {
+		if p := g.activeLayout().PrevLeaf(g.activeFocused()); p != nil {
 			g.setFocus(p)
 		}
 	case meta && key == ebiten.KeyBracketRight:
-		if p := g.layout.NextLeaf(g.focused); p != nil {
+		if p := g.activeLayout().NextLeaf(g.activeFocused()); p != nil {
 			g.setFocus(p)
 		}
 	case meta && shift && key == ebiten.KeyArrowLeft:
@@ -468,22 +468,22 @@ func (g *Game) handleTerminalKey(key ebiten.Key, ctrl, shift, meta, alt bool) bo
 	// alt + symbol/digit keys: send ESC + ASCII.
 	case alt:
 		if seq := altPrintableSeq(key); seq != nil {
-			g.focused.Term.SendBytes(seq)
+			g.activeFocused().Term.SendBytes(seq)
 			return true
 		}
 
 	// Vault ghost accept: right-arrow accepts the current suggestion.
 	case !ctrl && !alt && !meta && key == ebiten.KeyArrowRight && g.vlt.Suggest != "":
-		g.focused.Term.SendBytes([]byte(g.vlt.Suggest))
+		g.activeFocused().Term.SendBytes([]byte(g.vlt.Suggest))
 		g.vlt.Suggest = ""
 		g.vlt.LineCache = ""
 		g.vlt.Skip = 0
 		return true
 
 	case ctrl || isSpecialKey(key):
-		g.focused.Term.Buf.RLock()
-		appCursor := g.focused.Term.Buf.AppCursorKeys
-		g.focused.Term.Buf.RUnlock()
+		g.activeFocused().Term.Buf.RLock()
+		appCursor := g.activeFocused().Term.Buf.AppCursorKeys
+		g.activeFocused().Term.Buf.RUnlock()
 		if seq := terminal.KeyEventToBytes(key, appCursor); seq != nil {
 			g.sendWithRepeat(key, seq)
 			return true
@@ -494,7 +494,7 @@ func (g *Game) handleTerminalKey(key ebiten.Key, ctrl, shift, meta, alt bool) bo
 
 // sendWithRepeat sends seq to the focused PTY and starts key repeat tracking.
 func (g *Game) sendWithRepeat(key ebiten.Key, seq []byte) {
-	g.focused.Term.SendBytes(seq)
+	g.activeFocused().Term.SendBytes(seq)
 	g.input.RepeatSeq = seq
 	now := time.Now()
 	g.input.PtyRepeat.key = key

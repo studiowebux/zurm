@@ -70,14 +70,14 @@ func (g *Game) handleMouse() {
 		return
 	}
 
-	if g.focused == nil {
+	if g.activeFocused() == nil {
 		return
 	}
 
-	g.focused.Term.Buf.RLock()
-	mouseMode := g.focused.Term.Buf.MouseMode
-	sgrMouse := g.focused.Term.Buf.SgrMouse
-	g.focused.Term.Buf.RUnlock()
+	g.activeFocused().Term.Buf.RLock()
+	mouseMode := g.activeFocused().Term.Buf.MouseMode
+	sgrMouse := g.activeFocused().Term.Buf.SgrMouse
+	g.activeFocused().Term.Buf.RUnlock()
 
 	// Right-click opens context menu regardless of PTY mouse mode.
 	if rightPressed && !rightWas && g.cfg.Help.ContextMenu {
@@ -100,7 +100,7 @@ func (g *Game) handleMouse() {
 
 	// Start divider drag on click — 4px hit margin around the 1px divider.
 	if leftPressed && !leftWas && !g.zoomed {
-		if split := g.layout.SplitAt(mx, my, 4); split != nil {
+		if split := g.activeLayout().SplitAt(mx, my, 4); split != nil {
 			g.input.DivDrag.Start(split)
 			return
 		}
@@ -108,15 +108,15 @@ func (g *Game) handleMouse() {
 
 	// Click on an inactive pane always switches focus, regardless of PTY mouse mode.
 	if leftPressed && !leftWas && !g.zoomed {
-		if clicked := g.layout.PaneAt(mx, my); clicked != nil && clicked != g.focused {
+		if clicked := g.activeLayout().PaneAt(mx, my); clicked != nil && clicked != g.activeFocused() {
 			g.setFocus(clicked)
 			return
 		}
 	}
 
 	// Double-click on pane header area → rename pane.
-	if leftPressed && !leftWas && g.focused.HeaderH > 0 &&
-		my >= g.focused.Rect.Min.Y && my < g.focused.Rect.Min.Y+g.focused.HeaderH {
+	if leftPressed && !leftWas && g.activeFocused().HeaderH > 0 &&
+		my >= g.activeFocused().Rect.Min.Y && my < g.activeFocused().Rect.Min.Y+g.activeFocused().HeaderH {
 		now := time.Now()
 		if now.Sub(g.input.LastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
 			g.startRenamePane()
@@ -363,13 +363,13 @@ func (g *Game) handleMouseTabBar(mx, my int, leftPressed, leftWas, rightPressed,
 // handleMouseSelection handles text selection when no PTY mouse mode is active.
 func (g *Game) handleMouseSelection(mx, my int, leftPressed, leftWas bool) {
 	pad := g.cfg.Window.Padding
-	col := (mx - g.focused.Rect.Min.X - pad) / g.font.CellW
-	row := (my - g.focused.Rect.Min.Y - pad - g.focused.HeaderH) / g.font.CellH
+	col := (mx - g.activeFocused().Rect.Min.X - pad) / g.font.CellW
+	row := (my - g.activeFocused().Rect.Min.Y - pad - g.activeFocused().HeaderH) / g.font.CellH
 
-	g.focused.Term.Buf.RLock()
-	maxRow := g.focused.Term.Buf.Rows - 1
-	maxCol := g.focused.Term.Buf.Cols - 1
-	g.focused.Term.Buf.RUnlock()
+	g.activeFocused().Term.Buf.RLock()
+	maxRow := g.activeFocused().Term.Buf.Rows - 1
+	maxCol := g.activeFocused().Term.Buf.Cols - 1
+	g.activeFocused().Term.Buf.RUnlock()
 
 	// Save unclamped row for auto-scroll during selection drag.
 	rawRow := row
@@ -397,19 +397,19 @@ func (g *Game) handleMouseSelection(mx, my int, leftPressed, leftWas bool) {
 
 	// Shift+click extends the current selection to the clicked cell.
 	if leftPressed && !leftWas && ebiten.IsKeyPressed(ebiten.KeyShift) {
-		g.focused.Term.Buf.Lock()
-		if g.focused.Term.Buf.Selection.Active {
-			absRow := g.focused.Term.Buf.DisplayToAbsRow(row)
+		g.activeFocused().Term.Buf.Lock()
+		if g.activeFocused().Term.Buf.Selection.Active {
+			absRow := g.activeFocused().Term.Buf.DisplayToAbsRow(row)
 			snapCol := col
-			if snapCol >= 0 && snapCol < g.focused.Term.Buf.Cols &&
-				g.focused.Term.Buf.GetDisplayCell(row, snapCol).Width == 0 && snapCol > 0 {
+			if snapCol >= 0 && snapCol < g.activeFocused().Term.Buf.Cols &&
+				g.activeFocused().Term.Buf.GetDisplayCell(row, snapCol).Width == 0 && snapCol > 0 {
 				snapCol--
 			}
-			g.focused.Term.Buf.Selection.EndRow = absRow
-			g.focused.Term.Buf.Selection.EndCol = snapCol
-			g.focused.Term.Buf.BumpRenderGen()
+			g.activeFocused().Term.Buf.Selection.EndRow = absRow
+			g.activeFocused().Term.Buf.Selection.EndCol = snapCol
+			g.activeFocused().Term.Buf.BumpRenderGen()
 		}
-		g.focused.Term.Buf.Unlock()
+		g.activeFocused().Term.Buf.Unlock()
 		return
 	}
 
@@ -425,71 +425,71 @@ func (g *Game) handleMouseSelection(mx, my int, leftPressed, leftWas bool) {
 		g.input.LastClickRow = row
 		g.input.LastClickCol = col
 
-		g.focused.Term.Buf.Lock()
-		absRow := g.focused.Term.Buf.DisplayToAbsRow(row)
+		g.activeFocused().Term.Buf.Lock()
+		absRow := g.activeFocused().Term.Buf.DisplayToAbsRow(row)
 		// Snap col to parent cell if clicking on a wide char continuation.
 		snapCol := col
-		if snapCol >= 0 && snapCol < g.focused.Term.Buf.Cols && g.focused.Term.Buf.GetDisplayCell(row, snapCol).Width == 0 && snapCol > 0 {
+		if snapCol >= 0 && snapCol < g.activeFocused().Term.Buf.Cols && g.activeFocused().Term.Buf.GetDisplayCell(row, snapCol).Width == 0 && snapCol > 0 {
 			snapCol--
 		}
 		switch g.input.ClickCount {
 		case 1:
 			g.input.SelDrag.Active = true
-			g.focused.Term.Buf.Selection = terminal.Selection{
+			g.activeFocused().Term.Buf.Selection = terminal.Selection{
 				Active:   true,
 				StartRow: absRow, StartCol: snapCol,
 				EndRow:   absRow, EndCol: snapCol,
 			}
 		case 2:
 			g.input.SelDrag.Active = false
-			g.focused.Term.Buf.Selection = g.wordSelection(row, col)
+			g.activeFocused().Term.Buf.Selection = g.wordSelection(row, col)
 		default:
 			g.input.SelDrag.Active = false
-			g.focused.Term.Buf.Selection = terminal.Selection{
+			g.activeFocused().Term.Buf.Selection = terminal.Selection{
 				Active:   true,
 				StartRow: absRow, StartCol: 0,
-				EndRow:   absRow, EndCol: g.focused.Term.Buf.Cols - 1,
+				EndRow:   absRow, EndCol: g.activeFocused().Term.Buf.Cols - 1,
 			}
 			g.input.ClickCount = 0
 		}
-		g.focused.Term.Buf.BumpRenderGen()
-		g.focused.Term.Buf.Unlock()
+		g.activeFocused().Term.Buf.BumpRenderGen()
+		g.activeFocused().Term.Buf.Unlock()
 	} else if leftPressed && leftWas && g.input.SelDrag.Active {
-		g.focused.Term.Buf.Lock()
+		g.activeFocused().Term.Buf.Lock()
 		// Auto-scroll when dragging past the pane edges.
 		if rawRow < 0 {
-			vo := g.focused.Term.Buf.ViewOffset + 1
-			maxVO := g.focused.Term.Buf.ScrollbackLen()
+			vo := g.activeFocused().Term.Buf.ViewOffset + 1
+			maxVO := g.activeFocused().Term.Buf.ScrollbackLen()
 			if vo > maxVO {
 				vo = maxVO
 			}
-			g.focused.Term.Buf.SetViewOffset(vo)
+			g.activeFocused().Term.Buf.SetViewOffset(vo)
 		} else if rawRow > maxRow {
-			vo := g.focused.Term.Buf.ViewOffset - 1
+			vo := g.activeFocused().Term.Buf.ViewOffset - 1
 			if vo < 0 {
 				vo = 0
 			}
-			g.focused.Term.Buf.SetViewOffset(vo)
+			g.activeFocused().Term.Buf.SetViewOffset(vo)
 		}
-		g.focused.Term.Buf.Selection.EndRow = g.focused.Term.Buf.DisplayToAbsRow(row)
+		g.activeFocused().Term.Buf.Selection.EndRow = g.activeFocused().Term.Buf.DisplayToAbsRow(row)
 		// Snap to parent cell if dragging onto a continuation cell.
 		dragCol := col
-		if dragCol >= 0 && dragCol < g.focused.Term.Buf.Cols && g.focused.Term.Buf.GetDisplayCell(row, dragCol).Width == 0 && dragCol > 0 {
+		if dragCol >= 0 && dragCol < g.activeFocused().Term.Buf.Cols && g.activeFocused().Term.Buf.GetDisplayCell(row, dragCol).Width == 0 && dragCol > 0 {
 			dragCol--
 		}
-		g.focused.Term.Buf.Selection.EndCol = dragCol
-		g.focused.Term.Buf.BumpRenderGen()
-		g.focused.Term.Buf.Unlock()
+		g.activeFocused().Term.Buf.Selection.EndCol = dragCol
+		g.activeFocused().Term.Buf.BumpRenderGen()
+		g.activeFocused().Term.Buf.Unlock()
 		g.screenDirty = true
 	} else if !leftPressed && leftWas {
 		if g.input.SelDrag.Active {
 			g.input.SelDrag.Active = false
-			g.focused.Term.Buf.Lock()
-			sel := g.focused.Term.Buf.Selection.Normalize()
+			g.activeFocused().Term.Buf.Lock()
+			sel := g.activeFocused().Term.Buf.Selection.Normalize()
 			if sel.StartRow == sel.EndRow && sel.StartCol == sel.EndCol {
-				g.focused.Term.Buf.Selection = terminal.Selection{}
+				g.activeFocused().Term.Buf.Selection = terminal.Selection{}
 			}
-			g.focused.Term.Buf.Unlock()
+			g.activeFocused().Term.Buf.Unlock()
 		}
 	}
 }
@@ -497,8 +497,8 @@ func (g *Game) handleMouseSelection(mx, my int, leftPressed, leftWas bool) {
 // handleMousePTY forwards mouse events to the PTY when a mouse mode is active.
 func (g *Game) handleMousePTY(mx, my, mouseMode int, sgrMouse bool) {
 	pad := g.cfg.Window.Padding
-	col := (mx-g.focused.Rect.Min.X-pad)/g.font.CellW + 1
-	row := (my-g.focused.Rect.Min.Y-pad-g.focused.HeaderH)/g.font.CellH + 1
+	col := (mx-g.activeFocused().Rect.Min.X-pad)/g.font.CellW + 1
+	row := (my-g.activeFocused().Rect.Min.Y-pad-g.activeFocused().HeaderH)/g.font.CellH + 1
 	if col < 1 {
 		col = 1
 	}
@@ -548,21 +548,21 @@ func (g *Game) handleMousePTY(mx, my, mouseMode int, sgrMouse bool) {
 		// Shift+scroll bypasses PTY mouse mode and scrolls the terminal's own
 		// scrollback buffer (standard behaviour in iTerm2, kitty, etc.).
 		// Blocked in alt screen — TUI apps own the viewport.
-		g.focused.Term.Buf.RLock()
-		altShift := g.focused.Term.Buf.IsAltActive()
-		g.focused.Term.Buf.RUnlock()
+		g.activeFocused().Term.Buf.RLock()
+		altShift := g.activeFocused().Term.Buf.IsAltActive()
+		g.activeFocused().Term.Buf.RUnlock()
 		if ebiten.IsKeyPressed(ebiten.KeyShift) && !altShift {
 			g.input.ScrollAccum += wy * float64(g.cfg.Scroll.WheelLinesPerTick)
 			lines := int(g.input.ScrollAccum)
 			if lines != 0 {
 				g.input.ScrollAccum -= float64(lines)
-				g.focused.Term.Buf.Lock()
+				g.activeFocused().Term.Buf.Lock()
 				if lines > 0 {
-					g.focused.Term.Buf.ScrollViewUp(lines)
+					g.activeFocused().Term.Buf.ScrollViewUp(lines)
 				} else {
-					g.focused.Term.Buf.ScrollViewDown(-lines)
+					g.activeFocused().Term.Buf.ScrollViewDown(-lines)
 				}
-				g.focused.Term.Buf.Unlock()
+				g.activeFocused().Term.Buf.Unlock()
 			}
 		} else {
 			btn := mouseScrollUp
@@ -579,7 +579,7 @@ func (g *Game) handleMousePTY(mx, my, mouseMode int, sgrMouse bool) {
 // display rows is selected in full.
 // Must be called with Buf write lock held.
 func (g *Game) wordSelection(row, col int) terminal.Selection {
-	buf := g.focused.Term.Buf
+	buf := g.activeFocused().Term.Buf
 	isWordChar := func(r rune) bool {
 		return r != ' ' && r != 0 &&
 			(unicode.IsLetter(r) || unicode.IsDigit(r) ||
@@ -690,7 +690,7 @@ func (g *Game) sendMouseEvent(btn, col, row int, press bool, sgr bool) {
 			final = 'm'
 		}
 		seq := fmt.Sprintf("\x1B[<%d;%d;%d%c", btn, col, row, final)
-		g.focused.Term.SendBytes([]byte(seq))
+		g.activeFocused().Term.SendBytes([]byte(seq))
 	} else {
 		if col > mouseX10CoordMax || row > mouseX10CoordMax {
 			return
@@ -699,7 +699,7 @@ func (g *Game) sendMouseEvent(btn, col, row int, press bool, sgr bool) {
 		if !press {
 			b = mouseX10Release
 		}
-		g.focused.Term.SendBytes([]byte{0x1B, '[', 'M', b, byte(col + mouseX10Offset), byte(row + mouseX10Offset)}) // #nosec G115
+		g.activeFocused().Term.SendBytes([]byte{0x1B, '[', 'M', b, byte(col + mouseX10Offset), byte(row + mouseX10Offset)}) // #nosec G115
 	}
 }
 
@@ -708,11 +708,11 @@ func (g *Game) sendMouseEvent(btn, col, row int, press bool, sgr bool) {
 func (g *Game) sendMouseMotion(btn, col, row int, sgr bool) {
 	if sgr {
 		seq := fmt.Sprintf("\x1B[<%d;%d;%dM", btn, col, row)
-		g.focused.Term.SendBytes([]byte(seq))
+		g.activeFocused().Term.SendBytes([]byte(seq))
 	} else {
 		if col > mouseX10CoordMax || row > mouseX10CoordMax {
 			return
 		}
-		g.focused.Term.SendBytes([]byte{0x1B, '[', 'M', byte(btn), byte(col + mouseX10Offset), byte(row + mouseX10Offset)}) // #nosec G115 — col/row guarded above
+		g.activeFocused().Term.SendBytes([]byte{0x1B, '[', 'M', byte(btn), byte(col + mouseX10Offset), byte(row + mouseX10Offset)}) // #nosec G115 — col/row guarded above
 	}
 }

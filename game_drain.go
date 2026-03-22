@@ -57,9 +57,9 @@ func (g *Game) handleResize() {
 	// When zoomed, the focused pane must fill the entire pane area.
 	// ComputeRects above set it to the normal split rect — override it.
 	// Clear HeaderH — zoomed pane has no header (only one visible pane).
-	if g.zoomed && g.focused != nil {
-		g.focused.HeaderH = 0
-		g.focused.Rect = paneRect
+	if g.zoomed && g.activeFocused() != nil {
+		g.activeFocused().HeaderH = 0
+		g.activeFocused().Rect = paneRect
 		cols := (paneRect.Dx() - g.cfg.Window.Padding*2) / g.font.CellW
 		rows := (paneRect.Dy() - g.cfg.Window.Padding) / g.font.CellH
 		if cols < 1 {
@@ -68,21 +68,20 @@ func (g *Game) handleResize() {
 		if rows < 1 {
 			rows = 1
 		}
-		g.focused.Cols = cols
-		g.focused.Rows = rows
-		g.focused.Term.Resize(cols, rows)
+		g.activeFocused().Cols = cols
+		g.activeFocused().Rows = rows
+		g.activeFocused().Term.Resize(cols, rows)
 	}
 
-	g.syncActive()
 	g.screenDirty = true
 }
 
 func (g *Game) drainTitle() {
-	if g.focused == nil || g.tabMgr.ActiveIdx >= len(g.tabMgr.Tabs) {
+	if g.activeFocused() == nil || g.tabMgr.ActiveIdx >= len(g.tabMgr.Tabs) {
 		return
 	}
 	select {
-	case title := <-g.focused.Term.TitleCh:
+	case title := <-g.activeFocused().Term.TitleCh:
 		clean := sanitizeTitle(title) // SEC-003
 		// Do not overwrite a user-set tab name with OSC 0/2 from the shell.
 		if !g.tabMgr.Tabs[g.tabMgr.ActiveIdx].UserRenamed {
@@ -98,14 +97,14 @@ func (g *Game) drainTitle() {
 // drainCwd reads the latest CWD from the focused pane's OSC 7 channel.
 // When the CWD changes it kicks off an async git status lookup via the poller.
 func (g *Game) drainCwd() {
-	if g.focused == nil {
+	if g.activeFocused() == nil {
 		return
 	}
 	select {
-	case cwd := <-g.focused.Term.CwdCh:
+	case cwd := <-g.activeFocused().Term.CwdCh:
 		if cwd != g.statusBarState.Cwd {
 			g.statusBarState.Cwd = cwd
-			g.focused.Term.Cwd = cwd
+			g.activeFocused().Term.Cwd = cwd
 			g.statusBarState.GitBranch = ""
 			g.statusBarState.GitCommit = ""
 			g.statusBarState.GitDirty = 0
@@ -128,7 +127,7 @@ func (g *Game) drainBell() {
 	fired := false
 
 	// Active tab panes — visual border flash on bell.
-	for _, leaf := range g.layout.Leaves() {
+	for _, leaf := range g.activeLayout().Leaves() {
 		select {
 		case <-leaf.Pane.Term.BellCh:
 			if g.cfg.Bell.Style != "none" {
@@ -182,7 +181,7 @@ func (g *Game) drainBell() {
 // Background tab channels are drained silently to prevent buildup.
 func (g *Game) drainBlockDone() {
 	// Drain all active tab panes and capture completed commands for the vault.
-	for _, leaf := range g.layout.Leaves() {
+	for _, leaf := range g.activeLayout().Leaves() {
 		select {
 		case <-leaf.Pane.Term.Buf.BlockDoneCh:
 			// Capture the command text from the completed block for the vault.
@@ -227,7 +226,7 @@ func (g *Game) updateVaultSuggestion() {
 		return
 	}
 
-	buf := g.focused.Term.Buf
+	buf := g.activeFocused().Term.Buf
 	buf.RLock()
 	// No suggestions when scrolled back, in alt screen, or cursor is hidden.
 	if buf.ViewOffset != 0 || buf.IsAltActive() || !buf.CursorVisible {
@@ -298,7 +297,7 @@ func (g *Game) drainForeground() {
 			if name != p.ProcName {
 				p.ProcName = name
 				g.screenDirty = true
-				if p == g.focused {
+				if p == g.activeFocused() {
 					g.statusBarState.ForegroundProc = name
 				}
 			}
@@ -327,7 +326,7 @@ func (g *Game) drainShellIntegration() {
 				if p.ProcName != "" {
 					p.ProcName = ""
 					g.screenDirty = true
-					if p == g.focused {
+					if p == g.activeFocused() {
 						g.statusBarState.ForegroundProc = ""
 					}
 				}
@@ -346,8 +345,8 @@ func (g *Game) pollStatusOnOutput() {
 	seq := terminal.RenderSeq()
 
 	if g.poller.ShouldPollCwd(seq) {
-		if g.focused != nil {
-			go g.focused.Term.QueryCWD(g.ctx)
+		if g.activeFocused() != nil {
+			go g.activeFocused().Term.QueryCWD(g.ctx)
 		}
 	}
 
@@ -407,22 +406,22 @@ func (g *Game) handlePaste() {
 func (g *Game) drainTerminalPaste() bool {
 	select {
 	case clip := <-g.clipboardCh:
-		if g.focused == nil {
+		if g.activeFocused() == nil {
 			return false
 		}
 		out := norm.NFC.Bytes([]byte(clip))
 		out = bytes.ReplaceAll(out, []byte("\r\n"), []byte("\r"))
 		out = bytes.ReplaceAll(out, []byte("\n"), []byte("\r"))
 
-		g.focused.Term.Buf.RLock()
-		bracketed := g.focused.Term.Buf.BracketedPaste
-		g.focused.Term.Buf.RUnlock()
+		g.activeFocused().Term.Buf.RLock()
+		bracketed := g.activeFocused().Term.Buf.BracketedPaste
+		g.activeFocused().Term.Buf.RUnlock()
 		if bracketed {
-			g.focused.Term.SendBytes([]byte("\x1B[200~"))
-			g.focused.Term.SendBytes(out)
-			g.focused.Term.SendBytes([]byte("\x1B[201~"))
+			g.activeFocused().Term.SendBytes([]byte("\x1B[200~"))
+			g.activeFocused().Term.SendBytes(out)
+			g.activeFocused().Term.SendBytes([]byte("\x1B[201~"))
 		} else {
-			g.focused.Term.SendBytes(out)
+			g.activeFocused().Term.SendBytes(out)
 		}
 		return true
 	default:

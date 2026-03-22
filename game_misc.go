@@ -241,13 +241,13 @@ func (g *Game) handlePaneRenameInput() {
 	g.handleTextEdit(
 		g.cancelPaneRename,
 		func(text string, cursor int) bool {
-			g.focused.RenameText = text
-			g.focused.RenameCursorPos = cursor
+			g.activeFocused().RenameText = text
+			g.activeFocused().RenameCursorPos = cursor
 			g.commitPaneRename()
 			return true // stop processing after pane rename commit
 		},
-		func() (string, int) { return g.focused.RenameText, g.focused.RenameCursorPos },
-		func(t string, c int) { g.focused.RenameText = t; g.focused.RenameCursorPos = c },
+		func() (string, int) { return g.activeFocused().RenameText, g.activeFocused().RenameCursorPos },
+		func(t string, c int) { g.activeFocused().RenameText = t; g.activeFocused().RenameCursorPos = c },
 		&g.repeats.PaneRename,
 	)
 }
@@ -431,12 +431,12 @@ func (g *Game) collectStats() {
 		paneCount += len(t.Layout.Leaves())
 	}
 	g.statsState.PaneCount = paneCount
-	if g.focused != nil {
-		g.focused.Term.Buf.RLock()
-		g.statsState.BufRows = g.focused.Term.Buf.Rows
-		g.statsState.BufCols = g.focused.Term.Buf.Cols
-		g.statsState.Scrollback = g.focused.Term.Buf.ScrollbackLen()
-		g.focused.Term.Buf.RUnlock()
+	if g.activeFocused() != nil {
+		g.activeFocused().Term.Buf.RLock()
+		g.statsState.BufRows = g.activeFocused().Term.Buf.Rows
+		g.statsState.BufCols = g.activeFocused().Term.Buf.Cols
+		g.statsState.Scrollback = g.activeFocused().Term.Buf.ScrollbackLen()
+		g.activeFocused().Term.Buf.RUnlock()
 	}
 	g.statsLastTick = time.Now()
 	g.screenDirty = true
@@ -553,20 +553,20 @@ func (g *Game) toggleRecording() {
 // extractSelectedText returns the selected text from the focused pane,
 // or empty string if no selection is active.
 func (g *Game) extractSelectedText() string {
-	if g.focused == nil {
+	if g.activeFocused() == nil {
 		return ""
 	}
-	g.focused.Term.Buf.RLock()
-	sel := g.focused.Term.Buf.Selection
-	cols := g.focused.Term.Buf.Cols
+	g.activeFocused().Term.Buf.RLock()
+	sel := g.activeFocused().Term.Buf.Selection
+	cols := g.activeFocused().Term.Buf.Cols
 
 	if !sel.Active {
-		g.focused.Term.Buf.RUnlock()
+		g.activeFocused().Term.Buf.RUnlock()
 		return ""
 	}
 
 	norm := sel.Normalize()
-	maxAbsRow := g.focused.Term.Buf.ScrollbackLen() + g.focused.Term.Buf.Rows - 1
+	maxAbsRow := g.activeFocused().Term.Buf.ScrollbackLen() + g.activeFocused().Term.Buf.Rows - 1
 	if norm.StartRow < 0 {
 		norm.StartRow = 0
 	}
@@ -576,7 +576,7 @@ func (g *Game) extractSelectedText() string {
 
 	var text strings.Builder
 	for r := norm.StartRow; r <= norm.EndRow; r++ {
-		if r > norm.StartRow && !g.focused.Term.Buf.IsAbsRowWrapped(r) {
+		if r > norm.StartRow && !g.activeFocused().Term.Buf.IsAbsRowWrapped(r) {
 			text.WriteByte('\n')
 		}
 		colStart := 0
@@ -589,7 +589,7 @@ func (g *Game) extractSelectedText() string {
 		}
 		var line strings.Builder
 		for c := colStart; c <= colEnd && c < cols; c++ {
-			cell := g.focused.Term.Buf.GetAbsCell(r, c)
+			cell := g.activeFocused().Term.Buf.GetAbsCell(r, c)
 			if cell.Width == 0 {
 				continue
 			}
@@ -601,19 +601,19 @@ func (g *Game) extractSelectedText() string {
 		}
 		text.WriteString(strings.TrimRight(line.String(), " "))
 	}
-	g.focused.Term.Buf.RUnlock()
+	g.activeFocused().Term.Buf.RUnlock()
 	return text.String()
 }
 
 // updateURLHover rescans URLs in the focused pane and updates hover state.
 func (g *Game) updateURLHover(mx, my, pad int) {
-	if g.focused == nil {
+	if g.activeFocused() == nil {
 		return
 	}
 	// Convert pixel to cell coordinates within the focused pane.
-	col := (mx - g.focused.Rect.Min.X - pad) / g.font.CellW
-	row := (my - g.focused.Rect.Min.Y - pad - g.focused.HeaderH) / g.font.CellH
-	if col < 0 || row < 0 || col >= g.focused.Cols || row >= g.focused.Rows {
+	col := (mx - g.activeFocused().Rect.Min.X - pad) / g.font.CellW
+	row := (my - g.activeFocused().Rect.Min.Y - pad - g.activeFocused().HeaderH) / g.font.CellH
+	if col < 0 || row < 0 || col >= g.activeFocused().Cols || row >= g.activeFocused().Rows {
 		if g.urlHover.HoveredURL != nil {
 			g.urlHover.HoveredURL = nil
 			g.screenDirty = true
@@ -622,9 +622,9 @@ func (g *Game) updateURLHover(mx, my, pad int) {
 	}
 
 	// Rescan URLs from the buffer.
-	g.focused.Term.Buf.RLock()
-	g.urlHover.Matches = g.focused.Term.Buf.DetectURLs()
-	g.focused.Term.Buf.RUnlock()
+	g.activeFocused().Term.Buf.RLock()
+	g.urlHover.Matches = g.activeFocused().Term.Buf.DetectURLs()
+	g.activeFocused().Term.Buf.RUnlock()
 
 	hit := terminal.URLAt(g.urlHover.Matches, row, col)
 	if hit != g.urlHover.HoveredURL {
@@ -725,9 +725,7 @@ func (g *Game) recomputeAllTabs() {
 	for _, t := range g.tabMgr.Tabs {
 		g.recomputeLayoutNode(t.Layout)
 	}
-	if g.tabMgr.ActiveIdx < len(g.tabMgr.Tabs) {
-		g.layout = g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Layout
-	}
+	// activeLayout() reads directly from the tab — no cache refresh needed.
 }
 
 // reloadVault disables the vault and clears ghost text when vault is no longer enabled.
@@ -805,9 +803,7 @@ func (g *Game) adjustFontSize(delta float64) {
 	for _, t := range g.tabMgr.Tabs {
 		g.recomputeLayoutNode(t.Layout)
 	}
-	if g.tabMgr.ActiveIdx < len(g.tabMgr.Tabs) {
-		g.layout = g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Layout
-	}
+	// activeLayout() reads directly from the tab — no cache refresh needed.
 	g.screenDirty = true
 	g.flashStatus(fmt.Sprintf("Font size: %.0fpt", newSize))
 }

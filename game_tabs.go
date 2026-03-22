@@ -89,13 +89,11 @@ func (g *Game) closeActiveTab() {
 		leaf.Pane.Term.Close()
 	}
 	if !g.tabMgr.Remove(g.tabMgr.ActiveIdx) {
-		g.layout = nil
-		g.focused = nil
+		// No tabs remain — activeLayout()/activeFocused() return nil automatically.
 		return
 	}
 	g.renderer.ClearPaneCache()
 	g.renderer.SetLayoutDirty()
-	g.syncActive()
 }
 
 // dismissTabHover clears the tab hover popover state and marks the screen dirty.
@@ -201,7 +199,7 @@ func (g *Game) updateTabHover(mx, my int) {
 
 // pushFocus records the current focus state before changing it.
 func (g *Game) pushFocus() {
-	g.tabMgr.PushFocus(g.focused)
+	g.tabMgr.PushFocus(g.activeFocused())
 }
 
 // goBack pops the focus history stack and navigates to the previous location.
@@ -227,7 +225,7 @@ func (g *Game) goBack() {
 			continue
 		}
 		// Skip if it's the current location.
-		if e.tabIdx == g.tabMgr.ActiveIdx && e.pane == g.focused {
+		if e.tabIdx == g.tabMgr.ActiveIdx && e.pane == g.activeFocused() {
 			continue
 		}
 		if e.tabIdx != g.tabMgr.ActiveIdx {
@@ -263,10 +261,9 @@ func (g *Game) switchTabNoHistory(i int) {
 	g.tabMgr.Tabs[i].SnapshotGen()
 	g.renderer.SetLayoutDirty()
 	g.renderer.ClearPaneCache()
-	g.syncActive()
 	g.input.SelDrag.Active = false
 	g.statusBarState.ForegroundProc = ""
-	g.focused.Term.RefreshForeground(g.ctx)
+	g.activeFocused().Term.RefreshForeground(g.ctx)
 	if g.search.State.Open {
 		g.closeSearchOverlay()
 	}
@@ -375,7 +372,6 @@ func (g *Game) reorderTab(from, to int) {
 	g.dismissTabHover()
 	g.tabMgr.Reorder(from, to)
 	g.tabSwitcherState.Cursor = to
-	g.syncActive()
 	g.screenDirty = true
 }
 

@@ -265,11 +265,11 @@ func (g *Game) drainLLMSFetch() {
 // captureMarkdownContent extracts text from the terminal for markdown viewing.
 // Priority: last block output > active selection > visible screen.
 func (g *Game) captureMarkdownContent() string {
-	if g.focused == nil {
+	if g.activeFocused() == nil {
 		return ""
 	}
 
-	buf := g.focused.Term.Buf
+	buf := g.activeFocused().Term.Buf
 	buf.RLock()
 	defer buf.RUnlock()
 

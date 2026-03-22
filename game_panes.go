@@ -9,14 +9,14 @@ import (
 func (g *Game) performSplit(kind pane.NodeKind, createPane func() (*pane.Pane, error)) {
 	g.zoomed = false
 	paneRect := g.contentRect()
-	newRoot, newPane, err := g.layout.Split(g.focused, kind, createPane)
+	newRoot, newPane, err := g.activeLayout().Split(g.activeFocused(), kind, createPane)
 	if err != nil {
 		return
 	}
 	g.updateLayout(newRoot)
-	setPaneHeaders(g.layout, g.font.CellH)
-	g.layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
-	for _, leaf := range g.layout.Leaves() {
+	setPaneHeaders(g.activeLayout(), g.font.CellH)
+	g.activeLayout().ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
+	for _, leaf := range g.activeLayout().Leaves() {
 		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
 	}
 	g.renderer.SetLayoutDirty()
@@ -26,28 +26,28 @@ func (g *Game) performSplit(kind pane.NodeKind, createPane func() (*pane.Pane, e
 func (g *Game) splitH() {
 	dir := sanitizeDirectory(g.statusBarState.Cwd)
 	g.performSplit(pane.HSplit, func() (*pane.Pane, error) {
-		return pane.New(g.cfg, g.focused.Rect, g.font.CellW, g.font.CellH, dir)
+		return pane.New(g.cfg, g.activeFocused().Rect, g.font.CellW, g.font.CellH, dir)
 	})
 }
 
 func (g *Game) splitV() {
 	dir := sanitizeDirectory(g.statusBarState.Cwd)
 	g.performSplit(pane.VSplit, func() (*pane.Pane, error) {
-		return pane.New(g.cfg, g.focused.Rect, g.font.CellW, g.font.CellH, dir)
+		return pane.New(g.cfg, g.activeFocused().Rect, g.font.CellW, g.font.CellH, dir)
 	})
 }
 
 func (g *Game) splitHServer() {
 	dir := sanitizeDirectory(g.statusBarState.Cwd)
 	g.performSplit(pane.HSplit, func() (*pane.Pane, error) {
-		return pane.NewServer(g.cfg, g.focused.Rect, g.font.CellW, g.font.CellH, dir, "")
+		return pane.NewServer(g.cfg, g.activeFocused().Rect, g.font.CellW, g.font.CellH, dir, "")
 	})
 }
 
 func (g *Game) splitVServer() {
 	dir := sanitizeDirectory(g.statusBarState.Cwd)
 	g.performSplit(pane.VSplit, func() (*pane.Pane, error) {
-		return pane.NewServer(g.cfg, g.focused.Rect, g.font.CellW, g.font.CellH, dir, "")
+		return pane.NewServer(g.cfg, g.activeFocused().Rect, g.font.CellW, g.font.CellH, dir, "")
 	})
 }
 
@@ -57,33 +57,33 @@ func (g *Game) closePane(p *pane.Pane) {
 	paneRect := g.contentRect()
 
 	var nextFocus *pane.Pane
-	if p == g.focused {
-		nextFocus = g.layout.NextLeaf(p)
+	if p == g.activeFocused() {
+		nextFocus = g.activeLayout().NextLeaf(p)
 	}
 
-	newRoot := g.layout.Remove(p)
+	newRoot := g.activeLayout().Remove(p)
 	if newRoot == nil {
 		return
 	}
 	g.updateLayout(newRoot)
-	setPaneHeaders(g.layout, g.font.CellH)
-	g.layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
-	for _, leaf := range g.layout.Leaves() {
+	setPaneHeaders(g.activeLayout(), g.font.CellH)
+	g.activeLayout().ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
+	for _, leaf := range g.activeLayout().Leaves() {
 		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
 	}
 
 	g.renderer.SetLayoutDirty()
 	if nextFocus != nil && nextFocus != p {
 		g.setFocus(nextFocus)
-	} else if len(g.layout.Leaves()) > 0 {
-		g.setFocus(g.layout.Leaves()[0].Pane)
+	} else if len(g.activeLayout().Leaves()) > 0 {
+		g.setFocus(g.activeLayout().Leaves()[0].Pane)
 	}
 }
 
 // detachPaneToTab extracts the focused pane into a new tab.
 // Only works when the current tab has multiple panes.
 func (g *Game) detachPaneToTab() {
-	leaves := g.layout.Leaves()
+	leaves := g.activeLayout().Leaves()
 	if len(leaves) <= 1 {
 		g.flashStatus("Only one pane — nothing to detach")
 		return
@@ -91,21 +91,21 @@ func (g *Game) detachPaneToTab() {
 	g.zoomed = false
 
 	// Remember the pane to detach.
-	p := g.focused
+	p := g.activeFocused()
 
 	// Focus the next pane before detaching.
-	nextFocus := g.layout.NextLeaf(p)
+	nextFocus := g.activeLayout().NextLeaf(p)
 
 	// Detach from the current layout (does NOT close the terminal).
-	newRoot := g.layout.Detach(p)
+	newRoot := g.activeLayout().Detach(p)
 	if newRoot == nil {
 		return
 	}
 	g.updateLayout(newRoot)
 	if nextFocus != nil && nextFocus != p {
 		g.setFocusNoHistory(nextFocus)
-	} else if len(g.layout.Leaves()) > 0 {
-		g.setFocusNoHistory(g.layout.Leaves()[0].Pane)
+	} else if len(g.activeLayout().Leaves()) > 0 {
+		g.setFocusNoHistory(g.activeLayout().Leaves()[0].Pane)
 	}
 	g.recomputeLayout()
 
@@ -121,7 +121,7 @@ func (g *Game) detachPaneToTab() {
 	copy(g.tabMgr.Tabs[insertIdx+1:], g.tabMgr.Tabs[insertIdx:])
 	g.tabMgr.Tabs[insertIdx] = newTab
 	g.switchTab(insertIdx)
-	setPaneHeaders(g.layout, g.font.CellH)
+	setPaneHeaders(g.activeLayout(), g.font.CellH)
 	g.recomputeLayout()
 }
 
@@ -134,9 +134,9 @@ func (g *Game) mergePaneToTab(targetIdx int) {
 	}
 	g.zoomed = false
 
-	p := g.focused
+	p := g.activeFocused()
 	srcIdx := g.tabMgr.ActiveIdx
-	singlePane := len(g.layout.Leaves()) <= 1
+	singlePane := len(g.activeLayout().Leaves()) <= 1
 
 	if singlePane {
 		// Single-pane tab: move the whole tab's pane into the target.
@@ -159,21 +159,21 @@ func (g *Game) mergePaneToTab(targetIdx int) {
 		}
 		g.switchTabNoHistory(targetIdx)
 		// Recompute the target tab's layout.
-		setPaneHeaders(g.layout, g.font.CellH)
+		setPaneHeaders(g.activeLayout(), g.font.CellH)
 		g.recomputeLayout()
 		g.setFocus(p)
 	} else {
 		// Multi-pane tab: detach focused pane and move it.
-		nextFocus := g.layout.NextLeaf(p)
-		newRoot := g.layout.Detach(p)
+		nextFocus := g.activeLayout().NextLeaf(p)
+		newRoot := g.activeLayout().Detach(p)
 		if newRoot == nil {
 			return
 		}
 		g.updateLayout(newRoot)
 		if nextFocus != nil && nextFocus != p {
 			g.setFocusNoHistory(nextFocus)
-		} else if len(g.layout.Leaves()) > 0 {
-			g.setFocusNoHistory(g.layout.Leaves()[0].Pane)
+		} else if len(g.activeLayout().Leaves()) > 0 {
+			g.setFocusNoHistory(g.activeLayout().Leaves()[0].Pane)
 		}
 		g.recomputeLayout()
 
@@ -181,7 +181,7 @@ func (g *Game) mergePaneToTab(targetIdx int) {
 		targetTab := g.tabMgr.Tabs[targetIdx]
 		targetTab.Layout = targetTab.Layout.AttachH(targetTab.Focused, p)
 		g.switchTab(targetIdx)
-		setPaneHeaders(g.layout, g.font.CellH)
+		setPaneHeaders(g.activeLayout(), g.font.CellH)
 		g.recomputeLayout()
 		g.setFocus(p)
 	}
@@ -217,8 +217,7 @@ func (g *Game) setFocus(p *pane.Pane) {
 // setFocusNoHistory sets focus without recording history.
 // Used by goBack to avoid polluting the stack.
 func (g *Game) setFocusNoHistory(p *pane.Pane) {
-	g.focused = p
-	g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Focused = p
+	g.setActiveFocused(p)
 	g.input.SelDrag.Active = false
 	g.urlHover.HoveredURL = nil
 	g.urlHover.Matches = nil
@@ -239,7 +238,7 @@ func (g *Game) setFocusNoHistory(p *pane.Pane) {
 
 // focusDir moves focus to the nearest pane in direction (dx, dy).
 func (g *Game) focusDir(dx, dy int) {
-	if p := g.layout.NeighborInDir(g.focused, dx, dy); p != nil {
+	if p := g.activeLayout().NeighborInDir(g.activeFocused(), dx, dy); p != nil {
 		g.setFocus(p)
 	}
 }
@@ -250,7 +249,7 @@ func (g *Game) resizePane(dx, dy int) {
 	if g.zoomed {
 		return
 	}
-	parent, isLeft := g.layout.FindParent(g.focused)
+	parent, isLeft := g.activeLayout().FindParent(g.activeFocused())
 	if parent == nil {
 		return
 	}
@@ -284,26 +283,26 @@ func (g *Game) resizePane(dx, dy int) {
 
 // startRenamePane enters inline rename mode for the focused pane.
 func (g *Game) startRenamePane() {
-	if g.focused == nil {
+	if g.activeFocused() == nil {
 		return
 	}
 	// Cancel any active tab rename first.
 	g.cancelRename()
-	g.focused.Renaming = true
-	g.focused.RenameText = g.focused.CustomName
-	g.focused.RenameCursorPos = len([]rune(g.focused.CustomName))
+	g.activeFocused().Renaming = true
+	g.activeFocused().RenameText = g.activeFocused().CustomName
+	g.activeFocused().RenameCursorPos = len([]rune(g.activeFocused().CustomName))
 	g.screenDirty = true
 }
 
 // commitPaneRename applies the pane rename text.
 func (g *Game) commitPaneRename() {
-	if g.focused != nil && g.focused.Renaming {
-		name := sanitizeTitle(g.focused.RenameText)
-		g.focused.CustomName = name
-		g.focused.Renaming = false
-		g.focused.RenameText = ""
-		if g.focused.ServerSessionID != "" {
-			g.focused.Term.RenameSession(name)
+	if g.activeFocused() != nil && g.activeFocused().Renaming {
+		name := sanitizeTitle(g.activeFocused().RenameText)
+		g.activeFocused().CustomName = name
+		g.activeFocused().Renaming = false
+		g.activeFocused().RenameText = ""
+		if g.activeFocused().ServerSessionID != "" {
+			g.activeFocused().Term.RenameSession(name)
 		}
 		g.screenDirty = true
 	}
@@ -311,16 +310,16 @@ func (g *Game) commitPaneRename() {
 
 // cancelPaneRename exits pane rename mode without applying changes.
 func (g *Game) cancelPaneRename() {
-	if g.focused != nil && g.focused.Renaming {
-		g.focused.Renaming = false
-		g.focused.RenameText = ""
+	if g.activeFocused() != nil && g.activeFocused().Renaming {
+		g.activeFocused().Renaming = false
+		g.activeFocused().RenameText = ""
 		g.screenDirty = true
 	}
 }
 
 // renamingPane returns true if the focused pane is being renamed.
 func (g *Game) renamingPane() bool {
-	return g.focused != nil && g.focused.Renaming
+	return g.activeFocused() != nil && g.activeFocused().Renaming
 }
 
 // toggleZoom fullscreens the focused pane (Cmd+Z). Calling again restores the layout.
@@ -335,7 +334,7 @@ func (g *Game) toggleZoom() {
 	g.screenDirty = true
 	g.renderer.SetLayoutDirty()
 	g.renderer.ClearPaneCache()
-	p := g.focused
+	p := g.activeFocused()
 	p.HeaderH = 0 // zoomed pane has no header — only one pane visible
 	p.Rect = fullRect
 	cols := (fullRect.Dx() - g.cfg.Window.Padding*2) / g.font.CellW
@@ -354,7 +353,7 @@ func (g *Game) toggleZoom() {
 // recomputeLayout recalculates rects and resizes all pane terminals.
 // Call after any layout mutation (split ratio change, split/close, zoom toggle).
 func (g *Game) recomputeLayout() {
-	g.recomputeLayoutNode(g.layout)
+	g.recomputeLayoutNode(g.activeLayout())
 }
 
 // recomputeLayoutNode recomputes rects and resizes terminals for the given layout.
@@ -397,9 +396,9 @@ func (g *Game) unzoom() {
 
 	fullRect := g.contentRect()
 
-	setPaneHeaders(g.layout, g.font.CellH)
-	g.layout.ComputeRects(fullRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
-	for _, leaf := range g.layout.Leaves() {
+	setPaneHeaders(g.activeLayout(), g.font.CellH)
+	g.activeLayout().ComputeRects(fullRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
+	for _, leaf := range g.activeLayout().Leaves() {
 		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
 	}
 }

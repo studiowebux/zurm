@@ -25,7 +25,7 @@ var explorerInputKeys = []ebiten.Key{
 
 // openFileExplorer opens the file explorer sidebar rooted at the focused pane's CWD.
 func (g *Game) openFileExplorer() {
-	root := g.focused.Term.Cwd
+	root := g.activeFocused().Term.Cwd
 	if root == "" {
 		root = os.Getenv("HOME")
 	}
@@ -169,7 +169,7 @@ func (g *Game) handleFileExplorerInput() {
 				// Handle special entries
 				if e.Name == "." {
 					// Current directory - insert path
-					g.focused.Term.SendBytes([]byte(e.Path))
+					g.activeFocused().Term.SendBytes([]byte(e.Path))
 					g.closeFileExplorer()
 					return
 				} else if e.Name == ".." {
@@ -212,7 +212,7 @@ func (g *Game) handleFileExplorerInput() {
 
 			// "." — send path, close. File — send path, close.
 			if selected.Name == "." || !selected.IsDir {
-				g.focused.Term.SendBytes([]byte(selected.Path))
+				g.activeFocused().Term.SendBytes([]byte(selected.Path))
 				g.closeFileExplorer()
 				return
 			}
@@ -380,7 +380,7 @@ func (g *Game) handleExplorerSearchInput() {
 		st.SearchCursorPos = ti.CursorPos
 		if len(st.SearchResults) > 0 && st.Cursor >= 0 && st.Cursor < len(st.SearchResults) {
 			selected := st.SearchResults[st.Cursor]
-			g.focused.Term.SendBytes([]byte(selected.Path))
+			g.activeFocused().Term.SendBytes([]byte(selected.Path))
 			g.closeFileExplorer()
 		}
 		return
