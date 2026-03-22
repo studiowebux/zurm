@@ -173,6 +173,38 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCloseFlushes(t *testing.T) {
+	dir := t.TempDir()
+	v := New(dir, " ", 0)
+	// Initialize the done channel so Close() works.
+	v.Add("test-command")
+
+	v.Close()
+
+	// Load into a new vault and verify the command was persisted.
+	v2 := New(dir, " ", 0)
+	if err := v2.Load(); err != nil {
+		t.Fatalf("Load after Close: %v", err)
+	}
+	if v2.Len() != 1 {
+		t.Fatalf("expected 1 command after close+load, got %d", v2.Len())
+	}
+	got := v2.Suggest("$ test-com", 0)
+	if got != "mand" {
+		t.Errorf("Suggest = %q, want %q", got, "mand")
+	}
+}
+
+func TestCloseIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	v := New(dir, " ", 0)
+	v.Add("test")
+
+	// Close twice — should not panic.
+	v.Close()
+	v.Close()
+}
+
 func TestParseZshHistory(t *testing.T) {
 	dir := t.TempDir()
 	histFile := filepath.Join(dir, ".zsh_history")

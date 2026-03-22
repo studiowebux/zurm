@@ -366,6 +366,44 @@ func TestParseTaskList(t *testing.T) {
 	}
 }
 
+func TestParseOrderedList_Numbering(t *testing.T) {
+	input := "1. first\n2. second\n3. third"
+	lines := Parse(input, 80)
+	if len(lines) < 3 {
+		t.Fatalf("expected at least 3 lines, got %d", len(lines))
+	}
+
+	expected := []string{"1. ", "2. ", "3. "}
+	for i, want := range expected {
+		if len(lines[i].Spans) == 0 {
+			t.Fatalf("line %d: no spans", i)
+		}
+		got := lines[i].Spans[0].Text
+		if got != want {
+			t.Errorf("line %d: marker = %q, want %q", i, got, want)
+		}
+	}
+}
+
+func TestParseOrderedList_CustomStart(t *testing.T) {
+	input := "3. third\n4. fourth\n5. fifth"
+	lines := Parse(input, 80)
+	if len(lines) < 3 {
+		t.Fatalf("expected at least 3 lines, got %d", len(lines))
+	}
+
+	expected := []string{"3. ", "4. ", "5. "}
+	for i, want := range expected {
+		if len(lines[i].Spans) == 0 {
+			t.Fatalf("line %d: no spans", i)
+		}
+		got := lines[i].Spans[0].Text
+		if got != want {
+			t.Errorf("line %d: marker = %q, want %q", i, got, want)
+		}
+	}
+}
+
 // spanStyles collects all unique styles from a line's spans.
 func spanStyles(line StyledLine) map[SpanStyle]bool {
 	m := make(map[SpanStyle]bool)

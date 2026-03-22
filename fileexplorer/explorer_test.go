@@ -349,3 +349,104 @@ func TestSearchCurrentLevel_NoMatch(t *testing.T) {
 		t.Errorf("got %d results, want 0", len(results))
 	}
 }
+
+// --- Safety guard tests ---
+
+func TestDeletePath_RejectsEmpty(t *testing.T) {
+	if err := DeletePath(""); err == nil {
+		t.Error("DeletePath('') should return error")
+	}
+}
+
+func TestDeletePath_RejectsRoot(t *testing.T) {
+	if err := DeletePath("/"); err == nil {
+		t.Error("DeletePath('/') should return error")
+	}
+}
+
+func TestDeletePath_RejectsDot(t *testing.T) {
+	if err := DeletePath("."); err == nil {
+		t.Error("DeletePath('.') should return error")
+	}
+}
+
+func TestDeletePath_ValidPath(t *testing.T) {
+	root := setupTestDir(t)
+	path := filepath.Join(root, "file_a.txt")
+	if err := DeletePath(path); err != nil {
+		t.Fatalf("DeletePath(%q) = %v", path, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("file should be deleted")
+	}
+}
+
+func TestRenamePath_RejectsPathSeparator(t *testing.T) {
+	root := setupTestDir(t)
+	old := filepath.Join(root, "file_a.txt")
+	_, err := RenamePath(old, "../escape.txt")
+	if err == nil {
+		t.Error("RenamePath with ../ should return error")
+	}
+}
+
+func TestRenamePath_RejectsSlash(t *testing.T) {
+	root := setupTestDir(t)
+	old := filepath.Join(root, "file_a.txt")
+	_, err := RenamePath(old, "sub/name.txt")
+	if err == nil {
+		t.Error("RenamePath with / should return error")
+	}
+}
+
+func TestRenamePath_RejectsDotDot(t *testing.T) {
+	root := setupTestDir(t)
+	old := filepath.Join(root, "file_a.txt")
+	_, err := RenamePath(old, "..")
+	if err == nil {
+		t.Error("RenamePath with '..' should return error")
+	}
+}
+
+func TestRenamePath_Valid(t *testing.T) {
+	root := setupTestDir(t)
+	old := filepath.Join(root, "file_a.txt")
+	newPath, err := RenamePath(old, "renamed.txt")
+	if err != nil {
+		t.Fatalf("RenamePath = %v", err)
+	}
+	expected := filepath.Join(root, "renamed.txt")
+	if newPath != expected {
+		t.Errorf("newPath = %q, want %q", newPath, expected)
+	}
+	if _, err := os.Stat(expected); err != nil {
+		t.Error("renamed file should exist")
+	}
+}
+
+func TestCopyPath_RejectsDuplicateDst(t *testing.T) {
+	root := setupTestDir(t)
+	src := filepath.Join(root, "file_a.txt")
+	// Copy once.
+	if err := CopyPath(src, filepath.Join(root, "alpha")); err != nil {
+		t.Fatalf("first copy: %v", err)
+	}
+	// Copy again — should fail because dst already exists.
+	err := CopyPath(src, filepath.Join(root, "alpha"))
+	if err == nil {
+		t.Error("CopyPath should error when destination exists")
+	}
+}
+
+func TestMovePath_RejectsDuplicateDst(t *testing.T) {
+	root := setupTestDir(t)
+	// Create a second file to move.
+	src := filepath.Join(root, "file_b.txt")
+	// Copy file_a first to create a conflict.
+	os.WriteFile(filepath.Join(root, "alpha", "file_b.txt"), []byte("conflict"), 0o600)
+
+	err := MovePath(src, filepath.Join(root, "alpha"))
+	if err == nil {
+		t.Error("MovePath should error when destination exists")
+	}
+}
