@@ -137,11 +137,8 @@ type Game struct {
 	suspended   bool      // true when TPS has been reduced
 
 	// Key repeat state for special keys.
-	repeatKey    ebiten.Key
-	repeatSeq    []byte // exact bytes to resend on repeat; nil uses KeyEventToBytes
-	repeatActive bool
-	repeatStart  time.Time
-	repeatLast   time.Time
+	ptyRepeat KeyRepeatHandler
+	repeatSeq []byte // exact bytes to resend on repeat; nil uses KeyEventToBytes
 
 	// Selection drag state.
 	selDrag SelectionDragger
@@ -197,11 +194,8 @@ type Game struct {
 	tabSearchState renderer.TabSearchState
 
 	// Key repeat state for tab search navigation (arrow keys) and text input.
-	tabSearchRepeatKey    ebiten.Key
-	tabSearchRepeatActive bool
-	tabSearchRepeatStart  time.Time
-	tabSearchRepeatLast   time.Time
-	tabSearchInputRepeat  TextInputRepeat // backspace/cursor in the search text field
+	tabSearchRepeat      KeyRepeatHandler
+	tabSearchInputRepeat TextInputRepeat // backspace/cursor in the search text field
 
 	// Command palette controller (Cmd+P).
 	palette *PaletteController

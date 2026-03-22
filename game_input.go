@@ -408,35 +408,14 @@ func (g *Game) handleInput() {
 
 			// Left Option as Meta — specific sequences with repeat support.
 			case alt && key == ebiten.KeyBackspace:
-				seq := []byte("\x1b\x7f")
-				g.focused.Term.SendBytes(seq)
+				g.sendWithRepeat(key, []byte("\x1b\x7f"))
 				sentToPTY = true
-				g.repeatKey = key
-				g.repeatSeq = seq
-				g.repeatActive = true
-				now := time.Now()
-				g.repeatStart = now
-				g.repeatLast = now
 			case alt && key == ebiten.KeyArrowLeft:
-				seq := []byte("\x1bb")
-				g.focused.Term.SendBytes(seq)
+				g.sendWithRepeat(key, []byte("\x1bb"))
 				sentToPTY = true
-				g.repeatKey = key
-				g.repeatSeq = seq
-				g.repeatActive = true
-				now := time.Now()
-				g.repeatStart = now
-				g.repeatLast = now
 			case alt && key == ebiten.KeyArrowRight:
-				seq := []byte("\x1bf")
-				g.focused.Term.SendBytes(seq)
+				g.sendWithRepeat(key, []byte("\x1bf"))
 				sentToPTY = true
-				g.repeatKey = key
-				g.repeatSeq = seq
-				g.repeatActive = true
-				now := time.Now()
-				g.repeatStart = now
-				g.repeatLast = now
 
 			// alt + symbol/digit keys: send ESC + ASCII.
 			// Needed for keys whose Option+key is a macOS dead key (e.g. Option+`)
@@ -461,18 +440,12 @@ func (g *Game) handleInput() {
 				appCursor := g.focused.Term.Buf.AppCursorKeys
 				g.focused.Term.Buf.RUnlock()
 				if seq := terminal.KeyEventToBytes(key, appCursor); seq != nil {
-					g.focused.Term.SendBytes(seq)
+					g.sendWithRepeat(key, seq)
 					sentToPTY = true
-					g.repeatKey = key
-					g.repeatSeq = seq
-					g.repeatActive = true
-					now := time.Now()
-					g.repeatStart = now
-					g.repeatLast = now
 				}
 			}
-		} else if !pressed && g.repeatActive && g.repeatKey == key {
-			g.repeatActive = false
+		} else if !pressed && g.ptyRepeat.active && g.ptyRepeat.key == key {
+			g.ptyRepeat.Reset()
 		}
 		g.prevKeys[key] = pressed
 	}
@@ -494,17 +467,28 @@ func (g *Game) handleInput() {
 	// Vault suggestion update — extract current line from buffer and query vault.
 	g.updateVaultSuggestion()
 
-	if g.repeatActive && ebiten.IsKeyPressed(g.repeatKey) {
+	if g.ptyRepeat.active && ebiten.IsKeyPressed(g.ptyRepeat.key) {
 		now := time.Now()
-		if now.Sub(g.repeatStart) >= keyRepeatDelay && now.Sub(g.repeatLast) >= keyRepeatInterval {
+		if now.Sub(g.ptyRepeat.start) >= keyRepeatDelay && now.Sub(g.ptyRepeat.last) >= keyRepeatInterval {
 			if g.repeatSeq != nil {
 				g.focused.Term.SendBytes(g.repeatSeq)
 			}
-			g.repeatLast = now
+			g.ptyRepeat.last = now
 		}
-	} else if g.repeatActive && !ebiten.IsKeyPressed(g.repeatKey) {
-		g.repeatActive = false
+	} else if g.ptyRepeat.active {
+		g.ptyRepeat.Reset()
 	}
+}
+
+// sendWithRepeat sends seq to the focused PTY and starts key repeat tracking.
+func (g *Game) sendWithRepeat(key ebiten.Key, seq []byte) {
+	g.focused.Term.SendBytes(seq)
+	g.repeatSeq = seq
+	now := time.Now()
+	g.ptyRepeat.key = key
+	g.ptyRepeat.active = true
+	g.ptyRepeat.start = now
+	g.ptyRepeat.last = now
 }
 
 func isSpecialKey(key ebiten.Key) bool {

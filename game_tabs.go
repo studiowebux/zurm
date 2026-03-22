@@ -453,7 +453,7 @@ func (g *Game) openTabSearch() {
 	g.palette.Close()
 	g.overlayState = renderer.OverlayState{}
 	g.closeMenu()
-	g.tabSearchRepeatActive = false
+	g.tabSearchRepeat.Reset()
 	g.prevKeys[ebiten.KeyArrowUp] = ebiten.IsKeyPressed(ebiten.KeyArrowUp)
 	g.prevKeys[ebiten.KeyArrowDown] = ebiten.IsKeyPressed(ebiten.KeyArrowDown)
 	g.screenDirty = true
@@ -462,40 +462,8 @@ func (g *Game) openTabSearch() {
 // closeTabSearch closes the tab search overlay.
 func (g *Game) closeTabSearch() {
 	g.tabSearchState = renderer.TabSearchState{}
-	g.tabSearchRepeatActive = false
+	g.tabSearchRepeat.Reset()
 	g.screenDirty = true
-}
-
-// updateTabSearchRepeat handles key repeat for arrow keys in the tab search overlay.
-func (g *Game) updateTabSearchRepeat(key ebiten.Key, now time.Time) bool {
-	pressed := ebiten.IsKeyPressed(key)
-	wasPressed := g.prevKeys[key]
-	g.prevKeys[key] = pressed
-
-	if !pressed {
-		if g.tabSearchRepeatActive && g.tabSearchRepeatKey == key {
-			g.tabSearchRepeatActive = false
-		}
-		return false
-	}
-
-	keyRepeatDelay := time.Duration(g.cfg.Keyboard.RepeatDelayMs) * time.Millisecond
-	keyRepeatInterval := time.Duration(g.cfg.Keyboard.RepeatIntervalMs) * time.Millisecond
-
-	if !wasPressed {
-		g.tabSearchRepeatKey = key
-		g.tabSearchRepeatActive = true
-		g.tabSearchRepeatStart = now
-		g.tabSearchRepeatLast = now
-		return true
-	}
-	if g.tabSearchRepeatActive && g.tabSearchRepeatKey == key &&
-		now.Sub(g.tabSearchRepeatStart) >= keyRepeatDelay &&
-		now.Sub(g.tabSearchRepeatLast) >= keyRepeatInterval {
-		g.tabSearchRepeatLast = now
-		return true
-	}
-	return false
 }
 
 // handleTabSearchInput processes keyboard input while the tab search overlay is open.
@@ -506,12 +474,16 @@ func (g *Game) handleTabSearchInput() {
 
 	filtered := renderer.FilterTabSearch(g.tabMgr.Tabs, g.tabSearchState.Query)
 
-	if g.updateTabSearchRepeat(ebiten.KeyArrowUp, now) && g.tabSearchState.Cursor > 0 {
+	upPressed := ebiten.IsKeyPressed(ebiten.KeyArrowUp)
+	downPressed := ebiten.IsKeyPressed(ebiten.KeyArrowDown)
+	if g.tabSearchRepeat.Update(ebiten.KeyArrowUp, upPressed, g.prevKeys[ebiten.KeyArrowUp], now) && g.tabSearchState.Cursor > 0 {
 		g.tabSearchState.Cursor--
 	}
-	if g.updateTabSearchRepeat(ebiten.KeyArrowDown, now) && g.tabSearchState.Cursor < len(filtered)-1 {
+	if g.tabSearchRepeat.Update(ebiten.KeyArrowDown, downPressed, g.prevKeys[ebiten.KeyArrowDown], now) && g.tabSearchState.Cursor < len(filtered)-1 {
 		g.tabSearchState.Cursor++
 	}
+	g.prevKeys[ebiten.KeyArrowUp] = upPressed
+	g.prevKeys[ebiten.KeyArrowDown] = downPressed
 
 	// ESC: clear query if non-empty, otherwise close.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {

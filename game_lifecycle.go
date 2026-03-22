@@ -59,7 +59,7 @@ func (g *Game) handleFocus() {
 			for btn := range g.prevMouseButtons {
 				g.prevMouseButtons[btn] = false
 			}
-			g.repeatActive = false
+			g.ptyRepeat.Reset()
 			g.scrollAccum = 0
 
 			// Clear dock badge when window regains focus.
