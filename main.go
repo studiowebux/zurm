@@ -125,12 +125,8 @@ type Game struct {
 	// zoomed is true when the focused pane is temporarily fullscreened (Cmd+Z).
 	zoomed bool
 
-	// prevKeys tracks which keys were pressed last frame (for edge detection).
-	prevKeys map[ebiten.Key]bool
-	// prevMouseButtons tracks mouse button state last frame.
-	prevMouseButtons map[ebiten.MouseButton]bool
-	// prevMX/prevMY track last cursor position for block hover detection.
-	prevMX, prevMY int
+	// Input tracking — edge detection, drag, click, scroll, mouse state.
+	input inputTracker
 
 	// dpi is the device pixel ratio (2.0 on Retina).
 	dpi float64
@@ -142,33 +138,8 @@ type Game struct {
 	unfocusedAt time.Time // when focus was lost; zero = focused
 	suspended   bool      // true when TPS has been reduced
 
-	// Key repeat state for special keys.
-	ptyRepeat KeyRepeatHandler
-	repeatSeq []byte // exact bytes to resend on repeat; nil uses KeyEventToBytes
-
-	// Selection drag state.
-	selDrag SelectionDragger
-
-	// Divider drag state (pane resize).
-	divDrag DividerDragHandler
-
-
 	// URL hover state — detected URLs in the focused pane's visible buffer.
 	urlHover urlHoverState
-
-	// PTY mouse motion tracking for modes 1002/1003.
-	lastMouseCol int // last col sent to PTY (1-based)
-	lastMouseRow int // last row sent to PTY (1-based)
-	mouseHeldBtn int // button currently held (-1 = none, 0=left, 1=mid, 2=right)
-
-	// scrollAccum accumulates fractional trackpad wheel deltas so no input is lost.
-	scrollAccum float64
-
-	// Click timing for double/triple click word/line select.
-	lastClickTime time.Time
-	lastClickRow  int
-	lastClickCol  int
-	clickCount    int
 
 	// Context menu state.
 	menuState renderer.MenuState
@@ -198,24 +169,14 @@ type Game struct {
 	// Tab search overlay state (Cmd+J).
 	tabSearchState renderer.TabSearchState
 
-	// Key repeat state for tab search navigation (arrow keys) and text input.
-	tabSearchRepeat      KeyRepeatHandler
-	tabSearchInputRepeat TextInputRepeat // backspace/cursor in the search text field
+	// Key repeat state for all text input fields and tab search navigation.
+	repeats inputRepeats
 
 	// Command palette controller (Cmd+P).
 	palette *PaletteController
 
-
 	// File explorer controller (Cmd+E).
 	explorer *ExplorerController
-
-
-	// Key repeat state for text input overlays.
-	renameRepeat     TextInputRepeat // tab rename
-	noteRepeat       TextInputRepeat // tab note
-	paneRenameRepeat TextInputRepeat // pane rename
-	overlayRepeat    TextInputRepeat // help overlay search
-	mdSearchRepeat   TextInputRepeat // markdown viewer search
 
 	// Dirty-render state — screen is only redrawn when something changes.
 	screenDirty  bool
@@ -499,9 +460,11 @@ func main() {
 		winW:             logW,
 		winH:             logH,
 		dpi:              dpi,
-		prevKeys:         make(map[ebiten.Key]bool),
-		prevMouseButtons: make(map[ebiten.MouseButton]bool),
-		mouseHeldBtn:     -1,
+		input: inputTracker{
+			PrevKeys:         make(map[ebiten.Key]bool),
+			PrevMouseButtons: make(map[ebiten.MouseButton]bool),
+			MouseHeldBtn:     -1,
+		},
 		blocksEnabled:    cfg.Blocks.Enabled,
 		rec: recState{
 			Recorder: recorder.New(winW, winH),

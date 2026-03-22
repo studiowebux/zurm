@@ -20,14 +20,14 @@ func (g *Game) handleMouse() {
 	tabBarH := g.renderer.TabBarHeight()
 
 	leftPressed := ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft)
-	leftWas := g.prevMouseButtons[ebiten.MouseButtonLeft]
+	leftWas := g.input.PrevMouseButtons[ebiten.MouseButtonLeft]
 	rightPressed := ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight)
-	rightWas := g.prevMouseButtons[ebiten.MouseButtonRight]
+	rightWas := g.input.PrevMouseButtons[ebiten.MouseButtonRight]
 
 	// Update previous button state on every exit path.
 	defer func() {
-		g.prevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
-		g.prevMouseButtons[ebiten.MouseButtonRight] = rightPressed
+		g.input.PrevMouseButtons[ebiten.MouseButtonLeft] = leftPressed
+		g.input.PrevMouseButtons[ebiten.MouseButtonRight] = rightPressed
 	}()
 
 	// Any mouse button state change or scroll makes the frame dirty.
@@ -36,17 +36,17 @@ func (g *Game) handleMouse() {
 	}
 
 	// When blocks are enabled, cursor movement may change hover state.
-	if g.blocksEnabled && (mx != g.prevMX || my != g.prevMY) {
+	if g.blocksEnabled && (mx != g.input.PrevMX || my != g.input.PrevMY) {
 		g.screenDirty = true
 	}
 
 	// URL hover detection — update when cursor moves over the focused pane.
-	if mx != g.prevMX || my != g.prevMY {
+	if mx != g.input.PrevMX || my != g.input.PrevMY {
 		g.updateURLHover(mx, my, g.cfg.Window.Padding)
 	}
 
-	g.prevMX = mx
-	g.prevMY = my
+	g.input.PrevMX = mx
+	g.input.PrevMY = my
 
 	// Tab hover popover tracking — update before processing clicks.
 	g.updateTabHover(mx, my)
@@ -65,7 +65,7 @@ func (g *Game) handleMouse() {
 	if (leftPressed && !leftWas) || (rightPressed && !rightWas) {
 		g.dismissTabHover()
 	}
-	if my < tabBarH && !g.selDrag.Active {
+	if my < tabBarH && !g.input.SelDrag.Active {
 		g.handleMouseTabBar(mx, my, leftPressed, leftWas, rightPressed, rightWas)
 		return
 	}
@@ -86,14 +86,14 @@ func (g *Game) handleMouse() {
 	}
 
 	// Divider drag — resize pane splits by dragging the divider.
-	if g.divDrag.Active {
+	if g.input.DivDrag.Active {
 		if leftPressed {
-			if g.divDrag.Update(mx, my) {
+			if g.input.DivDrag.Update(mx, my) {
 				g.recomputeLayout()
 				g.screenDirty = true
 			}
 		} else {
-			g.divDrag.End()
+			g.input.DivDrag.End()
 		}
 		return
 	}
@@ -101,7 +101,7 @@ func (g *Game) handleMouse() {
 	// Start divider drag on click — 4px hit margin around the 1px divider.
 	if leftPressed && !leftWas && !g.zoomed {
 		if split := g.layout.SplitAt(mx, my, 4); split != nil {
-			g.divDrag.Start(split)
+			g.input.DivDrag.Start(split)
 			return
 		}
 	}
@@ -118,11 +118,11 @@ func (g *Game) handleMouse() {
 	if leftPressed && !leftWas && g.focused.HeaderH > 0 &&
 		my >= g.focused.Rect.Min.Y && my < g.focused.Rect.Min.Y+g.focused.HeaderH {
 		now := time.Now()
-		if now.Sub(g.lastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
+		if now.Sub(g.input.LastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
 			g.startRenamePane()
 			return
 		}
-		g.lastClickTime = now
+		g.input.LastClickTime = now
 		return
 	}
 
@@ -336,14 +336,14 @@ func (g *Game) handleMouseTabBar(mx, my int, leftPressed, leftWas, rightPressed,
 			clicked := mx / tabW
 			if clicked >= 0 && clicked < numTabs {
 				now := time.Now()
-				if clicked == g.tabMgr.ActiveIdx && now.Sub(g.lastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
+				if clicked == g.tabMgr.ActiveIdx && now.Sub(g.input.LastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
 					g.startRenameTab(clicked)
 				} else {
 					g.switchTab(clicked)
 					g.tabMgr.DragFromIdx = clicked
 					g.tabMgr.DragStartX = mx
 				}
-				g.lastClickTime = now
+				g.input.LastClickTime = now
 			}
 		}
 	} else if leftPressed && leftWas && !g.tabMgr.Dragging {
@@ -415,15 +415,15 @@ func (g *Game) handleMouseSelection(mx, my int, leftPressed, leftWas bool) {
 
 	if leftPressed && !leftWas {
 		now := time.Now()
-		sameCell := row == g.lastClickRow && col == g.lastClickCol
-		if sameCell && now.Sub(g.lastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
-			g.clickCount++
+		sameCell := row == g.input.LastClickRow && col == g.input.LastClickCol
+		if sameCell && now.Sub(g.input.LastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
+			g.input.ClickCount++
 		} else {
-			g.clickCount = 1
+			g.input.ClickCount = 1
 		}
-		g.lastClickTime = now
-		g.lastClickRow = row
-		g.lastClickCol = col
+		g.input.LastClickTime = now
+		g.input.LastClickRow = row
+		g.input.LastClickCol = col
 
 		g.focused.Term.Buf.Lock()
 		absRow := g.focused.Term.Buf.DisplayToAbsRow(row)
@@ -432,29 +432,29 @@ func (g *Game) handleMouseSelection(mx, my int, leftPressed, leftWas bool) {
 		if snapCol >= 0 && snapCol < g.focused.Term.Buf.Cols && g.focused.Term.Buf.GetDisplayCell(row, snapCol).Width == 0 && snapCol > 0 {
 			snapCol--
 		}
-		switch g.clickCount {
+		switch g.input.ClickCount {
 		case 1:
-			g.selDrag.Active = true
+			g.input.SelDrag.Active = true
 			g.focused.Term.Buf.Selection = terminal.Selection{
 				Active:   true,
 				StartRow: absRow, StartCol: snapCol,
 				EndRow:   absRow, EndCol: snapCol,
 			}
 		case 2:
-			g.selDrag.Active = false
+			g.input.SelDrag.Active = false
 			g.focused.Term.Buf.Selection = g.wordSelection(row, col)
 		default:
-			g.selDrag.Active = false
+			g.input.SelDrag.Active = false
 			g.focused.Term.Buf.Selection = terminal.Selection{
 				Active:   true,
 				StartRow: absRow, StartCol: 0,
 				EndRow:   absRow, EndCol: g.focused.Term.Buf.Cols - 1,
 			}
-			g.clickCount = 0
+			g.input.ClickCount = 0
 		}
 		g.focused.Term.Buf.BumpRenderGen()
 		g.focused.Term.Buf.Unlock()
-	} else if leftPressed && leftWas && g.selDrag.Active {
+	} else if leftPressed && leftWas && g.input.SelDrag.Active {
 		g.focused.Term.Buf.Lock()
 		// Auto-scroll when dragging past the pane edges.
 		if rawRow < 0 {
@@ -482,8 +482,8 @@ func (g *Game) handleMouseSelection(mx, my int, leftPressed, leftWas bool) {
 		g.focused.Term.Buf.Unlock()
 		g.screenDirty = true
 	} else if !leftPressed && leftWas {
-		if g.selDrag.Active {
-			g.selDrag.Active = false
+		if g.input.SelDrag.Active {
+			g.input.SelDrag.Active = false
 			g.focused.Term.Buf.Lock()
 			sel := g.focused.Term.Buf.Selection.Normalize()
 			if sel.StartRow == sel.EndRow && sel.StartCol == sel.EndCol {
@@ -517,30 +517,30 @@ func (g *Game) handleMousePTY(mx, my, mouseMode int, sgrMouse bool) {
 	}
 	for _, b := range buttons {
 		pressed := ebiten.IsMouseButtonPressed(b.btn)
-		was := g.prevMouseButtons[b.btn]
+		was := g.input.PrevMouseButtons[b.btn]
 		if pressed && !was {
-			g.mouseHeldBtn = b.btnNum
+			g.input.MouseHeldBtn = b.btnNum
 			g.sendMouseEvent(b.btnNum, col, row, true, sgrMouse)
 		} else if !pressed && was {
-			if g.mouseHeldBtn == b.btnNum {
-				g.mouseHeldBtn = -1
+			if g.input.MouseHeldBtn == b.btnNum {
+				g.input.MouseHeldBtn = -1
 			}
 			g.sendMouseEvent(b.btnNum, col, row, false, sgrMouse)
 		}
-		g.prevMouseButtons[b.btn] = pressed
+		g.input.PrevMouseButtons[b.btn] = pressed
 	}
 
 	// Send motion events for mode 1002 (button-tracking) and mode 1003 (any-motion).
-	if mouseMode >= 1002 && (col != g.lastMouseCol || row != g.lastMouseRow) {
-		if mouseMode == 1003 || g.mouseHeldBtn >= 0 {
+	if mouseMode >= 1002 && (col != g.input.LastMouseCol || row != g.input.LastMouseRow) {
+		if mouseMode == 1003 || g.input.MouseHeldBtn >= 0 {
 			motionBtn := 35 // no button held
-			if g.mouseHeldBtn >= 0 {
-				motionBtn = g.mouseHeldBtn + 32
+			if g.input.MouseHeldBtn >= 0 {
+				motionBtn = g.input.MouseHeldBtn + 32
 			}
 			g.sendMouseMotion(motionBtn, col, row, sgrMouse)
 		}
-		g.lastMouseCol = col
-		g.lastMouseRow = row
+		g.input.LastMouseCol = col
+		g.input.LastMouseRow = row
 	}
 
 	_, wy := ebiten.Wheel()
@@ -552,10 +552,10 @@ func (g *Game) handleMousePTY(mx, my, mouseMode int, sgrMouse bool) {
 		altShift := g.focused.Term.Buf.IsAltActive()
 		g.focused.Term.Buf.RUnlock()
 		if ebiten.IsKeyPressed(ebiten.KeyShift) && !altShift {
-			g.scrollAccum += wy * float64(g.cfg.Scroll.WheelLinesPerTick)
-			lines := int(g.scrollAccum)
+			g.input.ScrollAccum += wy * float64(g.cfg.Scroll.WheelLinesPerTick)
+			lines := int(g.input.ScrollAccum)
 			if lines != 0 {
-				g.scrollAccum -= float64(lines)
+				g.input.ScrollAccum -= float64(lines)
 				g.focused.Term.Buf.Lock()
 				if lines > 0 {
 					g.focused.Term.Buf.ScrollViewUp(lines)

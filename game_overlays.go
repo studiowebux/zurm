@@ -188,7 +188,7 @@ func (g *Game) handleMenuKeys() {
 	// inpututil.IsKeyJustPressed catches sub-frame taps that polling misses.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.closeMenu()
-		g.prevKeys[ebiten.KeyEscape] = true
+		g.input.PrevKeys[ebiten.KeyEscape] = true
 		return
 	}
 
@@ -199,7 +199,7 @@ func (g *Game) handleMenuKeys() {
 	}
 	for _, key := range menuKeys {
 		pressed := ebiten.IsKeyPressed(key)
-		wasPressed := g.prevKeys[key]
+		wasPressed := g.input.PrevKeys[key]
 		if pressed && !wasPressed {
 			switch key {
 			case ebiten.KeyArrowUp:
@@ -235,7 +235,7 @@ func (g *Game) handleMenuKeys() {
 				g.menuExecute()
 			}
 		}
-		g.prevKeys[key] = pressed
+		g.input.PrevKeys[key] = pressed
 	}
 }
 
@@ -323,7 +323,7 @@ func (g *Game) handleOverlayInput() {
 			g.overlayState = renderer.OverlayState{}
 		}
 		g.screenDirty = true
-		g.prevKeys[ebiten.KeyEscape] = true
+		g.input.PrevKeys[ebiten.KeyEscape] = true
 		return
 	}
 
@@ -338,7 +338,7 @@ func (g *Game) handleOverlayInput() {
 	prevQuery := g.overlayState.SearchQuery
 	for _, key := range scrollKeys {
 		pressed := ebiten.IsKeyPressed(key)
-		wasPressed := g.prevKeys[key]
+		wasPressed := g.input.PrevKeys[key]
 		if pressed && !wasPressed {
 			switch {
 			case key == ebiten.KeySlash && meta:
@@ -353,12 +353,12 @@ func (g *Game) handleOverlayInput() {
 				g.overlayState.ScrollOffset += 10 * g.overlayState.RowH
 			}
 		}
-		g.prevKeys[key] = pressed
+		g.input.PrevKeys[key] = pressed
 	}
-	g.prevKeys[ebiten.KeyMeta] = meta
+	g.input.PrevKeys[ebiten.KeyMeta] = meta
 
 	ti := &TextInput{Text: g.overlayState.SearchQuery, CursorPos: g.overlayState.SearchCursorPos}
-	ti.Update(&g.overlayRepeat, meta, alt)
+	ti.Update(&g.repeats.Overlay, meta, alt)
 	g.overlayState.SearchQuery = ti.Text
 	g.overlayState.SearchCursorPos = ti.CursorPos
 
@@ -388,8 +388,8 @@ func (g *Game) openPalette() {
 	g.palette.Open()
 	g.overlayState = renderer.OverlayState{}
 	g.closeMenu()
-	g.prevKeys[ebiten.KeyArrowUp] = ebiten.IsKeyPressed(ebiten.KeyArrowUp)
-	g.prevKeys[ebiten.KeyArrowDown] = ebiten.IsKeyPressed(ebiten.KeyArrowDown)
+	g.input.PrevKeys[ebiten.KeyArrowUp] = ebiten.IsKeyPressed(ebiten.KeyArrowUp)
+	g.input.PrevKeys[ebiten.KeyArrowDown] = ebiten.IsKeyPressed(ebiten.KeyArrowDown)
 	g.screenDirty = true
 }
 
@@ -548,14 +548,14 @@ func (g *Game) handlePaletteInput() {
 	// Arrow keys with OS-style repeat (delay then interval).
 	upPressed := ebiten.IsKeyPressed(ebiten.KeyArrowUp)
 	downPressed := ebiten.IsKeyPressed(ebiten.KeyArrowDown)
-	if g.palette.repeat.Update(ebiten.KeyArrowUp, upPressed, g.prevKeys[ebiten.KeyArrowUp], now) && g.palette.State.Cursor > 0 {
+	if g.palette.repeat.Update(ebiten.KeyArrowUp, upPressed, g.input.PrevKeys[ebiten.KeyArrowUp], now) && g.palette.State.Cursor > 0 {
 		g.palette.State.Cursor--
 	}
-	if g.palette.repeat.Update(ebiten.KeyArrowDown, downPressed, g.prevKeys[ebiten.KeyArrowDown], now) && g.palette.State.Cursor < len(filtered)-1 {
+	if g.palette.repeat.Update(ebiten.KeyArrowDown, downPressed, g.input.PrevKeys[ebiten.KeyArrowDown], now) && g.palette.State.Cursor < len(filtered)-1 {
 		g.palette.State.Cursor++
 	}
-	g.prevKeys[ebiten.KeyArrowUp] = upPressed
-	g.prevKeys[ebiten.KeyArrowDown] = downPressed
+	g.input.PrevKeys[ebiten.KeyArrowUp] = upPressed
+	g.input.PrevKeys[ebiten.KeyArrowDown] = downPressed
 
 	// ESC: clear query if non-empty, otherwise close. Uses inpututil to catch
 	// sub-frame taps that polling misses.
@@ -567,15 +567,15 @@ func (g *Game) handlePaletteInput() {
 		} else {
 			g.closePalette()
 		}
-		g.prevKeys[ebiten.KeyEscape] = true
+		g.input.PrevKeys[ebiten.KeyEscape] = true
 		return
 	}
 
 	// Enter and Cmd+P — edge-triggered only.
 	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyP} {
 		pressed := ebiten.IsKeyPressed(key)
-		wasPressed := g.prevKeys[key]
-		g.prevKeys[key] = pressed
+		wasPressed := g.input.PrevKeys[key]
+		g.input.PrevKeys[key] = pressed
 		if !pressed || wasPressed {
 			continue
 		}
@@ -592,7 +592,7 @@ func (g *Game) handlePaletteInput() {
 			g.closePalette()
 		}
 	}
-	g.prevKeys[ebiten.KeyMeta] = meta
+	g.input.PrevKeys[ebiten.KeyMeta] = meta
 
 	prevQuery := g.palette.State.Query
 	ti := &TextInput{Text: g.palette.State.Query, CursorPos: g.palette.State.CursorPos}
@@ -621,7 +621,7 @@ func (g *Game) handleConfirmInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) || inpututil.IsKeyJustPressed(ebiten.KeyN) {
 		g.confirmState = renderer.ConfirmState{}
 		g.confirmPendingAction = nil
-		g.prevKeys[ebiten.KeyEscape] = true
+		g.input.PrevKeys[ebiten.KeyEscape] = true
 		g.screenDirty = true
 		return
 	}
@@ -630,8 +630,8 @@ func (g *Game) handleConfirmInput() {
 		ebiten.KeyEnter, ebiten.KeyNumpadEnter, ebiten.KeyY,
 	} {
 		pressed := ebiten.IsKeyPressed(key)
-		was := g.prevKeys[key]
-		g.prevKeys[key] = pressed
+		was := g.input.PrevKeys[key]
+		g.input.PrevKeys[key] = pressed
 		if pressed && !was {
 			if g.confirmPendingAction != nil {
 				g.confirmPendingAction()

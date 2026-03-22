@@ -219,13 +219,13 @@ func (g *Game) setFocus(p *pane.Pane) {
 func (g *Game) setFocusNoHistory(p *pane.Pane) {
 	g.focused = p
 	g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Focused = p
-	g.selDrag.Active = false
+	g.input.SelDrag.Active = false
 	g.urlHover.HoveredURL = nil
 	g.urlHover.Matches = nil
-	g.scrollAccum = 0
-	g.mouseHeldBtn = -1
-	g.lastMouseCol = 0
-	g.lastMouseRow = 0
+	g.input.ScrollAccum = 0
+	g.input.MouseHeldBtn = -1
+	g.input.LastMouseCol = 0
+	g.input.LastMouseRow = 0
 	g.statusBarState.ForegroundProc = ""
 	p.Term.RefreshForeground(g.ctx)
 	if g.search.State.Open {

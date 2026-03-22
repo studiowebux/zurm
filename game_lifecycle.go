@@ -47,20 +47,20 @@ func (g *Game) handleFocus() {
 					ebiten.KeyControl, ebiten.KeyControlLeft, ebiten.KeyControlRight,
 					ebiten.KeyShift, ebiten.KeyShiftLeft, ebiten.KeyShiftRight,
 					ebiten.KeyAlt, ebiten.KeyAltLeft, ebiten.KeyAltRight:
-					g.prevKeys[k] = ebiten.IsKeyPressed(k)
+					g.input.PrevKeys[k] = ebiten.IsKeyPressed(k)
 				default:
-					g.prevKeys[k] = false
+					g.input.PrevKeys[k] = false
 				}
 			}
 			// Reset mouse button edge-detection state on focus gain, matching
 			// prevKeys reset above. Stale prevMouseButtons[left]=true from the
 			// last interaction before focus loss would cause the first click to
 			// be silently skipped (pressed==was → no edge detected).
-			for btn := range g.prevMouseButtons {
-				g.prevMouseButtons[btn] = false
+			for btn := range g.input.PrevMouseButtons {
+				g.input.PrevMouseButtons[btn] = false
 			}
-			g.ptyRepeat.Reset()
-			g.scrollAccum = 0
+			g.input.PtyRepeat.Reset()
+			g.input.ScrollAccum = 0
 
 			// Clear dock badge when window regains focus.
 			clearDockBadge()

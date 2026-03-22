@@ -11,9 +11,9 @@ func (g *Game) handleInput() {
 	// Track meta key state for hint mode (tab number badges).
 	// Must run before any early return so release is always detected.
 	metaNow := ebiten.IsKeyPressed(ebiten.KeyMeta)
-	if metaNow != g.prevKeys[ebiten.KeyMeta] {
+	if metaNow != g.input.PrevKeys[ebiten.KeyMeta] {
 		g.screenDirty = true
-		g.prevKeys[ebiten.KeyMeta] = metaNow
+		g.input.PrevKeys[ebiten.KeyMeta] = metaNow
 	}
 
 	// Pane rename mode intercepts all input (highest priority).
@@ -144,7 +144,7 @@ func (g *Game) handleInput() {
 	keyScrolled := false
 	if !altActive {
 		for _, key := range allKeys {
-			if !ebiten.IsKeyPressed(key) || g.prevKeys[key] {
+			if !ebiten.IsKeyPressed(key) || g.input.PrevKeys[key] {
 				continue
 			}
 			switch {
@@ -176,10 +176,10 @@ func (g *Game) handleInput() {
 		if mouseMode == 0 && !altActive {
 			// Accumulate fractional trackpad deltas — int truncation drops sub-pixel
 			// input and makes smooth-scroll feel janky.
-			g.scrollAccum += wy * float64(g.cfg.Scroll.WheelLinesPerTick)
-			lines := int(g.scrollAccum)
+			g.input.ScrollAccum += wy * float64(g.cfg.Scroll.WheelLinesPerTick)
+			lines := int(g.input.ScrollAccum)
 			if lines != 0 {
-				g.scrollAccum -= float64(lines)
+				g.input.ScrollAccum -= float64(lines)
 				g.focused.Term.Buf.Lock()
 				if lines > 0 {
 					g.focused.Term.Buf.ScrollViewUp(lines)
@@ -217,16 +217,16 @@ func (g *Game) handleInput() {
 	// Vault suggestion update — extract current line from buffer and query vault.
 	g.updateVaultSuggestion()
 
-	if g.ptyRepeat.active && ebiten.IsKeyPressed(g.ptyRepeat.key) {
+	if g.input.PtyRepeat.active && ebiten.IsKeyPressed(g.input.PtyRepeat.key) {
 		now := time.Now()
-		if now.Sub(g.ptyRepeat.start) >= keyRepeatDelay && now.Sub(g.ptyRepeat.last) >= keyRepeatInterval {
-			if g.repeatSeq != nil {
-				g.focused.Term.SendBytes(g.repeatSeq)
+		if now.Sub(g.input.PtyRepeat.start) >= keyRepeatDelay && now.Sub(g.input.PtyRepeat.last) >= keyRepeatInterval {
+			if g.input.RepeatSeq != nil {
+				g.focused.Term.SendBytes(g.input.RepeatSeq)
 			}
-			g.ptyRepeat.last = now
+			g.input.PtyRepeat.last = now
 		}
-	} else if g.ptyRepeat.active {
-		g.ptyRepeat.Reset()
+	} else if g.input.PtyRepeat.active {
+		g.input.PtyRepeat.Reset()
 	}
 }
 
@@ -256,17 +256,17 @@ func (g *Game) handleInputKeys(ctrl, shift, meta, alt bool) bool {
 
 	for _, key := range allKeys {
 		pressed := ebiten.IsKeyPressed(key)
-		wasPressed := g.prevKeys[key]
+		wasPressed := g.input.PrevKeys[key]
 		if pressed && !wasPressed {
 			if g.handleAppShortcut(key, ctrl, shift, meta, alt) {
 				// App-level shortcut consumed the key.
 			} else if pty := g.handleTerminalKey(key, ctrl, shift, meta, alt); pty {
 				sentToPTY = true
 			}
-		} else if !pressed && g.ptyRepeat.active && g.ptyRepeat.key == key {
-			g.ptyRepeat.Reset()
+		} else if !pressed && g.input.PtyRepeat.active && g.input.PtyRepeat.key == key {
+			g.input.PtyRepeat.Reset()
 		}
-		g.prevKeys[key] = pressed
+		g.input.PrevKeys[key] = pressed
 	}
 
 	return sentToPTY
@@ -495,12 +495,12 @@ func (g *Game) handleTerminalKey(key ebiten.Key, ctrl, shift, meta, alt bool) bo
 // sendWithRepeat sends seq to the focused PTY and starts key repeat tracking.
 func (g *Game) sendWithRepeat(key ebiten.Key, seq []byte) {
 	g.focused.Term.SendBytes(seq)
-	g.repeatSeq = seq
+	g.input.RepeatSeq = seq
 	now := time.Now()
-	g.ptyRepeat.key = key
-	g.ptyRepeat.active = true
-	g.ptyRepeat.start = now
-	g.ptyRepeat.last = now
+	g.input.PtyRepeat.key = key
+	g.input.PtyRepeat.active = true
+	g.input.PtyRepeat.start = now
+	g.input.PtyRepeat.last = now
 }
 
 func isSpecialKey(key ebiten.Key) bool {

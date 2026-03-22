@@ -1,6 +1,35 @@
 package main
 
-import "github.com/studiowebux/zurm/pane"
+import (
+	"time"
+
+	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/studiowebux/zurm/pane"
+)
+
+// inputTracker groups all input edge-detection, drag, click, scroll, and mouse state.
+type inputTracker struct {
+	PrevKeys         map[ebiten.Key]bool
+	PrevMouseButtons map[ebiten.MouseButton]bool
+	PrevMX, PrevMY   int
+
+	PtyRepeat KeyRepeatHandler
+	RepeatSeq []byte // exact bytes to resend on PTY repeat
+
+	SelDrag SelectionDragger
+	DivDrag DividerDragHandler
+
+	LastMouseCol int // last col sent to PTY (1-based)
+	LastMouseRow int // last row sent to PTY (1-based)
+	MouseHeldBtn int // -1 = none, 0=left, 1=mid, 2=right
+
+	ScrollAccum float64 // fractional trackpad wheel accumulation
+
+	LastClickTime time.Time
+	LastClickRow  int
+	LastClickCol  int
+	ClickCount    int
+}
 
 // SelectionDragger tracks whether a text selection drag is in progress.
 // The actual selection coordinates live on terminal.ScreenBuffer.Selection.

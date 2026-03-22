@@ -165,7 +165,7 @@ func (g *Game) handleTextEdit(
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		cancel()
-		g.prevKeys[ebiten.KeyEscape] = true
+		g.input.PrevKeys[ebiten.KeyEscape] = true
 		return
 	}
 
@@ -175,15 +175,15 @@ func (g *Game) handleTextEdit(
 	// Edge-triggered: Enter commits.
 	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyNumpadEnter} {
 		pressed := ebiten.IsKeyPressed(key)
-		if pressed && !g.prevKeys[key] {
+		if pressed && !g.input.PrevKeys[key] {
 			if commit(ti.Text, ti.CursorPos) {
 				return
 			}
 		}
-		g.prevKeys[key] = pressed
+		g.input.PrevKeys[key] = pressed
 	}
-	g.prevKeys[ebiten.KeyMeta] = meta
-	g.prevKeys[ebiten.KeyAlt] = alt
+	g.input.PrevKeys[ebiten.KeyMeta] = meta
+	g.input.PrevKeys[ebiten.KeyAlt] = alt
 
 	// Cmd+V — async clipboard paste.
 	if meta && inpututil.IsKeyJustPressed(ebiten.KeyV) {
@@ -214,7 +214,7 @@ func (g *Game) handleNoteInput() {
 		},
 		func() (string, int) { return g.tabMgr.Tabs[idx].NoteText, g.tabMgr.Tabs[idx].NoteCursorPos },
 		func(t string, c int) { g.tabMgr.Tabs[idx].NoteText = t; g.tabMgr.Tabs[idx].NoteCursorPos = c },
-		&g.noteRepeat,
+		&g.repeats.Note,
 	)
 }
 
@@ -233,7 +233,7 @@ func (g *Game) handleRenameInput() {
 		},
 		func() (string, int) { return g.tabMgr.Tabs[idx].RenameText, g.tabMgr.Tabs[idx].RenameCursorPos },
 		func(t string, c int) { g.tabMgr.Tabs[idx].RenameText = t; g.tabMgr.Tabs[idx].RenameCursorPos = c },
-		&g.renameRepeat,
+		&g.repeats.Rename,
 	)
 }
 
@@ -248,7 +248,7 @@ func (g *Game) handlePaneRenameInput() {
 		},
 		func() (string, int) { return g.focused.RenameText, g.focused.RenameCursorPos },
 		func(t string, c int) { g.focused.RenameText = t; g.focused.RenameCursorPos = c },
-		&g.paneRenameRepeat,
+		&g.repeats.PaneRename,
 	)
 }
 

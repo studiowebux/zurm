@@ -48,7 +48,7 @@ func (g *Game) openFileExplorer() {
 	// This prevents stale "was pressed" state from prior handlers causing missed
 	// or double-fired edge detection on the first explorer frame.
 	for _, k := range explorerInputKeys {
-		g.prevKeys[k] = ebiten.IsKeyPressed(k)
+		g.input.PrevKeys[k] = ebiten.IsKeyPressed(k)
 	}
 	g.explorer.repeat.Reset()
 	g.screenDirty = true
@@ -76,7 +76,7 @@ func (g *Game) handleFileExplorerInput() {
 	if st.ConfirmOpen {
 		if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 			st.ConfirmOpen = false
-			g.prevKeys[ebiten.KeyEscape] = true
+			g.input.PrevKeys[ebiten.KeyEscape] = true
 			return
 		}
 		g.handleExplorerConfirmInput()
@@ -101,15 +101,15 @@ func (g *Game) handleFileExplorerInput() {
 			// Normal close
 			g.closeFileExplorer()
 		}
-		g.prevKeys[ebiten.KeyEscape] = true
+		g.input.PrevKeys[ebiten.KeyEscape] = true
 		return
 	}
 
 	// Cmd+E toggle close (separate from ESC so the E key is tracked independently).
 	{
 		ePressed := ebiten.IsKeyPressed(ebiten.KeyE)
-		eWas := g.prevKeys[ebiten.KeyE]
-		g.prevKeys[ebiten.KeyE] = ePressed
+		eWas := g.input.PrevKeys[ebiten.KeyE]
+		g.input.PrevKeys[ebiten.KeyE] = ePressed
 		if meta && ePressed && !eWas {
 			g.closeFileExplorer()
 			return
@@ -137,14 +137,14 @@ func (g *Game) handleFileExplorerInput() {
 	now := time.Now()
 	upPressed := ebiten.IsKeyPressed(ebiten.KeyArrowUp)
 	downPressed := ebiten.IsKeyPressed(ebiten.KeyArrowDown)
-	if g.explorer.repeat.Update(ebiten.KeyArrowUp, upPressed, g.prevKeys[ebiten.KeyArrowUp], now) {
+	if g.explorer.repeat.Update(ebiten.KeyArrowUp, upPressed, g.input.PrevKeys[ebiten.KeyArrowUp], now) {
 		g.explorer.Move(-1)
 	}
-	if g.explorer.repeat.Update(ebiten.KeyArrowDown, downPressed, g.prevKeys[ebiten.KeyArrowDown], now) {
+	if g.explorer.repeat.Update(ebiten.KeyArrowDown, downPressed, g.input.PrevKeys[ebiten.KeyArrowDown], now) {
 		g.explorer.Move(1)
 	}
-	g.prevKeys[ebiten.KeyArrowUp] = upPressed
-	g.prevKeys[ebiten.KeyArrowDown] = downPressed
+	g.input.PrevKeys[ebiten.KeyArrowUp] = upPressed
+	g.input.PrevKeys[ebiten.KeyArrowDown] = downPressed
 
 	// Non-repeating action keys — edge-triggered only.
 	actionKeys := []ebiten.Key{
@@ -156,8 +156,8 @@ func (g *Game) handleFileExplorerInput() {
 	}
 	for _, key := range actionKeys {
 		pressed := ebiten.IsKeyPressed(key)
-		wasPressed := g.prevKeys[key]
-		g.prevKeys[key] = pressed
+		wasPressed := g.input.PrevKeys[key]
+		g.input.PrevKeys[key] = pressed
 		if !pressed || wasPressed {
 			continue
 		}
@@ -288,8 +288,8 @@ func (g *Game) handleFileExplorerInput() {
 				}
 				st.ConfirmOpen = true
 				// Reset confirm keys so edge detection fires cleanly on next frame.
-				g.prevKeys[ebiten.KeyEnter] = ebiten.IsKeyPressed(ebiten.KeyEnter)
-				g.prevKeys[ebiten.KeyY] = ebiten.IsKeyPressed(ebiten.KeyY)
+				g.input.PrevKeys[ebiten.KeyEnter] = ebiten.IsKeyPressed(ebiten.KeyEnter)
+				g.input.PrevKeys[ebiten.KeyY] = ebiten.IsKeyPressed(ebiten.KeyY)
 			}
 
 		case key == ebiten.KeyR && !meta:
@@ -298,8 +298,8 @@ func (g *Game) handleFileExplorerInput() {
 				st.InputLabel = "Rename:"
 				st.InputText = st.Entries[st.Cursor].Name
 				st.InputCursorPos = len([]rune(st.InputText))
-				g.prevKeys[ebiten.KeyEnter] = ebiten.IsKeyPressed(ebiten.KeyEnter)
-				g.prevKeys[ebiten.KeyBackspace] = ebiten.IsKeyPressed(ebiten.KeyBackspace)
+				g.input.PrevKeys[ebiten.KeyEnter] = ebiten.IsKeyPressed(ebiten.KeyEnter)
+				g.input.PrevKeys[ebiten.KeyBackspace] = ebiten.IsKeyPressed(ebiten.KeyBackspace)
 			}
 
 		case key == ebiten.KeyN && !meta && !shift:
@@ -307,16 +307,16 @@ func (g *Game) handleFileExplorerInput() {
 			st.InputLabel = "New file:"
 			st.InputText = ""
 			st.InputCursorPos = 0
-			g.prevKeys[ebiten.KeyEnter] = ebiten.IsKeyPressed(ebiten.KeyEnter)
-			g.prevKeys[ebiten.KeyBackspace] = ebiten.IsKeyPressed(ebiten.KeyBackspace)
+			g.input.PrevKeys[ebiten.KeyEnter] = ebiten.IsKeyPressed(ebiten.KeyEnter)
+			g.input.PrevKeys[ebiten.KeyBackspace] = ebiten.IsKeyPressed(ebiten.KeyBackspace)
 
 		case key == ebiten.KeyN && shift:
 			st.Mode = renderer.ExplorerModeNewDir
 			st.InputLabel = "New dir:"
 			st.InputText = ""
 			st.InputCursorPos = 0
-			g.prevKeys[ebiten.KeyEnter] = ebiten.IsKeyPressed(ebiten.KeyEnter)
-			g.prevKeys[ebiten.KeyBackspace] = ebiten.IsKeyPressed(ebiten.KeyBackspace)
+			g.input.PrevKeys[ebiten.KeyEnter] = ebiten.IsKeyPressed(ebiten.KeyEnter)
+			g.input.PrevKeys[ebiten.KeyBackspace] = ebiten.IsKeyPressed(ebiten.KeyBackspace)
 
 		case key == ebiten.KeyO && !meta:
 			if st.Cursor < len(st.Entries) {
@@ -338,8 +338,8 @@ func (g *Game) handleFileExplorerInput() {
 			// Enter search mode — position cursor at end of any existing query.
 			st.SearchMode = true
 			st.SearchCursorPos = len([]rune(st.SearchQuery))
-			g.prevKeys[ebiten.KeyEnter] = ebiten.IsKeyPressed(ebiten.KeyEnter)
-			g.prevKeys[ebiten.KeyBackspace] = ebiten.IsKeyPressed(ebiten.KeyBackspace)
+			g.input.PrevKeys[ebiten.KeyEnter] = ebiten.IsKeyPressed(ebiten.KeyEnter)
+			g.input.PrevKeys[ebiten.KeyBackspace] = ebiten.IsKeyPressed(ebiten.KeyBackspace)
 		}
 	}
 }
@@ -350,8 +350,8 @@ func (g *Game) handleExplorerConfirmInput() {
 	st := &g.explorer.State
 	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyY} {
 		pressed := ebiten.IsKeyPressed(key)
-		wasPressed := g.prevKeys[key]
-		g.prevKeys[key] = pressed
+		wasPressed := g.input.PrevKeys[key]
+		g.input.PrevKeys[key] = pressed
 		if pressed && !wasPressed {
 			if st.ConfirmAction != nil {
 				st.ConfirmAction()
@@ -373,8 +373,8 @@ func (g *Game) handleExplorerSearchInput() {
 
 	// Enter — accept and exit search mode.
 	enterPressed := ebiten.IsKeyPressed(ebiten.KeyEnter)
-	enterWas := g.prevKeys[ebiten.KeyEnter]
-	g.prevKeys[ebiten.KeyEnter] = enterPressed
+	enterWas := g.input.PrevKeys[ebiten.KeyEnter]
+	g.input.PrevKeys[ebiten.KeyEnter] = enterPressed
 	if enterPressed && !enterWas {
 		st.SearchMode = false
 		st.SearchCursorPos = ti.CursorPos
@@ -416,8 +416,8 @@ func (g *Game) handleExplorerInputMode() {
 
 	// Enter — commit the operation.
 	enterPressed := ebiten.IsKeyPressed(ebiten.KeyEnter)
-	enterWas := g.prevKeys[ebiten.KeyEnter]
-	g.prevKeys[ebiten.KeyEnter] = enterPressed
+	enterWas := g.input.PrevKeys[ebiten.KeyEnter]
+	g.input.PrevKeys[ebiten.KeyEnter] = enterPressed
 	if enterPressed && !enterWas {
 		st.InputText = ti.Text
 		st.InputCursorPos = ti.CursorPos

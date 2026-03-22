@@ -170,14 +170,14 @@ func (g *Game) handleSearchInput() {
 	// inpututil.IsKeyJustPressed catches sub-frame taps that polling misses.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.closeSearchOverlay()
-		g.prevKeys[ebiten.KeyEscape] = true
+		g.input.PrevKeys[ebiten.KeyEscape] = true
 		return
 	}
 
 	// Arrow up/down navigate search results (edge-triggered).
 	for _, key := range []ebiten.Key{ebiten.KeyArrowDown, ebiten.KeyArrowUp} {
 		pressed := ebiten.IsKeyPressed(key)
-		wasPressed := g.prevKeys[key]
+		wasPressed := g.input.PrevKeys[key]
 		if pressed && !wasPressed {
 			var buf *terminal.ScreenBuffer
 			if g.focused != nil {
@@ -193,7 +193,7 @@ func (g *Game) handleSearchInput() {
 				}
 			}
 		}
-		g.prevKeys[key] = pressed
+		g.input.PrevKeys[key] = pressed
 	}
 
 	ti := &TextInput{Text: g.search.State.Query, CursorPos: g.search.State.CursorPos}

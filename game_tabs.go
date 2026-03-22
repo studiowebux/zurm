@@ -264,7 +264,7 @@ func (g *Game) switchTabNoHistory(i int) {
 	g.renderer.SetLayoutDirty()
 	g.renderer.ClearPaneCache()
 	g.syncActive()
-	g.selDrag.Active = false
+	g.input.SelDrag.Active = false
 	g.statusBarState.ForegroundProc = ""
 	g.focused.Term.RefreshForeground(g.ctx)
 	if g.search.State.Open {
@@ -327,8 +327,8 @@ func (g *Game) handlePinInput() {
 
 	for _, hr := range keys {
 		pressed := ebiten.IsKeyPressed(hr.key)
-		wasPressed := g.prevKeys[hr.key]
-		g.prevKeys[hr.key] = pressed
+		wasPressed := g.input.PrevKeys[hr.key]
+		g.input.PrevKeys[hr.key] = pressed
 		if pressed && !wasPressed {
 			if shift {
 				g.pinTab(hr.slot)
@@ -345,7 +345,7 @@ func (g *Game) handlePinInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.tabMgr.PinMode = false
 		g.screenDirty = true
-		g.prevKeys[ebiten.KeyEscape] = true
+		g.input.PrevKeys[ebiten.KeyEscape] = true
 		return
 	}
 
@@ -355,8 +355,8 @@ func (g *Game) handlePinInput() {
 	}
 	for _, key := range cancelKeys {
 		pressed := ebiten.IsKeyPressed(key)
-		wasPressed := g.prevKeys[key]
-		g.prevKeys[key] = pressed
+		wasPressed := g.input.PrevKeys[key]
+		g.input.PrevKeys[key] = pressed
 		if pressed && !wasPressed {
 			g.tabMgr.PinMode = false
 			g.screenDirty = true
@@ -402,7 +402,7 @@ func (g *Game) handleTabSwitcherInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.tabSwitcherState.Open = false
 		g.screenDirty = true
-		g.prevKeys[ebiten.KeyEscape] = true
+		g.input.PrevKeys[ebiten.KeyEscape] = true
 		return
 	}
 
@@ -413,7 +413,7 @@ func (g *Game) handleTabSwitcherInput() {
 	}
 	for _, key := range keys {
 		pressed := ebiten.IsKeyPressed(key)
-		wasPressed := g.prevKeys[key]
+		wasPressed := g.input.PrevKeys[key]
 		if pressed && !wasPressed {
 			switch {
 			case meta && shift && key == ebiten.KeyT:
@@ -441,7 +441,7 @@ func (g *Game) handleTabSwitcherInput() {
 				g.tabSwitcherState.Open = false
 			}
 		}
-		g.prevKeys[key] = pressed
+		g.input.PrevKeys[key] = pressed
 	}
 	g.screenDirty = true
 }
@@ -453,16 +453,16 @@ func (g *Game) openTabSearch() {
 	g.palette.Close()
 	g.overlayState = renderer.OverlayState{}
 	g.closeMenu()
-	g.tabSearchRepeat.Reset()
-	g.prevKeys[ebiten.KeyArrowUp] = ebiten.IsKeyPressed(ebiten.KeyArrowUp)
-	g.prevKeys[ebiten.KeyArrowDown] = ebiten.IsKeyPressed(ebiten.KeyArrowDown)
+	g.repeats.TabSearch.Reset()
+	g.input.PrevKeys[ebiten.KeyArrowUp] = ebiten.IsKeyPressed(ebiten.KeyArrowUp)
+	g.input.PrevKeys[ebiten.KeyArrowDown] = ebiten.IsKeyPressed(ebiten.KeyArrowDown)
 	g.screenDirty = true
 }
 
 // closeTabSearch closes the tab search overlay.
 func (g *Game) closeTabSearch() {
 	g.tabSearchState = renderer.TabSearchState{}
-	g.tabSearchRepeat.Reset()
+	g.repeats.TabSearch.Reset()
 	g.screenDirty = true
 }
 
@@ -476,14 +476,14 @@ func (g *Game) handleTabSearchInput() {
 
 	upPressed := ebiten.IsKeyPressed(ebiten.KeyArrowUp)
 	downPressed := ebiten.IsKeyPressed(ebiten.KeyArrowDown)
-	if g.tabSearchRepeat.Update(ebiten.KeyArrowUp, upPressed, g.prevKeys[ebiten.KeyArrowUp], now) && g.tabSearchState.Cursor > 0 {
+	if g.repeats.TabSearch.Update(ebiten.KeyArrowUp, upPressed, g.input.PrevKeys[ebiten.KeyArrowUp], now) && g.tabSearchState.Cursor > 0 {
 		g.tabSearchState.Cursor--
 	}
-	if g.tabSearchRepeat.Update(ebiten.KeyArrowDown, downPressed, g.prevKeys[ebiten.KeyArrowDown], now) && g.tabSearchState.Cursor < len(filtered)-1 {
+	if g.repeats.TabSearch.Update(ebiten.KeyArrowDown, downPressed, g.input.PrevKeys[ebiten.KeyArrowDown], now) && g.tabSearchState.Cursor < len(filtered)-1 {
 		g.tabSearchState.Cursor++
 	}
-	g.prevKeys[ebiten.KeyArrowUp] = upPressed
-	g.prevKeys[ebiten.KeyArrowDown] = downPressed
+	g.input.PrevKeys[ebiten.KeyArrowUp] = upPressed
+	g.input.PrevKeys[ebiten.KeyArrowDown] = downPressed
 
 	// ESC: clear query if non-empty, otherwise close.
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
@@ -493,7 +493,7 @@ func (g *Game) handleTabSearchInput() {
 		} else {
 			g.closeTabSearch()
 		}
-		g.prevKeys[ebiten.KeyEscape] = true
+		g.input.PrevKeys[ebiten.KeyEscape] = true
 		g.screenDirty = true
 		return
 	}
@@ -501,15 +501,15 @@ func (g *Game) handleTabSearchInput() {
 	// Cmd+J toggles off.
 	if meta && inpututil.IsKeyJustPressed(ebiten.KeyJ) {
 		g.closeTabSearch()
-		g.prevKeys[ebiten.KeyJ] = true
+		g.input.PrevKeys[ebiten.KeyJ] = true
 		return
 	}
 
 	// Enter — select the highlighted tab.
 	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyNumpadEnter} {
 		pressed := ebiten.IsKeyPressed(key)
-		wasPressed := g.prevKeys[key]
-		g.prevKeys[key] = pressed
+		wasPressed := g.input.PrevKeys[key]
+		g.input.PrevKeys[key] = pressed
 		if pressed && !wasPressed {
 			if len(filtered) > 0 && g.tabSearchState.Cursor < len(filtered) {
 				g.switchTab(filtered[g.tabSearchState.Cursor].OrigIdx)
@@ -521,7 +521,7 @@ func (g *Game) handleTabSearchInput() {
 
 	prevQuery := g.tabSearchState.Query
 	ti := &TextInput{Text: g.tabSearchState.Query, CursorPos: g.tabSearchState.CursorPos}
-	ti.Update(&g.tabSearchInputRepeat, meta, alt)
+	ti.Update(&g.repeats.TabInput, meta, alt)
 	g.tabSearchState.Query = ti.Text
 	g.tabSearchState.CursorPos = ti.CursorPos
 	if g.tabSearchState.Query != prevQuery {

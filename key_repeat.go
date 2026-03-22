@@ -6,6 +6,18 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
+// inputRepeats groups all key repeat state for text input fields and navigation.
+type inputRepeats struct {
+	Rename     TextInputRepeat // tab rename
+	Note       TextInputRepeat // tab note
+	PaneRename TextInputRepeat // pane rename
+	Overlay    TextInputRepeat // help overlay search
+	MdSearch   TextInputRepeat // markdown viewer search
+	TabSearch  KeyRepeatHandler // tab search arrow navigation
+	TabInput   TextInputRepeat // tab search text field
+	URL        TextInputRepeat // URL input field
+}
+
 // KeyRepeatHandler implements OS-style key repeat: fire on initial press,
 // then after keyRepeatDelay fire every keyRepeatInterval while held.
 // Shared by PaletteController, ExplorerController, and tab search.

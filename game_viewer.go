@@ -113,7 +113,7 @@ func (g *Game) handleURLInputInput() {
 			g.llms.FetchCancel = nil
 		}
 		g.llms.FetchCh = nil
-		g.prevKeys[ebiten.KeyEscape] = true
+		g.input.PrevKeys[ebiten.KeyEscape] = true
 		return
 	}
 
@@ -127,7 +127,7 @@ func (g *Game) handleURLInputInput() {
 	// Edge-triggered: Enter submits.
 	for _, key := range []ebiten.Key{ebiten.KeyEnter, ebiten.KeyNumpadEnter} {
 		pressed := ebiten.IsKeyPressed(key)
-		if pressed && !g.prevKeys[key] {
+		if pressed && !g.input.PrevKeys[key] {
 			q := strings.TrimSpace(ti.Text)
 			if q != "" {
 				g.llms.URLInput.Query = ti.Text
@@ -135,7 +135,7 @@ func (g *Game) handleURLInputInput() {
 				g.startLLMSFetch(q)
 			}
 		}
-		g.prevKeys[key] = pressed
+		g.input.PrevKeys[key] = pressed
 	}
 
 	// Cmd+V — async clipboard paste (first line only).
@@ -151,7 +151,7 @@ func (g *Game) handleURLInputInput() {
 	default:
 	}
 
-	ti.Update(&g.urlRepeat, meta, alt)
+	ti.Update(&g.repeats.URL, meta, alt)
 
 	g.llms.URLInput.Query = ti.Text
 	g.llms.URLInput.CursorPos = ti.CursorPos
@@ -323,7 +323,7 @@ func (g *Game) handleMarkdownViewerInput() {
 		g.renderer.SetLayoutDirty()
 		g.renderer.ClearPaneCache()
 		g.screenDirty = true
-		g.prevKeys[ebiten.KeyEscape] = true
+		g.input.PrevKeys[ebiten.KeyEscape] = true
 		return
 	}
 
@@ -551,7 +551,7 @@ func (g *Game) handleMarkdownSearchInput() {
 	ti := &TextInput{Text: g.mdViewerState.SearchQuery, CursorPos: g.mdViewerState.SearchCursorPos}
 	prevQuery := g.mdViewerState.SearchQuery
 
-	ti.Update(&g.mdSearchRepeat, meta, alt)
+	ti.Update(&g.repeats.MdSearch, meta, alt)
 
 	g.mdViewerState.SearchQuery = ti.Text
 	g.mdViewerState.SearchCursorPos = ti.CursorPos
