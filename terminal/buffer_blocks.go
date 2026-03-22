@@ -166,9 +166,10 @@ func (sb *ScreenBuffer) applyBlockEvent(kind rune, exitCode int) {
 		}
 	case 'B':
 		// Prompt end — cursor is now at the first column of user input.
-		if sb.activeBlock != nil {
-			sb.activeBlock.CmdCol = sb.CursorCol
+		if sb.activeBlock == nil {
+			return
 		}
+		sb.activeBlock.CmdCol = sb.CursorCol
 	case 'C':
 		if sb.activeBlock != nil {
 			sb.activeBlock.AbsCmdRow = absRow

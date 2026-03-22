@@ -494,6 +494,9 @@ func (g *Game) handleTerminalKey(key ebiten.Key, ctrl, shift, meta, alt bool) bo
 
 // sendWithRepeat sends seq to the focused PTY and starts key repeat tracking.
 func (g *Game) sendWithRepeat(key ebiten.Key, seq []byte) {
+	if g.activeFocused() == nil {
+		return
+	}
 	g.activeFocused().Term.SendBytes(seq)
 	g.input.RepeatSeq = seq
 	now := time.Now()

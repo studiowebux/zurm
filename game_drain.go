@@ -225,6 +225,9 @@ func (g *Game) updateVaultSuggestion() {
 		g.vlt.Suggest = ""
 		return
 	}
+	if g.activeFocused() == nil {
+		return
+	}
 
 	buf := g.activeFocused().Term.Buf
 	buf.RLock()

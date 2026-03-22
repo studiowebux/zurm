@@ -238,7 +238,12 @@ func (g *Game) setFocusNoHistory(p *pane.Pane) {
 
 // focusDir moves focus to the nearest pane in direction (dx, dy).
 func (g *Game) focusDir(dx, dy int) {
-	if p := g.activeLayout().NeighborInDir(g.activeFocused(), dx, dy); p != nil {
+	layout := g.activeLayout()
+	focused := g.activeFocused()
+	if layout == nil || focused == nil {
+		return
+	}
+	if p := layout.NeighborInDir(focused, dx, dy); p != nil {
 		g.setFocus(p)
 	}
 }
@@ -249,7 +254,12 @@ func (g *Game) resizePane(dx, dy int) {
 	if g.zoomed {
 		return
 	}
-	parent, isLeft := g.activeLayout().FindParent(g.activeFocused())
+	layout := g.activeLayout()
+	focused := g.activeFocused()
+	if layout == nil || focused == nil {
+		return
+	}
+	parent, isLeft := layout.FindParent(focused)
 	if parent == nil {
 		return
 	}
@@ -357,7 +367,7 @@ func (g *Game) recomputeLayout() {
 }
 
 // recomputeLayoutNode recomputes rects and resizes terminals for the given layout.
-// Use this instead of recomputeLayout when operating on a layout that isn't g.layout
+// Use this instead of recomputeLayout when operating on a different tab's layout
 // (e.g. iterating over all tabs during font size change or config reload).
 func (g *Game) recomputeLayoutNode(n *pane.LayoutNode) {
 	g.dismissTabHover()

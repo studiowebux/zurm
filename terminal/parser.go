@@ -21,7 +21,7 @@ const (
 	stateCSIParam                 // collecting CSI parameters
 	stateCSIInterm                // CSI intermediate byte
 	stateOSC                      // received ESC ]
-	stateDCS                      // received ESC P (device control string — ignored)
+	stateDCS                      // received ESC P (device control string — collected and dispatched)
 	stateIgnore                   // collecting ignored sequence
 )
 

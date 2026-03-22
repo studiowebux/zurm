@@ -263,7 +263,9 @@ func (g *Game) switchTabNoHistory(i int) {
 	g.renderer.ClearPaneCache()
 	g.input.SelDrag.Active = false
 	g.statusBarState.ForegroundProc = ""
-	g.activeFocused().Term.RefreshForeground(g.ctx)
+	if f := g.activeFocused(); f != nil {
+		f.Term.RefreshForeground(g.ctx)
+	}
 	if g.search.State.Open {
 		g.closeSearchOverlay()
 	}

@@ -624,7 +624,7 @@ func (g *Game) Update() error {
 	}
 
 	// Check for dead panes (non-blocking). Close at most one per frame to avoid
-	// nil-dereffing g.layout or g.focused after a close mutates both.
+	// Close at most one per frame to keep the layout consistent.
 	closedDead := false
 	for _, leaf := range g.activeLayout().Leaves() {
 		if closedDead {
@@ -859,8 +859,8 @@ func (g *Game) setActiveFocused(p *pane.Pane) {
 	}
 }
 
-// syncActive is a no-op — layout and focused are now computed on-demand.
-// Kept temporarily so callers compile; will be removed in a follow-up.
+// syncActive is a no-op — layout and focused are read from the active tab on demand.
+// Retained for test compatibility; callers should use activeLayout()/activeFocused() directly.
 func (g *Game) syncActive() {}
 
 // updateLayout writes a new layout to the active tab.
