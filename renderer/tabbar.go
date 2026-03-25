@@ -46,6 +46,11 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int, hintMode bool) {
 			// Accent line at bottom of active tab.
 			r.offscreen.SubImage(image.Rect(x, tabBarH-2, x+tabW, tabBarH)).(*ebiten.Image).Fill(r.cursorColor)
 		}
+		// Rename mode: fill the entire tab with the accent color so the user
+		// knows input is captured (similar to hint badge coloring).
+		if t.Renaming {
+			r.offscreen.SubImage(tabRect).(*ebiten.Image).Fill(r.cursorColor)
+		}
 
 		// Right-edge divider between tabs (skip last).
 		if i < numTabs-1 {
@@ -96,6 +101,9 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int, hintMode bool) {
 		fg := inactiveFg
 		if i == activeTab {
 			fg = activeFg
+		}
+		if t.Renaming {
+			fg = parseHexColor(r.cfg.Colors.Background)
 		}
 
 		// Vertically center text in the tab bar.
