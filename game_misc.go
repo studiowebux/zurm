@@ -496,24 +496,15 @@ func (g *Game) flashStatus(msg string) {
 	g.render.Dirty = true
 }
 
-// installShellHooks appends OSC 133 shell integration hooks to ~/.zshrc or
-// ~/.bashrc, guarded by idempotency markers so repeated calls are safe.
-func (g *Game) installShellHooks() {
-	shell := g.cfg.Shell.Program
-	if shell == "" {
-		shell = os.Getenv("SHELL")
-	}
-
-	const markerStart = "# zurm-hooks-start"
-	const markerEnd = "# zurm-hooks-end"
-
-	var rcFile, hooks string
+// shellHookContent returns the raw shell integration hook code for the given
+// shell (matched by suffix: "zsh" or "bash"). Includes OSC 133 (prompt/command
+// markers) and OSC 7 (CWD emission). Returns "" for unsupported shells.
+// Used by both installShellHooks and the --print-hooks CLI flag.
+func shellHookContent(shell string) string {
 	switch {
 	case strings.HasSuffix(shell, "zsh"):
-		rcFile = filepath.Join(os.Getenv("HOME"), ".zshrc")
 		// _zurm_cmd_started guards against emitting D before the first command.
-		hooks = markerStart + `
-_zurm_precmd() {
+		return `_zurm_precmd() {
   local _code=$?
   [[ -n $_zurm_cmd_started ]] && printf '\033]133;D;%d\007' "$_code"
   unset _zurm_cmd_started
@@ -526,16 +517,46 @@ preexec_functions+=(_zurm_preexec)
 # works with any prompt tool (starship, p10k, oh-my-zsh).
 _zurm_line_init() { print -n '\033]133;B\007'; }
 zle -N zle-line-init _zurm_line_init
-` + markerEnd + "\n"
+# OSC 7: emit CWD on every directory change and once at source time.
+_zurm_chpwd() { printf '\033]7;file://%s%s\007' "$HOST" "$PWD"; }
+chpwd_functions+=(_zurm_chpwd)
+_zurm_chpwd
+`
 	case strings.HasSuffix(shell, "bash"):
-		rcFile = filepath.Join(os.Getenv("HOME"), ".bashrc")
-		hooks = markerStart + `
-PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }printf '\033]133;D;%s\007' \"$?\"; printf '\033]133;A\007'"
-` + markerEnd + "\n"
+		return `PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }printf '\033]133;D;%s\007' \"$?\"; printf '\033]133;A\007'; printf '\033]7;file://%s%s\007' \"$HOSTNAME\" \"$PWD\""
+printf '\033]7;file://%s%s\007' "$HOSTNAME" "$PWD"
+`
 	default:
+		return ""
+	}
+}
+
+// installShellHooks appends OSC 133 + OSC 7 shell integration hooks to
+// ~/.zshrc or ~/.bashrc, guarded by idempotency markers so repeated calls
+// are safe.
+func (g *Game) installShellHooks() {
+	shell := g.cfg.Shell.Program
+	if shell == "" {
+		shell = os.Getenv("SHELL")
+	}
+
+	const markerStart = "# zurm-hooks-start"
+	const markerEnd = "# zurm-hooks-end"
+
+	content := shellHookContent(shell)
+	if content == "" {
 		g.flashStatus("Auto-hooks not supported for: " + filepath.Base(shell))
 		return
 	}
+
+	var rcFile string
+	switch {
+	case strings.HasSuffix(shell, "zsh"):
+		rcFile = filepath.Join(os.Getenv("HOME"), ".zshrc")
+	case strings.HasSuffix(shell, "bash"):
+		rcFile = filepath.Join(os.Getenv("HOME"), ".bashrc")
+	}
+	hooks := markerStart + "\n" + content + markerEnd + "\n"
 
 	existing, err := os.ReadFile(rcFile) // #nosec G304 G703 — rcFile is ~/.zshrc derived from os.UserHomeDir()
 	if err != nil && !os.IsNotExist(err) {
