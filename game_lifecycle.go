@@ -98,6 +98,12 @@ func (g *Game) unsuspendAndRedraw() {
 		}
 	}
 	g.wfocus.UnfocusedAt = time.Time{}
+	// Reset cached window size so handleResize fires unconditionally on the
+	// next Update. handleResize runs before handleFocus, so on wake or
+	// focus-gain the stale size check would silently skip the resize pass.
+	// Clearing g.winW guarantees the next frame re-applies pane rects with
+	// whatever size macOS has settled on after sleep/wake.
+	g.winW = 0
 	g.render.Dirty = true
 	g.renderer.SetLayoutDirty()
 	for _, t := range g.tabMgr.Tabs {
