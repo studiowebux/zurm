@@ -215,10 +215,21 @@ func main() {
 	flag.BoolVar(listSessions, "ls", false, "list active zurm-server sessions and exit (shorthand)")
 	attachID := flag.String("attach", "", "start zurm attached to the given server session ID")
 	flag.StringVar(attachID, "a", "", "start zurm attached to the given server session ID (shorthand)")
+	printHooks := flag.String("print-hooks", "", "print shell integration hooks for the given shell (bash or zsh) and exit")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Printf("zurm %s\n", version)
+		return
+	}
+
+	if *printHooks != "" {
+		content := shellHookContent(*printHooks)
+		if content == "" {
+			fmt.Fprintf(os.Stderr, "zurm: --print-hooks: unsupported shell %q (use bash or zsh)\n", *printHooks)
+			os.Exit(1)
+		}
+		fmt.Print(content)
 		return
 	}
 

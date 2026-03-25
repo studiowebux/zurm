@@ -77,6 +77,7 @@ func AllCommands() []Command {
 		{Name: "Send Viewer to Pane", Shortcut: "Cmd+Enter"},
 		// Config
 		{Name: "Reload Config", Shortcut: "Cmd+,"},
+		{Name: "Force Refresh", Shortcut: ""},
 		// App
 		{Name: "Quit", Shortcut: "Cmd+Q"},
 	}

@@ -517,6 +517,7 @@ func (g *Game) buildPalette() {
 		g.sendViewerToPane,
 		// Config
 		g.reloadConfig,
+		g.forceRefresh,
 		// App
 		func() { os.Exit(0) },
 	}

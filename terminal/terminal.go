@@ -395,6 +395,12 @@ func (t *Terminal) QueryCWD(ctx context.Context) {
 	if pid <= 0 {
 		return
 	}
+	// When a subprocess owns the terminal (e.g. nix develop spawning a bash
+	// subshell), the foreground PGID differs from the shell PID. Query the
+	// foreground process's CWD instead so cd inside the subshell is tracked.
+	if pgid, err := t.pty.ForegroundPgid(); err == nil && pgid > 0 && pgid != pid {
+		pid = pgid
+	}
 	out, err := exec.CommandContext(ctx, "lsof", "-a", "-p", // #nosec G204 — fixed binary, only argument is numeric PID
 		fmt.Sprintf("%d", pid), "-d", "cwd", "-Fn").Output()
 	if err != nil {

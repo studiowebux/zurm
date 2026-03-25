@@ -336,14 +336,14 @@ func (g *Game) handleMouseTabBar(mx, my int, leftPressed, leftWas, rightPressed,
 			clicked := mx / tabW
 			if clicked >= 0 && clicked < numTabs {
 				now := time.Now()
-				if clicked == g.tabMgr.ActiveIdx && now.Sub(g.input.LastClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
+				if clicked == g.tabMgr.ActiveIdx && now.Sub(g.input.TabClickTime) <= time.Duration(g.cfg.Input.DoubleClickMs)*time.Millisecond {
 					g.startRenameTab(clicked)
 				} else {
 					g.switchTab(clicked)
 					g.tabMgr.DragFromIdx = clicked
 					g.tabMgr.DragStartX = mx
 				}
-				g.input.LastClickTime = now
+				g.input.TabClickTime = now
 			}
 		}
 	} else if leftPressed && leftWas && !g.tabMgr.Dragging {

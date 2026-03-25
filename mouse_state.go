@@ -29,6 +29,11 @@ type inputTracker struct {
 	LastClickRow  int
 	LastClickCol  int
 	ClickCount    int
+
+	// TabClickTime tracks the last click in the tab bar for double-click rename
+	// detection. Kept separate from LastClickTime so tab clicks do not
+	// contaminate the terminal's click-count sequence.
+	TabClickTime time.Time
 }
 
 // SelectionDragger tracks whether a text selection drag is in progress.
