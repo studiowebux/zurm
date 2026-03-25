@@ -726,6 +726,23 @@ func (g *Game) reloadConfig() {
 	g.flashStatus("Config reloaded")
 }
 
+// forceRefresh re-triggers window resize, CWD, git, and foreground process
+// queries, then forces a full repaint. Useful after sleep/wake or when the
+// status bar is showing stale data.
+func (g *Game) forceRefresh() {
+	g.unsuspendAndRedraw() // resets g.winW=0 → forces handleResize next frame
+	if g.activeFocused() == nil {
+		g.flashStatus("Refreshed")
+		return
+	}
+	go g.activeFocused().Term.QueryCWD(g.ctx)
+	g.activeFocused().Term.RefreshForeground(g.ctx)
+	if g.cfg.StatusBar.ShowGit && g.status.Bar.Cwd != "" {
+		g.status.Poller.StartGitQuery(g.status.Bar.Cwd)
+	}
+	g.flashStatus("Refreshed")
+}
+
 // reloadColors propagates the new color config to the renderer and all terminal panes.
 func (g *Game) reloadColors(cfg *config.Config) {
 	g.renderer.ReloadColors(buildRenderConfig(cfg))
