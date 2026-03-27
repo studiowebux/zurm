@@ -60,6 +60,12 @@ func (g *Game) handleResize() {
 		setPaneHeaders(t.Layout, g.font.CellH)
 		t.Layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
 		for _, leaf := range t.Layout.Leaves() {
+			// When zoomed, skip the focused pane here — reapplyZoom below
+			// sets the correct full-rect dimensions. Resizing with the split
+			// rect first would send a spurious SIGWINCH with wrong cols/rows.
+			if g.zoomed && leaf.Pane == g.activeFocused() {
+				continue
+			}
 			leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
 		}
 	}
