@@ -74,24 +74,9 @@ func (g *Game) handleResize() {
 		}
 	}
 
-	// When zoomed, the focused pane must fill the entire pane area.
-	// ComputeRects above set it to the normal split rect — override it.
-	// Clear HeaderH — zoomed pane has no header (only one visible pane).
-	if g.zoomed && g.activeFocused() != nil {
-		g.activeFocused().HeaderH = 0
-		g.activeFocused().Rect = paneRect
-		cols := (paneRect.Dx() - g.cfg.Window.Padding*2) / g.font.CellW
-		rows := (paneRect.Dy() - g.cfg.Window.Padding) / g.font.CellH
-		if cols < 1 {
-			cols = 1
-		}
-		if rows < 1 {
-			rows = 1
-		}
-		g.activeFocused().Cols = cols
-		g.activeFocused().Rows = rows
-		g.activeFocused().Term.Resize(cols, rows)
-	}
+	// When zoomed, restore the full-rect geometry that ComputeRects above
+	// overwrote with the normal split rect.
+	g.reapplyZoom()
 
 	g.render.Dirty = true
 }

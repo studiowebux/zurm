@@ -809,6 +809,11 @@ func (g *Game) recomputeAllTabs() {
 		g.recomputeLayoutNode(t.Layout)
 	}
 	// activeLayout() reads directly from the tab — no cache refresh needed.
+	// Re-apply zoom geometry after recomputing all layouts: recomputeLayoutNode
+	// runs ComputeRects which overwrites the zoomed pane's full rect with its
+	// normal split rect. Zoom must be restored so font/theme changes don't
+	// break the zoomed layout.
+	g.reapplyZoom()
 }
 
 // reloadVault disables the vault and clears ghost text when vault is no longer enabled.
@@ -892,6 +897,7 @@ func (g *Game) adjustFontSize(delta float64) {
 		g.recomputeLayoutNode(t.Layout)
 	}
 	// activeLayout() reads directly from the tab — no cache refresh needed.
+	g.reapplyZoom()
 	g.render.Dirty = true
 	g.flashStatus(fmt.Sprintf("Font size: %.0fpt", newSize))
 }

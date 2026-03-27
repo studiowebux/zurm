@@ -396,6 +396,34 @@ func setPaneHeaders(layout *pane.LayoutNode, cellH int) {
 	}
 }
 
+// reapplyZoom re-applies the zoom geometry to the active focused pane.
+// Must be called after any operation that recomputes layout rects (font change,
+// config reload, resize) while g.zoomed is true, so the zoomed pane keeps the
+// full content rect instead of reverting to its normal split rect.
+func (g *Game) reapplyZoom() {
+	if !g.zoomed {
+		return
+	}
+	p := g.activeFocused()
+	if p == nil {
+		return
+	}
+	fullRect := g.contentRect()
+	p.HeaderH = 0
+	p.Rect = fullRect
+	cols := (fullRect.Dx() - g.cfg.Window.Padding*2) / g.font.CellW
+	rows := (fullRect.Dy() - g.cfg.Window.Padding) / g.font.CellH
+	if cols < 1 {
+		cols = 1
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	p.Cols = cols
+	p.Rows = rows
+	p.Term.Resize(cols, rows)
+}
+
 // unzoom restores pane rects to the normal layout. Called by toggleZoom and
 // switchTab so the layout is always consistent when leaving zoom state.
 func (g *Game) unzoom() {
