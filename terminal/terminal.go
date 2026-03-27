@@ -324,12 +324,17 @@ func (t *Terminal) UpdateColors(fg, bg color.RGBA, palette [16]color.RGBA) {
 // Resize resizes both the screen buffer and PTY.
 func (t *Terminal) Resize(cols, rows int) {
 	t.Buf.Lock()
+	sameSize := rows == t.Buf.Rows && cols == t.Buf.Cols
 	t.Buf.Resize(rows, cols)
 	if t.parser != nil {
 		t.parser.resetTabStops() // rebuild tab stops for new column count
 	}
 	t.Buf.Unlock()
-	if t.pty != nil {
+	// Only send SIGWINCH when dimensions actually changed. Spurious SIGWINCH
+	// (same cols/rows) causes full-screen apps like vim to clear and redraw,
+	// wiping visible content. unsuspendAndRedraw() zeros g.winW on every focus
+	// gain to force handleResize, but the pane dimensions may be unchanged.
+	if !sameSize && t.pty != nil {
 		if err := t.pty.Resize(cols, rows); err != nil {
 			log.Printf("terminal: PTY resize failed: %v", err)
 		}
