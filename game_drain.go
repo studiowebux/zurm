@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -9,13 +10,32 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/studiowebux/zurm/renderer"
 	"github.com/studiowebux/zurm/terminal"
 )
 
 func (g *Game) handleResize() {
 	w, h := ebiten.WindowSize()
-	if w == g.winW && h == g.winH {
+	dpi := ebiten.Monitor().DeviceScaleFactor()
+	dpiChanged := dpi != g.dpi
+	if w == g.winW && h == g.winH && !dpiChanged {
 		return
+	}
+	// When the window moves between displays with different pixel densities,
+	// logical size stays the same but g.dpi must update before physSize() is
+	// used. Rebuild the font renderer so cell metrics match the new DPI.
+	if dpiChanged {
+		g.dpi = dpi
+		fontBytes := jetbrainsMono
+		if g.cfg.Font.File != "" {
+			if data, err := os.ReadFile(g.cfg.Font.File); err == nil {
+				fontBytes = data
+			}
+		}
+		if fontR, err := renderer.NewFontRenderer(fontBytes, g.cfg.Font.Size*g.dpi, loadFontFallbacks(g.cfg.Font)...); err == nil {
+			g.font = fontR
+			g.renderer.SetFont(fontR)
+		}
 	}
 	g.winW = w
 	g.winH = h
@@ -40,6 +60,12 @@ func (g *Game) handleResize() {
 		setPaneHeaders(t.Layout, g.font.CellH)
 		t.Layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
 		for _, leaf := range t.Layout.Leaves() {
+			// When zoomed, skip the focused pane here — reapplyZoom below
+			// sets the correct full-rect dimensions. Resizing with the split
+			// rect first would send a spurious SIGWINCH with wrong cols/rows.
+			if g.zoomed && g.activeFocused() != nil && leaf.Pane == g.activeFocused() {
+				continue
+			}
 			leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
 		}
 	}
@@ -54,24 +80,9 @@ func (g *Game) handleResize() {
 		}
 	}
 
-	// When zoomed, the focused pane must fill the entire pane area.
-	// ComputeRects above set it to the normal split rect — override it.
-	// Clear HeaderH — zoomed pane has no header (only one visible pane).
-	if g.zoomed && g.activeFocused() != nil {
-		g.activeFocused().HeaderH = 0
-		g.activeFocused().Rect = paneRect
-		cols := (paneRect.Dx() - g.cfg.Window.Padding*2) / g.font.CellW
-		rows := (paneRect.Dy() - g.cfg.Window.Padding) / g.font.CellH
-		if cols < 1 {
-			cols = 1
-		}
-		if rows < 1 {
-			rows = 1
-		}
-		g.activeFocused().Cols = cols
-		g.activeFocused().Rows = rows
-		g.activeFocused().Term.Resize(cols, rows)
-	}
+	// When zoomed, restore the full-rect geometry that ComputeRects above
+	// overwrote with the normal split rect.
+	g.reapplyZoom()
 
 	g.render.Dirty = true
 }
