@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -9,13 +10,32 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/studiowebux/zurm/renderer"
 	"github.com/studiowebux/zurm/terminal"
 )
 
 func (g *Game) handleResize() {
 	w, h := ebiten.WindowSize()
-	if w == g.winW && h == g.winH {
+	dpi := ebiten.Monitor().DeviceScaleFactor()
+	dpiChanged := dpi != g.dpi
+	if w == g.winW && h == g.winH && !dpiChanged {
 		return
+	}
+	// When the window moves between displays with different pixel densities,
+	// logical size stays the same but g.dpi must update before physSize() is
+	// used. Rebuild the font renderer so cell metrics match the new DPI.
+	if dpiChanged {
+		g.dpi = dpi
+		fontBytes := jetbrainsMono
+		if g.cfg.Font.File != "" {
+			if data, err := os.ReadFile(g.cfg.Font.File); err == nil {
+				fontBytes = data
+			}
+		}
+		if fontR, err := renderer.NewFontRenderer(fontBytes, g.cfg.Font.Size*g.dpi, loadFontFallbacks(g.cfg.Font)...); err == nil {
+			g.font = fontR
+			g.renderer.SetFont(fontR)
+		}
 	}
 	g.winW = w
 	g.winH = h
