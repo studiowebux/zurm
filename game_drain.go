@@ -63,7 +63,7 @@ func (g *Game) handleResize() {
 			// When zoomed, skip the focused pane here — reapplyZoom below
 			// sets the correct full-rect dimensions. Resizing with the split
 			// rect first would send a spurious SIGWINCH with wrong cols/rows.
-			if g.zoomed && leaf.Pane == g.activeFocused() {
+			if g.zoomed && g.activeFocused() != nil && leaf.Pane == g.activeFocused() {
 				continue
 			}
 			leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
