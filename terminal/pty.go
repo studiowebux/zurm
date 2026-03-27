@@ -90,7 +90,17 @@ func (m *PTYManager) StartReader(parser *Parser, buf *ScreenBuffer, paused *atom
 				}
 				buf.Lock()
 				parser.Feed(scratch[:n])
+				// Drain terminal query responses immediately so time-sensitive
+				// tools (e.g. restcli querying OSC 11 background color) receive
+				// the reply before their read timeout expires. Waiting for the
+				// next game frame (~16ms) causes the late response to leak into
+				// the shell's input buffer and display as raw escape text.
+				imm := buf.PendingDCSResponses
+				buf.PendingDCSResponses = nil
 				buf.Unlock()
+				for _, resp := range imm {
+					_, _ = m.ptmx.Write(resp)
+				}
 				buf.BumpRenderGen()
 				renderSeq.Add(1)
 			}

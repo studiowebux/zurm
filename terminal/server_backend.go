@@ -139,7 +139,12 @@ func (b *ServerBackend) StartReader(parser *Parser, buf *ScreenBuffer, paused *a
 				}
 				buf.Lock()
 				parser.Feed(msg.Payload)
+				imm := buf.PendingDCSResponses
+				buf.PendingDCSResponses = nil
 				buf.Unlock()
+				for _, resp := range imm {
+					_, _ = b.Write(resp)
+				}
 				buf.BumpRenderGen()
 				BumpRenderSeq()
 			case zserver.MsgSessionDead:
