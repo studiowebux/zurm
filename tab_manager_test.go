@@ -278,6 +278,27 @@ func TestPinnedParkedTab_Found(t *testing.T) {
 	}
 }
 
+func TestPinActive_EvictsParkedTab(t *testing.T) {
+	tm := NewTabManager()
+	parked := &tab.Tab{PinnedSlot: 'a'}
+	visible := &tab.Tab{}
+	tm.Add(parked)
+	tm.Add(visible)
+	tm.ActiveIdx = 0
+	tm.Park(0) // park tab with slot 'a'
+
+	// Pin the remaining visible tab to slot 'a' — should evict the parked tab.
+	tm.ActiveIdx = 0
+	tm.PinActive('a')
+
+	if tm.Parked[0].PinnedSlot != 0 {
+		t.Errorf("parked tab PinnedSlot = %c after eviction, want 0", tm.Parked[0].PinnedSlot)
+	}
+	if tm.Tabs[0].PinnedSlot != 'a' {
+		t.Errorf("visible tab PinnedSlot = %c, want 'a'", tm.Tabs[0].PinnedSlot)
+	}
+}
+
 func TestPinnedParkedTab_NotFound(t *testing.T) {
 	tm := NewTabManager()
 	tm.Add(&tab.Tab{})

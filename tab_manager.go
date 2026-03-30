@@ -119,8 +119,13 @@ func (tm *TabManager) PinActive(slot rune) {
 		active.PinnedSlot = 0 // toggle off
 		return
 	}
-	// Evict any tab currently holding this slot.
+	// Evict any tab currently holding this slot (visible and parked).
 	for _, t := range tm.Tabs {
+		if t.PinnedSlot == slot {
+			t.PinnedSlot = 0
+		}
+	}
+	for _, t := range tm.Parked {
 		if t.PinnedSlot == slot {
 			t.PinnedSlot = 0
 		}
