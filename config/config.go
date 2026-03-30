@@ -300,6 +300,8 @@ type TabsConfig struct {
 	// NewTabDir controls where new tabs open: "cwd" inherits the active tab's
 	// working directory; "home" always opens in $HOME.
 	NewTabDir string `toml:"new_tab_dir"`
+	// MaxOpen caps the number of visible (non-parked) tabs. 0 = unlimited.
+	MaxOpen int `toml:"max_open"`
 	// Hover configures the tab hover minimap popover.
 	Hover TabHoverConfig `toml:"hover"`
 }

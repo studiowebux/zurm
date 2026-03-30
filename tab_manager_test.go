@@ -181,3 +181,111 @@ func TestPopFocus_Empty(t *testing.T) {
 		t.Error("PopFocus should return false on empty history")
 	}
 }
+
+func TestPark_RefusesLastTab(t *testing.T) {
+	tm := NewTabManager()
+	tm.Add(&tab.Tab{})
+	tm.ActiveIdx = 0
+
+	ok := tm.Park(0)
+	if ok {
+		t.Error("Park should return false when only one visible tab remains")
+	}
+	if len(tm.Tabs) != 1 {
+		t.Errorf("Tabs len = %d after refused park, want 1", len(tm.Tabs))
+	}
+	if len(tm.Parked) != 0 {
+		t.Errorf("Parked len = %d after refused park, want 0", len(tm.Parked))
+	}
+}
+
+func TestPark_MovesTabToParked(t *testing.T) {
+	tm := NewTabManager()
+	t1 := &tab.Tab{}
+	t2 := &tab.Tab{}
+	tm.Add(t1)
+	tm.Add(t2)
+	tm.ActiveIdx = 0
+
+	ok := tm.Park(1)
+	if !ok {
+		t.Error("Park should return true")
+	}
+	if len(tm.Tabs) != 1 {
+		t.Errorf("Tabs len = %d, want 1", len(tm.Tabs))
+	}
+	if len(tm.Parked) != 1 {
+		t.Errorf("Parked len = %d, want 1", len(tm.Parked))
+	}
+	if tm.Parked[0] != t2 {
+		t.Error("Parked[0] should be t2")
+	}
+}
+
+func TestPark_AdjustsActiveIdx(t *testing.T) {
+	tm := NewTabManager()
+	tm.Add(&tab.Tab{})
+	tm.Add(&tab.Tab{})
+	tm.Add(&tab.Tab{})
+	tm.ActiveIdx = 2
+
+	tm.Park(2)
+	if tm.ActiveIdx != 1 {
+		t.Errorf("ActiveIdx = %d after parking last tab, want 1", tm.ActiveIdx)
+	}
+}
+
+func TestUnpark_MovesTabToVisible(t *testing.T) {
+	tm := NewTabManager()
+	t1 := &tab.Tab{}
+	t2 := &tab.Tab{}
+	tm.Add(t1)
+	tm.Add(t2)
+	tm.ActiveIdx = 0
+	tm.Park(1)
+
+	tm.Unpark(0)
+	if len(tm.Tabs) != 2 {
+		t.Errorf("Tabs len = %d after unpark, want 2", len(tm.Tabs))
+	}
+	if len(tm.Parked) != 0 {
+		t.Errorf("Parked len = %d after unpark, want 0", len(tm.Parked))
+	}
+	if tm.Tabs[1] != t2 {
+		t.Error("Unparked tab should be appended at end of Tabs")
+	}
+}
+
+func TestUnpark_OutOfRange(t *testing.T) {
+	tm := NewTabManager()
+	tm.Add(&tab.Tab{})
+	// Should not panic.
+	tm.Unpark(-1)
+	tm.Unpark(0)
+}
+
+func TestPinnedParkedTab_Found(t *testing.T) {
+	tm := NewTabManager()
+	t1 := &tab.Tab{}
+	t2 := &tab.Tab{PinnedSlot: 'a'}
+	tm.Add(t1)
+	tm.Add(t2)
+	tm.Park(1)
+
+	idx := tm.PinnedParkedTab('a')
+	if idx != 0 {
+		t.Errorf("PinnedParkedTab('a') = %d, want 0", idx)
+	}
+}
+
+func TestPinnedParkedTab_NotFound(t *testing.T) {
+	tm := NewTabManager()
+	tm.Add(&tab.Tab{})
+	tm.Add(&tab.Tab{PinnedSlot: 'b'})
+	tm.Park(1)
+
+	idx := tm.PinnedParkedTab('a')
+	if idx != -1 {
+		t.Errorf("PinnedParkedTab('a') = %d, want -1", idx)
+	}
+}
