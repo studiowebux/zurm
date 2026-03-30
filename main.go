@@ -559,6 +559,10 @@ func (g *Game) Update() error {
 			}
 		}
 	}
+	// Check parked tabs for PTY activity (PTYs still running while parked).
+	for _, t := range g.tabMgr.Parked {
+		t.CheckActivity()
+	}
 
 	// Check for dead panes (non-blocking). Close at most one per frame to avoid
 	// Close at most one per frame to keep the layout consistent.

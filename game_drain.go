@@ -54,6 +54,11 @@ func (g *Game) handleResize() {
 			leaf.Pane.Term.SetPaused(true)
 		}
 	}
+	for _, t := range g.tabMgr.Parked {
+		for _, leaf := range t.Layout.Leaves() {
+			leaf.Pane.Term.SetPaused(true)
+		}
+	}
 
 	// Recompute rects for every tab's layout.
 	for _, t := range g.tabMgr.Tabs {
@@ -74,6 +79,11 @@ func (g *Game) handleResize() {
 	// Skip if window is idle-suspended — readers should stay paused.
 	if !g.wfocus.Suspended {
 		for _, t := range g.tabMgr.Tabs {
+			for _, leaf := range t.Layout.Leaves() {
+				leaf.Pane.Term.SetPaused(false)
+			}
+		}
+		for _, t := range g.tabMgr.Parked {
 			for _, leaf := range t.Layout.Leaves() {
 				leaf.Pane.Term.SetPaused(false)
 			}
@@ -167,6 +177,19 @@ func (g *Game) drainBell() {
 		}
 	}
 
+	// Parked tabs — mark activity on bell (PTYs still running).
+	for _, t := range g.tabMgr.Parked {
+		for _, leaf := range t.Layout.Leaves() {
+			select {
+			case <-leaf.Pane.Term.BellCh:
+				t.HasActivity = true
+				t.HasBell = true
+				fired = true
+			default:
+			}
+		}
+	}
+
 	if !fired {
 		return
 	}
@@ -219,6 +242,16 @@ func (g *Game) drainBlockDone() {
 		if i == g.tabMgr.ActiveIdx {
 			continue
 		}
+		for _, leaf := range t.Layout.Leaves() {
+			select {
+			case <-leaf.Pane.Term.Buf.BlockDoneCh:
+			default:
+			}
+		}
+	}
+
+	// Drain parked tabs silently.
+	for _, t := range g.tabMgr.Parked {
 		for _, leaf := range t.Layout.Leaves() {
 			select {
 			case <-leaf.Pane.Term.Buf.BlockDoneCh:

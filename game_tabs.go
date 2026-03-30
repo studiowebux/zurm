@@ -18,11 +18,33 @@ type focusEntry struct {
 	pane   *pane.Pane
 }
 
+// parkActiveTab moves the active tab to the parking lot (hidden but still alive).
+// Refused if only one visible tab remains.
+func (g *Game) parkActiveTab() {
+	if !g.tabMgr.Park(g.tabMgr.ActiveIdx) {
+		g.flashStatus("Cannot park last tab.")
+		return
+	}
+	g.renderer.ClearPaneCache()
+	g.renderer.SetLayoutDirty()
+	g.render.Dirty = true
+}
+
+// unparkTab moves the parked tab at parkedIdx back to the visible slice and activates it.
+func (g *Game) unparkTab(parkedIdx int) {
+	g.tabMgr.Unpark(parkedIdx)
+	g.switchTab(len(g.tabMgr.Tabs) - 1)
+}
+
 // newTab creates a new tab and switches to it.
 // The starting directory is controlled by cfg.Tabs.NewTabDir:
 //   - "cwd"  → inherit the active tab's current working directory
 //   - "home" → always open in $HOME
 func (g *Game) newTab() {
+	if g.cfg.Tabs.MaxOpen > 0 && g.tabMgr.Count() >= g.cfg.Tabs.MaxOpen {
+		g.flashStatus(fmt.Sprintf("Tab limit reached (%d). Park or close a tab first.", g.cfg.Tabs.MaxOpen))
+		return
+	}
 	paneRect := g.contentRect()
 
 	var dir string
@@ -51,6 +73,10 @@ func (g *Game) newTab() {
 // If the server binary is not found or the connection fails, the pane falls back
 // to a local PTY — the tab is always created.
 func (g *Game) newServerTab() {
+	if g.cfg.Tabs.MaxOpen > 0 && g.tabMgr.Count() >= g.cfg.Tabs.MaxOpen {
+		g.flashStatus(fmt.Sprintf("Tab limit reached (%d). Park or close a tab first.", g.cfg.Tabs.MaxOpen))
+		return
+	}
 	paneRect := g.contentRect()
 
 	var dir string
@@ -290,10 +316,15 @@ func (g *Game) pinTab(slot rune) {
 }
 
 // switchToSlot activates the tab pinned to the given home-row slot.
-// Does nothing if no tab is pinned there.
+// If the pinned tab is parked, it is unparked first.
+// Does nothing if no tab is pinned to the slot.
 func (g *Game) switchToSlot(slot rune) {
 	if idx := g.tabMgr.PinnedTab(slot); idx >= 0 {
 		g.switchTab(idx)
+		return
+	}
+	if idx := g.tabMgr.PinnedParkedTab(slot); idx >= 0 {
+		g.unparkTab(idx)
 	}
 }
 

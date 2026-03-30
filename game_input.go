@@ -348,6 +348,8 @@ func (g *Game) handleAppShortcut(key ebiten.Key, ctrl, shift, meta, alt bool) bo
 		g.openURLInput()
 
 	// Tab management.
+	case meta && shift && key == ebiten.KeyK:
+		g.parkActiveTab()
 	case meta && shift && key == ebiten.KeyT:
 		g.openTabSwitcher()
 	case meta && key == ebiten.KeyG:
