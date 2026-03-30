@@ -21,6 +21,8 @@ type focusEntry struct {
 // parkActiveTab moves the active tab to the parking lot (hidden but still alive).
 // Refused if only one visible tab remains.
 func (g *Game) parkActiveTab() {
+	// Snapshot render generation so the tab doesn't immediately show activity.
+	g.tabMgr.Tabs[g.tabMgr.ActiveIdx].SnapshotGen()
 	if !g.tabMgr.Park(g.tabMgr.ActiveIdx) {
 		g.flashStatus("Cannot park last tab.")
 		return
