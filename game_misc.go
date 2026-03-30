@@ -345,6 +345,24 @@ func (g *Game) doSaveSession() {
 		}
 		data.Tabs = append(data.Tabs, td)
 	}
+	for _, t := range g.tabMgr.Parked {
+		leaves := t.Layout.Leaves()
+		if len(leaves) == 0 {
+			continue
+		}
+		term := leaves[0].Pane.Term
+		td := session.TabData{
+			Cwd:         term.Cwd,
+			Title:       t.Title,
+			UserRenamed: t.UserRenamed,
+			Note:        t.Note,
+			Layout:      serializePaneLayout(t.Layout),
+		}
+		if t.PinnedSlot != 0 {
+			td.PinnedSlot = string(t.PinnedSlot)
+		}
+		data.Parked = append(data.Parked, td)
+	}
 	if err := session.Save(data); err != nil {
 		log.Printf("zurm: session save: %v", err)
 	}

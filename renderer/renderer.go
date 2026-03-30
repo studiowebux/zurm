@@ -321,7 +321,7 @@ func (r *Renderer) DrawAll(ds DrawState) {
 	layout := r.prepareFrame(ds.Tabs, ds.ActiveTab, ds.Zoomed)
 
 	// Phase 2 — draw tab bar.
-	r.drawTabBar(ds.Tabs, ds.ActiveTab, ds.HintMode)
+	r.drawTabBar(ds.Tabs, ds.ActiveTab, ds.HintMode, len(ds.ParkedTabs))
 
 	// Phase 3 — draw panes and snapshot block data.
 	blockSnaps := r.drawPanes(layout, ds.Focused, ds.Zoomed, ds.Search)

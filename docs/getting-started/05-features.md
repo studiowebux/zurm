@@ -30,11 +30,27 @@ Pin frequently-used tabs to keyboard slots for instant switching.
 
 Pinned tabs show a `·X` badge (where X is the slot letter) in the tab bar, and `[X]` in the tab switcher/search.
 
+## Tab Parking
+
+Park tabs you want to keep running but don't need in the tab bar right now. Parked tabs are hidden from the tab bar — their PTY stays alive, shell state is preserved.
+
+**Park a tab:** `Cmd+Shift+K` parks the active tab. You cannot park the last visible tab.
+
+**Find parked tabs:** `Cmd+J` (tab search) shows all tabs — visible and parked. Parked entries show a `[P]` badge and dimmed title. Select one to unpark and activate it.
+
+**Pin slot jump:** If a parked tab has a pin slot, jumping to that slot (`Cmd+G` then the letter) unparks it automatically.
+
+**Tab bar badge:** When parked tabs exist, a `[N↓]` count badge appears at the right edge of the tab bar.
+
+**Session restore:** Parked tabs are saved and restored across sessions.
+
+**Max open tabs:** The `max_open` config key caps the number of visible tabs (default 10, `0` = unlimited). When the limit is reached, `Cmd+T` shows a status flash — park or close a tab first.
+
 ## Tab Switcher & Search
 
-**Tab switcher** (`Cmd+Shift+T`): Shows all tabs with pin badges. Arrow keys to select, Enter to switch.
+**Tab switcher** (`Cmd+Shift+T`): Shows visible tabs with pin badges. Arrow keys to select, Enter to switch.
 
-**Tab search** (`Cmd+J`): Type to fuzzy-search tabs by title or working directory. Results ranked by match position (earlier matches rank higher).
+**Tab search** (`Cmd+J`): Type to search all tabs (visible + parked) by title or working directory. Results ranked by match position. Parked tabs show a `[P]` badge — selecting one unparks and activates it.
 
 ## Panes
 

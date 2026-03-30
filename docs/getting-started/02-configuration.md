@@ -46,6 +46,7 @@ cursor_blink    = false   # true = blinking cursor at 530 ms; false = steady
 [tabs]
 max_width_chars = 24      # maximum tab label width in character cells
 new_tab_dir     = "cwd"   # "cwd" = inherit active tab's directory; "home" = $HOME
+max_open        = 10      # max visible (non-parked) tabs; 0 = unlimited
 
 [tabs.hover]
 enabled  = true    # show minimap popover when hovering a background tab

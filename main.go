@@ -413,6 +413,41 @@ func main() {
 
 	game.tabMgr.Tabs = initialTabs
 	game.tabMgr.ActiveIdx = initialActive
+
+	// Restore parked tabs from session.
+	if loadErr == nil && sess != nil && cfg.Session.Enabled && cfg.Session.RestoreOnLaunch && !*noRestore {
+		for _, td := range sess.Parked {
+			var t *tab.Tab
+			var tErr error
+			if td.Layout != nil {
+				t, tErr = restoreTabWithLayout(cfg, paneRect, fontR.CellW, fontR.CellH, td)
+				if tErr != nil {
+					log.Printf("session restore: failed to restore parked tab layout: %v", tErr)
+				}
+			}
+			if t == nil {
+				sanitizedDir := sanitizeDirectory(td.Cwd)
+				t, tErr = tab.New(cfg, paneRect, fontR.CellW, fontR.CellH, sanitizedDir)
+				if tErr != nil {
+					log.Printf("session restore: parked tab new: %v", tErr)
+					continue
+				}
+				if leaf := t.Layout.Leaves(); len(leaf) > 0 {
+					leaf[0].Pane.Term.Cwd = td.Cwd
+				}
+			}
+			t.Title = td.Title
+			if t.Title == "" {
+				t.Title = fmt.Sprintf("parked %d", len(game.tabMgr.Parked)+1)
+			}
+			t.UserRenamed = td.UserRenamed
+			t.Note = td.Note
+			if len(td.PinnedSlot) > 0 {
+				t.PinnedSlot = []rune(td.PinnedSlot)[0]
+			}
+			game.tabMgr.Parked = append(game.tabMgr.Parked, t)
+		}
+	}
 	game.renderer.BlocksEnabled = game.blocksEnabled
 	game.status.Bar.Version = version
 	game.buildPalette()
