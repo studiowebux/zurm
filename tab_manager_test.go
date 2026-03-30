@@ -235,6 +235,25 @@ func TestPark_AdjustsActiveIdx(t *testing.T) {
 	}
 }
 
+func TestPark_AdjustsActiveIdx_ParkBelowActive(t *testing.T) {
+	tm := NewTabManager()
+	t0 := &tab.Tab{}
+	t1 := &tab.Tab{}
+	t2 := &tab.Tab{}
+	tm.Add(t0)
+	tm.Add(t1)
+	tm.Add(t2)
+	tm.ActiveIdx = 2
+
+	tm.Park(0) // park tab below active
+	if tm.ActiveIdx != 1 {
+		t.Errorf("ActiveIdx = %d after parking tab 0 (active was 2), want 1", tm.ActiveIdx)
+	}
+	if tm.Tabs[tm.ActiveIdx] != t2 {
+		t.Error("ActiveIdx should still point to t2 after parking t0")
+	}
+}
+
 func TestUnpark_MovesTabToVisible(t *testing.T) {
 	tm := NewTabManager()
 	t1 := &tab.Tab{}

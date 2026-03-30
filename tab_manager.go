@@ -190,6 +190,8 @@ func (tm *TabManager) Park(i int) bool {
 	tm.Parked = append(tm.Parked, t)
 	if tm.ActiveIdx >= len(tm.Tabs) {
 		tm.ActiveIdx = len(tm.Tabs) - 1
+	} else if i < tm.ActiveIdx {
+		tm.ActiveIdx--
 	}
 	return true
 }

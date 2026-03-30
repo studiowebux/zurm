@@ -8,7 +8,7 @@ import (
 	"github.com/studiowebux/zurm/tab"
 )
 
-func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int, hintMode bool, parkedCount int) {
+func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int, hintMode bool, parkedCount int, parkedActivity bool) {
 	tabBarH := r.TabBarHeight()
 	physW, _ := r.screenSize()
 	numTabs := len(tabs)
@@ -148,7 +148,11 @@ func (r *Renderer) drawTabBar(tabs []*tab.Tab, activeTab int, hintMode bool, par
 		badgePixW := badgeRunes * r.font.CellW
 		textY := (tabBarH - r.font.CellH) / 2
 		badgeX := physW - badgePixW - r.font.CellW/2
-		r.font.DrawString(r.offscreen, badge, badgeX, textY, inactiveFg)
+		badgeColor := inactiveFg
+		if parkedActivity {
+			badgeColor = r.cursorColor
+		}
+		r.font.DrawString(r.offscreen, badge, badgeX, textY, badgeColor)
 	}
 }
 

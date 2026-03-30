@@ -519,7 +519,7 @@ func (g *Game) handleTabSearchInput() {
 	if g.repeats.TabSearch.Update(ebiten.KeyArrowUp, upPressed, g.input.PrevKeys[ebiten.KeyArrowUp], now) && g.overlays.TabSearch.Cursor > 0 {
 		g.overlays.TabSearch.Cursor--
 	}
-	if g.repeats.TabSearch.Update(ebiten.KeyArrowDown, downPressed, g.input.PrevKeys[ebiten.KeyArrowDown], now) && g.overlays.TabSearch.Cursor < len(filtered)-1 {
+	if g.repeats.TabSearch.Update(ebiten.KeyArrowDown, downPressed, g.input.PrevKeys[ebiten.KeyArrowDown], now) && g.overlays.TabSearch.Cursor+1 < len(filtered) {
 		g.overlays.TabSearch.Cursor++
 	}
 	g.input.PrevKeys[ebiten.KeyArrowUp] = upPressed
