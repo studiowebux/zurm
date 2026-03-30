@@ -586,6 +586,29 @@ func (g *Game) Update() error {
 		return ebiten.Termination
 	}
 
+	// Check parked tabs for dead panes. When any pane in a parked tab exits,
+	// close all its panes and remove the tab from Parked.
+	for i := len(g.tabMgr.Parked) - 1; i >= 0; i-- {
+		t := g.tabMgr.Parked[i]
+		dead := false
+		for _, leaf := range t.Layout.Leaves() {
+			select {
+			case <-leaf.Pane.Term.Dead():
+				dead = true
+			default:
+			}
+		}
+		if dead {
+			for _, leaf := range t.Layout.Leaves() {
+				leaf.Pane.Term.Close()
+			}
+			old := g.tabMgr.Parked
+			g.tabMgr.Parked = append(g.tabMgr.Parked[:i], g.tabMgr.Parked[i+1:]...)
+			old[len(old)-1] = nil
+			g.render.Dirty = true
+		}
+	}
+
 	g.handleMouse()
 	g.handleInput()
 	if len(g.tabMgr.Tabs) == 0 {
