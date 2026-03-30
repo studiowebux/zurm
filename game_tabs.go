@@ -514,6 +514,13 @@ func (g *Game) handleTabSearchInput() {
 
 	filtered := renderer.FilterTabSearch(g.tabMgr.Tabs, g.tabMgr.Parked, g.overlays.TabSearch.Query)
 
+	// Clamp cursor after list changes (e.g. dead parked tab removed between frames).
+	if g.overlays.TabSearch.Cursor >= len(filtered) && len(filtered) > 0 {
+		g.overlays.TabSearch.Cursor = len(filtered) - 1
+	} else if len(filtered) == 0 {
+		g.overlays.TabSearch.Cursor = 0
+	}
+
 	upPressed := ebiten.IsKeyPressed(ebiten.KeyArrowUp)
 	downPressed := ebiten.IsKeyPressed(ebiten.KeyArrowDown)
 	if g.repeats.TabSearch.Update(ebiten.KeyArrowUp, upPressed, g.input.PrevKeys[ebiten.KeyArrowUp], now) && g.overlays.TabSearch.Cursor > 0 {

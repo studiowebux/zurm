@@ -14,6 +14,7 @@ func AllCommands() []Command {
 	return []Command{
 		// Tabs
 		{Name: "New Tab", Shortcut: "Cmd+T"},
+		{Name: "Park Tab", Shortcut: "Cmd+Shift+K"},
 		{Name: "Close Tab", Shortcut: "Cmd+W"},
 		{Name: "Next Tab", Shortcut: "Cmd+Shift+]"},
 		{Name: "Previous Tab", Shortcut: "Cmd+Shift+["},

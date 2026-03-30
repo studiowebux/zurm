@@ -488,9 +488,12 @@ func (g *Game) collectStats() {
 	if len(gcStats.Pause) > 0 && gcStats.Pause[0] >= 0 {
 		g.overlays.Stats.GCPauseNs = uint64(gcStats.Pause[0]) // #nosec G115 — pause duration is always non-negative
 	}
-	g.overlays.Stats.TabCount = len(g.tabMgr.Tabs)
+	g.overlays.Stats.TabCount = len(g.tabMgr.Tabs) + len(g.tabMgr.Parked)
 	paneCount := 0
 	for _, t := range g.tabMgr.Tabs {
+		paneCount += len(t.Layout.Leaves())
+	}
+	for _, t := range g.tabMgr.Parked {
 		paneCount += len(t.Layout.Leaves())
 	}
 	g.overlays.Stats.PaneCount = paneCount
