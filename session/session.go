@@ -33,6 +33,7 @@ type SessionData struct {
 	Version   int       `json:"version"`
 	ActiveTab int       `json:"active_tab"`
 	Tabs      []TabData `json:"tabs"`
+	Parked    []TabData `json:"parked,omitempty"`
 }
 
 // Path returns the path to the session file.

@@ -413,6 +413,41 @@ func main() {
 
 	game.tabMgr.Tabs = initialTabs
 	game.tabMgr.ActiveIdx = initialActive
+
+	// Restore parked tabs from session.
+	if loadErr == nil && sess != nil && cfg.Session.Enabled && cfg.Session.RestoreOnLaunch && !*noRestore {
+		for _, td := range sess.Parked {
+			var t *tab.Tab
+			var tErr error
+			if td.Layout != nil {
+				t, tErr = restoreTabWithLayout(cfg, paneRect, fontR.CellW, fontR.CellH, td)
+				if tErr != nil {
+					log.Printf("session restore: failed to restore parked tab layout: %v", tErr)
+				}
+			}
+			if t == nil {
+				sanitizedDir := sanitizeDirectory(td.Cwd)
+				t, tErr = tab.New(cfg, paneRect, fontR.CellW, fontR.CellH, sanitizedDir)
+				if tErr != nil {
+					log.Printf("session restore: parked tab new: %v", tErr)
+					continue
+				}
+				if leaf := t.Layout.Leaves(); len(leaf) > 0 {
+					leaf[0].Pane.Term.Cwd = td.Cwd
+				}
+			}
+			t.Title = td.Title
+			if t.Title == "" {
+				t.Title = fmt.Sprintf("parked %d", len(game.tabMgr.Parked)+1)
+			}
+			t.UserRenamed = td.UserRenamed
+			t.Note = td.Note
+			if len(td.PinnedSlot) > 0 {
+				t.PinnedSlot = []rune(td.PinnedSlot)[0]
+			}
+			game.tabMgr.Parked = append(game.tabMgr.Parked, t)
+		}
+	}
 	game.renderer.BlocksEnabled = game.blocksEnabled
 	game.status.Bar.Version = version
 	game.buildPalette()
@@ -559,6 +594,15 @@ func (g *Game) Update() error {
 			}
 		}
 	}
+	// Check parked tabs for PTY activity (PTYs still running while parked).
+	// Dirty flag needed so the [N↓] badge redraws when parked tabs get output.
+	for _, t := range g.tabMgr.Parked {
+		had := t.HasActivity
+		t.CheckActivity()
+		if t.HasActivity != had {
+			g.render.Dirty = true
+		}
+	}
 
 	// Check for dead panes (non-blocking). Close at most one per frame to avoid
 	// Close at most one per frame to keep the layout consistent.
@@ -580,6 +624,29 @@ func (g *Game) Update() error {
 	}
 	if len(g.tabMgr.Tabs) == 0 {
 		return ebiten.Termination
+	}
+
+	// Check parked tabs for dead panes. When any pane in a parked tab exits,
+	// close all its panes and remove the tab from Parked.
+	for i := len(g.tabMgr.Parked) - 1; i >= 0; i-- {
+		t := g.tabMgr.Parked[i]
+		dead := false
+		for _, leaf := range t.Layout.Leaves() {
+			select {
+			case <-leaf.Pane.Term.Dead():
+				dead = true
+			default:
+			}
+		}
+		if dead {
+			for _, leaf := range t.Layout.Leaves() {
+				leaf.Pane.Term.Close()
+			}
+			old := g.tabMgr.Parked
+			g.tabMgr.Parked = append(g.tabMgr.Parked[:i], g.tabMgr.Parked[i+1:]...)
+			old[len(old)-1] = nil
+			g.render.Dirty = true
+		}
 	}
 
 	g.handleMouse()
@@ -715,6 +782,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.renderer.DrawAll(renderer.DrawState{
 		Screen:         screen,
 		Tabs:           g.tabMgr.Tabs,
+		ParkedTabs:     g.tabMgr.Parked,
 		ActiveTab:      g.tabMgr.ActiveIdx,
 		Focused:        g.activeFocused(),
 		Zoomed:         g.zoomed,

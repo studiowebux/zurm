@@ -78,6 +78,7 @@ var Defaults = Config{
 	Tabs: TabsConfig{
 		MaxWidthChars: 24,
 		NewTabDir:     "cwd",
+		MaxOpen:       10,
 		Hover: TabHoverConfig{
 			Enabled: true,
 			DelayMs: 300,

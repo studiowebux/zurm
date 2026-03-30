@@ -158,7 +158,7 @@ func (g *Game) handleInput() {
 				g.activeFocused().Term.Buf.ScrollViewDown(halfPage)
 				g.activeFocused().Term.Buf.Unlock()
 				keyScrolled = true
-			case (meta || ctrl) && key == ebiten.KeyK:
+			case (meta || ctrl) && !shift && key == ebiten.KeyK:
 				g.activeFocused().Term.Buf.Lock()
 				g.activeFocused().Term.Buf.ClearScrollback()
 				g.activeFocused().Term.Buf.ClearSelection()
@@ -348,6 +348,8 @@ func (g *Game) handleAppShortcut(key ebiten.Key, ctrl, shift, meta, alt bool) bo
 		g.openURLInput()
 
 	// Tab management.
+	case meta && shift && key == ebiten.KeyK:
+		g.parkActiveTab()
 	case meta && shift && key == ebiten.KeyT:
 		g.openTabSwitcher()
 	case meta && key == ebiten.KeyG:

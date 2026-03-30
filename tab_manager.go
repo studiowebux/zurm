@@ -10,8 +10,12 @@ const maxFocusHistory = 50
 // TabManager owns the tab slice, active index, focus history, drag state,
 // and pin mode. Game holds a *TabManager and delegates tab operations to it.
 type TabManager struct {
-	Tabs     []*tab.Tab
+	Tabs      []*tab.Tab
 	ActiveIdx int
+
+	// Parked holds tabs that are hidden from the tab bar but still active.
+	// PTYs keep running; tabs are accessible via tab search (Cmd+J).
+	Parked []*tab.Tab
 
 	// Focus history for Cmd+` navigation.
 	FocusHistory []focusEntry
@@ -115,8 +119,13 @@ func (tm *TabManager) PinActive(slot rune) {
 		active.PinnedSlot = 0 // toggle off
 		return
 	}
-	// Evict any tab currently holding this slot.
+	// Evict any tab currently holding this slot (visible and parked).
 	for _, t := range tm.Tabs {
+		if t.PinnedSlot == slot {
+			t.PinnedSlot = 0
+		}
+	}
+	for _, t := range tm.Parked {
 		if t.PinnedSlot == slot {
 			t.PinnedSlot = 0
 		}
@@ -165,4 +174,47 @@ func (tm *TabManager) PopFocus() (focusEntry, bool) {
 	e := tm.FocusHistory[len(tm.FocusHistory)-1]
 	tm.FocusHistory = tm.FocusHistory[:len(tm.FocusHistory)-1]
 	return e, true
+}
+
+// Park moves the tab at index i from Tabs to Parked.
+// Returns false (and does nothing) if only one visible tab remains — the last
+// visible tab cannot be parked.
+func (tm *TabManager) Park(i int) bool {
+	if len(tm.Tabs) <= 1 {
+		return false
+	}
+	t := tm.Tabs[i]
+	old := tm.Tabs
+	tm.Tabs = append(tm.Tabs[:i], tm.Tabs[i+1:]...)
+	old[len(old)-1] = nil // release for GC
+	tm.Parked = append(tm.Parked, t)
+	if tm.ActiveIdx >= len(tm.Tabs) {
+		tm.ActiveIdx = len(tm.Tabs) - 1
+	} else if i < tm.ActiveIdx {
+		tm.ActiveIdx--
+	}
+	return true
+}
+
+// Unpark moves the tab at parked index i from Parked back to the end of Tabs.
+func (tm *TabManager) Unpark(i int) {
+	if i < 0 || i >= len(tm.Parked) {
+		return
+	}
+	t := tm.Parked[i]
+	old := tm.Parked
+	tm.Parked = append(tm.Parked[:i], tm.Parked[i+1:]...)
+	old[len(old)-1] = nil // release for GC
+	tm.Tabs = append(tm.Tabs, t)
+}
+
+// PinnedParkedTab returns the index within Parked of the tab pinned to slot,
+// or -1 if no parked tab holds that slot.
+func (tm *TabManager) PinnedParkedTab(slot rune) int {
+	for i, t := range tm.Parked {
+		if t.PinnedSlot == slot {
+			return i
+		}
+	}
+	return -1
 }

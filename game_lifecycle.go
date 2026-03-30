@@ -30,6 +30,11 @@ func (g *Game) handleFocus() {
 				leaf.Pane.Term.SetPaused(true)
 			}
 		}
+		for _, t := range g.tabMgr.Parked {
+			for _, leaf := range t.Layout.Leaves() {
+				leaf.Pane.Term.SetPaused(true)
+			}
+		}
 	}
 
 	if focused != g.wfocus.PrevFocused {
@@ -92,6 +97,11 @@ func (g *Game) unsuspendAndRedraw() {
 		ebiten.SetTPS(g.cfg.Performance.TPS)
 		g.wfocus.Suspended = false
 		for _, t := range g.tabMgr.Tabs {
+			for _, leaf := range t.Layout.Leaves() {
+				leaf.Pane.Term.SetPaused(false)
+			}
+		}
+		for _, t := range g.tabMgr.Parked {
 			for _, leaf := range t.Layout.Leaves() {
 				leaf.Pane.Term.SetPaused(false)
 			}

@@ -411,6 +411,7 @@ func (g *Game) buildPalette() {
 	actions := []func(){
 		// Tabs
 		g.newTab,
+		g.parkActiveTab,
 		g.closeActiveTab,
 		g.nextTab,
 		g.prevTab,

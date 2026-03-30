@@ -18,11 +18,46 @@ type focusEntry struct {
 	pane   *pane.Pane
 }
 
+// parkActiveTab moves the active tab to the parking lot (hidden but still alive).
+// Refused if only one visible tab remains.
+func (g *Game) parkActiveTab() {
+	// Snapshot render generation so the tab doesn't immediately show activity.
+	g.tabMgr.Tabs[g.tabMgr.ActiveIdx].SnapshotGen()
+	if !g.tabMgr.Park(g.tabMgr.ActiveIdx) {
+		g.flashStatus("Cannot park last tab.")
+		return
+	}
+	g.renderer.ClearPaneCache()
+	g.renderer.SetLayoutDirty()
+	g.render.Dirty = true
+}
+
+// unparkTab moves the parked tab at parkedIdx back to the visible slice and activates it.
+// Recomputes the tab's pane layout in case the window was resized while it was parked.
+func (g *Game) unparkTab(parkedIdx int) {
+	if parkedIdx < 0 || parkedIdx >= len(g.tabMgr.Parked) {
+		return
+	}
+	g.tabMgr.Unpark(parkedIdx)
+	t := g.tabMgr.Tabs[len(g.tabMgr.Tabs)-1]
+	paneRect := g.contentRect()
+	setPaneHeaders(t.Layout, g.font.CellH)
+	t.Layout.ComputeRects(paneRect, g.font.CellW, g.font.CellH, g.cfg.Window.Padding, g.cfg.Panes.DividerWidthPixels)
+	for _, leaf := range t.Layout.Leaves() {
+		leaf.Pane.Term.Resize(leaf.Pane.Cols, leaf.Pane.Rows)
+	}
+	g.switchTab(len(g.tabMgr.Tabs) - 1)
+}
+
 // newTab creates a new tab and switches to it.
 // The starting directory is controlled by cfg.Tabs.NewTabDir:
 //   - "cwd"  → inherit the active tab's current working directory
 //   - "home" → always open in $HOME
 func (g *Game) newTab() {
+	if g.cfg.Tabs.MaxOpen > 0 && g.tabMgr.Count() >= g.cfg.Tabs.MaxOpen {
+		g.flashStatus(fmt.Sprintf("Tab limit reached (%d). Park or close a tab first.", g.cfg.Tabs.MaxOpen))
+		return
+	}
 	paneRect := g.contentRect()
 
 	var dir string
@@ -51,6 +86,10 @@ func (g *Game) newTab() {
 // If the server binary is not found or the connection fails, the pane falls back
 // to a local PTY — the tab is always created.
 func (g *Game) newServerTab() {
+	if g.cfg.Tabs.MaxOpen > 0 && g.tabMgr.Count() >= g.cfg.Tabs.MaxOpen {
+		g.flashStatus(fmt.Sprintf("Tab limit reached (%d). Park or close a tab first.", g.cfg.Tabs.MaxOpen))
+		return
+	}
 	paneRect := g.contentRect()
 
 	var dir string
@@ -290,10 +329,15 @@ func (g *Game) pinTab(slot rune) {
 }
 
 // switchToSlot activates the tab pinned to the given home-row slot.
-// Does nothing if no tab is pinned there.
+// If the pinned tab is parked, it is unparked first.
+// Does nothing if no tab is pinned to the slot.
 func (g *Game) switchToSlot(slot rune) {
 	if idx := g.tabMgr.PinnedTab(slot); idx >= 0 {
 		g.switchTab(idx)
+		return
+	}
+	if idx := g.tabMgr.PinnedParkedTab(slot); idx >= 0 {
+		g.unparkTab(idx)
 	}
 }
 
@@ -470,14 +514,21 @@ func (g *Game) handleTabSearchInput() {
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
 	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 
-	filtered := renderer.FilterTabSearch(g.tabMgr.Tabs, g.overlays.TabSearch.Query)
+	filtered := renderer.FilterTabSearch(g.tabMgr.Tabs, g.tabMgr.Parked, g.overlays.TabSearch.Query)
+
+	// Clamp cursor after list changes (e.g. dead parked tab removed between frames).
+	if g.overlays.TabSearch.Cursor >= len(filtered) && len(filtered) > 0 {
+		g.overlays.TabSearch.Cursor = len(filtered) - 1
+	} else if len(filtered) == 0 {
+		g.overlays.TabSearch.Cursor = 0
+	}
 
 	upPressed := ebiten.IsKeyPressed(ebiten.KeyArrowUp)
 	downPressed := ebiten.IsKeyPressed(ebiten.KeyArrowDown)
 	if g.repeats.TabSearch.Update(ebiten.KeyArrowUp, upPressed, g.input.PrevKeys[ebiten.KeyArrowUp], now) && g.overlays.TabSearch.Cursor > 0 {
 		g.overlays.TabSearch.Cursor--
 	}
-	if g.repeats.TabSearch.Update(ebiten.KeyArrowDown, downPressed, g.input.PrevKeys[ebiten.KeyArrowDown], now) && g.overlays.TabSearch.Cursor < len(filtered)-1 {
+	if g.repeats.TabSearch.Update(ebiten.KeyArrowDown, downPressed, g.input.PrevKeys[ebiten.KeyArrowDown], now) && g.overlays.TabSearch.Cursor+1 < len(filtered) {
 		g.overlays.TabSearch.Cursor++
 	}
 	g.input.PrevKeys[ebiten.KeyArrowUp] = upPressed
@@ -510,7 +561,12 @@ func (g *Game) handleTabSearchInput() {
 		g.input.PrevKeys[key] = pressed
 		if pressed && !wasPressed {
 			if len(filtered) > 0 && g.overlays.TabSearch.Cursor < len(filtered) {
-				g.switchTab(filtered[g.overlays.TabSearch.Cursor].OrigIdx)
+				entry := filtered[g.overlays.TabSearch.Cursor]
+				if entry.Parked {
+					g.unparkTab(-(entry.OrigIdx + 1))
+				} else {
+					g.switchTab(entry.OrigIdx)
+				}
 				g.closeTabSearch()
 			}
 			return

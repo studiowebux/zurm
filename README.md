@@ -54,12 +54,14 @@ Discord: https://discord.gg/BG5Erm9fNv
 | | Headers | Name labels with scroll position indicator |
 | | Rename | Double-click header, right-click menu, or command palette |
 | | Persist | Pane names and layout survive session save/restore |
-| **Tabs** | Switcher | Cmd+Shift+T — fuzzy overlay to switch by name |
-| | Search | Cmd+J — filter by tab name or CWD |
-| | Pins | Cmd+G → home-row key (a–l) for instant tab jump |
+| **Tabs** | Parking | Cmd+Shift+K — hide tab from bar, keep PTY alive; Cmd+J to find/unpark |
+| | Max open | `[tabs] max_open = 10` caps visible tabs; parked tabs are unlimited |
+| | Switcher | Cmd+Shift+T — fuzzy overlay to switch by name |
+| | Search | Cmd+J — filter all tabs (visible + parked) by name or CWD |
+| | Pins | Cmd+G → home-row key (a–l) for instant tab jump; works with parked tabs |
 | | Notes | Cmd+Shift+N — persistent text note per tab; shown in status bar |
 | | Reorder | Cmd+Shift+←/→ or mouse drag |
-| | Activity indicator | Purple dot on tabs with unseen PTY output |
+| | Activity indicator | Purple dot on tabs with unseen PTY output; badge glow for parked |
 | | Hover preview | Minimap popover on background tab hover |
 | | Focus history | Cmd+; — stack of 50 previously viewed tabs/panes |
 | **File Explorer** | Tree sidebar | Cmd+E — browse, create, rename, delete, copy path |

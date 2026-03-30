@@ -345,6 +345,24 @@ func (g *Game) doSaveSession() {
 		}
 		data.Tabs = append(data.Tabs, td)
 	}
+	for _, t := range g.tabMgr.Parked {
+		leaves := t.Layout.Leaves()
+		if len(leaves) == 0 {
+			continue
+		}
+		term := leaves[0].Pane.Term
+		td := session.TabData{
+			Cwd:         term.Cwd,
+			Title:       t.Title,
+			UserRenamed: t.UserRenamed,
+			Note:        t.Note,
+			Layout:      serializePaneLayout(t.Layout),
+		}
+		if t.PinnedSlot != 0 {
+			td.PinnedSlot = string(t.PinnedSlot)
+		}
+		data.Parked = append(data.Parked, td)
+	}
 	if err := session.Save(data); err != nil {
 		log.Printf("zurm: session save: %v", err)
 	}
@@ -470,9 +488,12 @@ func (g *Game) collectStats() {
 	if len(gcStats.Pause) > 0 && gcStats.Pause[0] >= 0 {
 		g.overlays.Stats.GCPauseNs = uint64(gcStats.Pause[0]) // #nosec G115 — pause duration is always non-negative
 	}
-	g.overlays.Stats.TabCount = len(g.tabMgr.Tabs)
+	g.overlays.Stats.TabCount = len(g.tabMgr.Tabs) + len(g.tabMgr.Parked)
 	paneCount := 0
 	for _, t := range g.tabMgr.Tabs {
+		paneCount += len(t.Layout.Leaves())
+	}
+	for _, t := range g.tabMgr.Parked {
 		paneCount += len(t.Layout.Leaves())
 	}
 	g.overlays.Stats.PaneCount = paneCount

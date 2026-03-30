@@ -15,18 +15,24 @@ const (
 )
 
 // TabSearchEntry is a filtered tab entry with its original index preserved.
+// OrigIdx >= 0: index into the visible Tabs slice.
+// OrigIdx < 0:  parked tab — actual index is -(OrigIdx+1).
 type TabSearchEntry struct {
 	DisplayTitle string
 	PinnedSlot   rune
 	Cwd          string
 	OrigIdx      int
+	Parked       bool
 	matchPos     int
 }
 
-// FilterTabSearch returns tabs matching query (case-insensitive substring on title or CWD).
-// Sorted by match position (earlier = higher rank).
-func FilterTabSearch(tabs []*tab.Tab, query string) []TabSearchEntry {
-	entries := make([]TabSearchEntry, 0, len(tabs))
+// FilterTabSearch returns visible and parked tabs matching query (case-insensitive
+// substring on title or CWD). Visible tabs are listed first, parked tabs after.
+// Parked entries use OrigIdx = -(parkedIdx+1) to distinguish them from visible ones.
+// Sorted within each group by match position (earlier = higher rank).
+func FilterTabSearch(tabs, parked []*tab.Tab, query string) []TabSearchEntry {
+	entries := make([]TabSearchEntry, 0, len(tabs)+len(parked))
+
 	for i, t := range tabs {
 		title := t.DisplayTitle(i)
 		cwd := ""
@@ -38,6 +44,22 @@ func FilterTabSearch(tabs []*tab.Tab, query string) []TabSearchEntry {
 			PinnedSlot:   t.PinnedSlot,
 			Cwd:          cwd,
 			OrigIdx:      i,
+			Parked:       false,
+		})
+	}
+
+	for i, t := range parked {
+		title := t.DisplayTitle(i)
+		cwd := ""
+		if leaves := t.Layout.Leaves(); len(leaves) > 0 {
+			cwd = leaves[0].Pane.Term.Cwd
+		}
+		entries = append(entries, TabSearchEntry{
+			DisplayTitle: title,
+			PinnedSlot:   t.PinnedSlot,
+			Cwd:          cwd,
+			OrigIdx:      -(i + 1),
+			Parked:       true,
 		})
 	}
 
@@ -54,14 +76,14 @@ func FilterTabSearch(tabs []*tab.Tab, query string) []TabSearchEntry {
 }
 
 // drawTabSearch renders the tab search overlay onto r.modalLayer.
-func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearchState) {
+func (r *Renderer) drawTabSearch(tabs, parked []*tab.Tab, activeTab int, state *TabSearchState) {
 	if state == nil || !state.Open {
 		return
 	}
 
 	physW, physH := r.modalSize()
 
-	filtered := FilterTabSearch(tabs, state.Query)
+	filtered := FilterTabSearch(tabs, parked, state.Query)
 	visible := len(filtered)
 	if visible > tsMaxVisible {
 		visible = tsMaxVisible
@@ -130,7 +152,7 @@ func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearc
 		scrollOffset = state.Cursor - tsMaxVisible + 1
 	}
 
-	badgeW := 4 * cw // "[N] " or "    "
+	badgeW := 4 * cw // "[P] " or "[a] " or "    "
 	cwdColW := 20 * cw
 	nameMaxW := panelW - tsPad*cw - badgeW - cwdColW - tsPad*cw/2
 
@@ -150,17 +172,28 @@ func (r *Renderer) drawTabSearch(tabs []*tab.Tab, activeTab int, state *TabSearc
 		textY := rowY + (rowH-ch)/2
 		nameX := panelX + tsPad*cw/2
 
-		// Pin badge.
-		badge := pinnedBadge(entry.PinnedSlot, "   ") + " "
+		// Badge: [P] for parked, pin slot letter for pinned, spaces otherwise.
+		var badge string
+		if entry.Parked {
+			badge = "[P] "
+		} else {
+			badge = pinnedBadge(entry.PinnedSlot, "   ") + " "
+		}
 		badgeColor := ui.KeyName
+		if entry.Parked {
+			badgeColor = ui.Dim
+		}
 		if idx == state.Cursor {
 			badgeColor = ui.Accent
 		}
 		r.font.DrawString(r.modalLayer, badge, nameX, textY, badgeColor)
 
-		// Tab title.
+		// Tab title — dimmed for parked entries.
 		titleColor := ui.Fg
-		if entry.OrigIdx == activeTab {
+		if entry.Parked {
+			titleColor = ui.Dim
+		}
+		if !entry.Parked && entry.OrigIdx == activeTab {
 			titleColor = ui.Accent
 		}
 		if idx == state.Cursor {
