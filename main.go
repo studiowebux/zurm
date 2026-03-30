@@ -742,6 +742,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.renderer.DrawAll(renderer.DrawState{
 		Screen:         screen,
 		Tabs:           g.tabMgr.Tabs,
+		ParkedTabs:     g.tabMgr.Parked,
 		ActiveTab:      g.tabMgr.ActiveIdx,
 		Focused:        g.activeFocused(),
 		Zoomed:         g.zoomed,

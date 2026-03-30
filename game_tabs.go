@@ -509,7 +509,7 @@ func (g *Game) handleTabSearchInput() {
 	meta := ebiten.IsKeyPressed(ebiten.KeyMeta)
 	alt := ebiten.IsKeyPressed(ebiten.KeyAlt)
 
-	filtered := renderer.FilterTabSearch(g.tabMgr.Tabs, g.overlays.TabSearch.Query)
+	filtered := renderer.FilterTabSearch(g.tabMgr.Tabs, g.tabMgr.Parked, g.overlays.TabSearch.Query)
 
 	upPressed := ebiten.IsKeyPressed(ebiten.KeyArrowUp)
 	downPressed := ebiten.IsKeyPressed(ebiten.KeyArrowDown)
@@ -549,7 +549,12 @@ func (g *Game) handleTabSearchInput() {
 		g.input.PrevKeys[key] = pressed
 		if pressed && !wasPressed {
 			if len(filtered) > 0 && g.overlays.TabSearch.Cursor < len(filtered) {
-				g.switchTab(filtered[g.overlays.TabSearch.Cursor].OrigIdx)
+				entry := filtered[g.overlays.TabSearch.Cursor]
+				if entry.Parked {
+					g.unparkTab(-(entry.OrigIdx + 1))
+				} else {
+					g.switchTab(entry.OrigIdx)
+				}
 				g.closeTabSearch()
 			}
 			return

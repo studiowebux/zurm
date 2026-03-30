@@ -290,6 +290,7 @@ func (r *Renderer) StatusBarHeight() int {
 type DrawState struct {
 	Screen         *ebiten.Image
 	Tabs           []*tab.Tab
+	ParkedTabs     []*tab.Tab
 	ActiveTab      int
 	Focused        *pane.Pane
 	Zoomed         bool
@@ -504,7 +505,7 @@ func (r *Renderer) drawModalOverlays(ds DrawState) {
 	}
 
 	r.drawTabSwitcher(ds.Tabs, ds.ActiveTab, ds.TabSwitcher)
-	r.drawTabSearch(ds.Tabs, ds.ActiveTab, ds.TabSearch)
+	r.drawTabSearch(ds.Tabs, ds.ParkedTabs, ds.ActiveTab, ds.TabSearch)
 
 	if ds.Palette != nil && ds.Palette.Open {
 		r.drawPalette(ds.PaletteEntries, ds.Palette)
