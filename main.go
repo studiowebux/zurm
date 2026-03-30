@@ -595,8 +595,13 @@ func (g *Game) Update() error {
 		}
 	}
 	// Check parked tabs for PTY activity (PTYs still running while parked).
+	// Dirty flag needed so the [N↓] badge redraws when parked tabs get output.
 	for _, t := range g.tabMgr.Parked {
+		had := t.HasActivity
 		t.CheckActivity()
+		if t.HasActivity != had {
+			g.render.Dirty = true
+		}
 	}
 
 	// Check for dead panes (non-blocking). Close at most one per frame to avoid

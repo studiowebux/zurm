@@ -33,6 +33,9 @@ func (g *Game) parkActiveTab() {
 // unparkTab moves the parked tab at parkedIdx back to the visible slice and activates it.
 // Recomputes the tab's pane layout in case the window was resized while it was parked.
 func (g *Game) unparkTab(parkedIdx int) {
+	if parkedIdx < 0 || parkedIdx >= len(g.tabMgr.Parked) {
+		return
+	}
 	g.tabMgr.Unpark(parkedIdx)
 	t := g.tabMgr.Tabs[len(g.tabMgr.Tabs)-1]
 	paneRect := g.contentRect()
