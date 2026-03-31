@@ -168,6 +168,7 @@ type StatusBarState struct {
 	TabNote           string        // active tab's annotation, shown as a middle segment
 	ServerSession      bool           // true when the focused pane is backed by zurm-server
 	ServerSessionCount int           // number of open panes backed by zurm-server; 0 in local mode
+	SSHHost            string         // [user@]host of the active SSH session, "" when not in SSH
 }
 
 // --- Tab switcher (Cmd+Space) ---
