@@ -440,6 +440,8 @@ func (t *Terminal) QueryForeground(ctx context.Context) {
 
 // foregroundProcessName returns the basename of the foreground process in the PTY.
 // Returns an empty string when the shell itself is the foreground process or on error.
+// When the foreground process is ssh, returns "ssh\n<user@host>" so the caller
+// can extract the SSH destination from the second newline-delimited field.
 func (t *Terminal) foregroundProcessName(ctx context.Context) string {
 	if t.pty == nil {
 		return ""
@@ -460,7 +462,57 @@ func (t *Terminal) foregroundProcessName(ctx context.Context) string {
 	if i := strings.LastIndex(name, "/"); i >= 0 {
 		name = name[i+1:]
 	}
+	if name == "ssh" {
+		if host := sshHostFromPGID(ctx, pgid); host != "" {
+			return "ssh\n" + host
+		}
+	}
 	return name
+}
+
+// sshHostFromPGID runs ps to get the full args for the given PGID and extracts
+// the SSH destination ([user@]host) from the command-line arguments.
+func sshHostFromPGID(ctx context.Context, pgid int) string {
+	out, err := exec.CommandContext(ctx, "ps", "-p", fmt.Sprintf("%d", pgid), "-o", "args=").Output() // #nosec G204 — fixed binary, only argument is numeric PGID
+	if err != nil {
+		return ""
+	}
+	return parseSSHHost(strings.TrimSpace(string(out)))
+}
+
+// parseSSHHost extracts the [user@]host from an ssh command line.
+// Skips the "ssh" binary name and any flags (and their single-argument values).
+func parseSSHHost(args string) string {
+	parts := strings.Fields(args)
+	if len(parts) == 0 {
+		return ""
+	}
+	// flags that consume the next argument (single-char flags with a value)
+	flagsWithArg := map[byte]bool{
+		'b': true, 'c': true, 'D': true, 'e': true, 'E': true,
+		'F': true, 'I': true, 'i': true, 'J': true, 'L': true,
+		'l': true, 'm': true, 'o': true, 'p': true, 'R': true,
+		'S': true, 'w': true, 'W': true,
+	}
+	skipNext := false
+	for _, p := range parts[1:] { // skip the binary name itself
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		if strings.HasPrefix(p, "-") {
+			if len(p) == 2 && flagsWithArg[p[1]] {
+				skipNext = true
+			}
+			continue
+		}
+		// First non-flag argument is [user@]host (or [user@]host:port — strip port)
+		if idx := strings.LastIndex(p, ":"); idx > 0 {
+			return p[:idx]
+		}
+		return p
+	}
+	return ""
 }
 
 // RefreshForeground immediately queries the foreground process and sends the
