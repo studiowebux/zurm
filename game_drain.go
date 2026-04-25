@@ -330,6 +330,8 @@ func (g *Game) drainGitBranch() {
 
 // drainForeground reads the latest foreground process name from all visible panes
 // and updates ProcName on each. The focused pane's name also feeds the status bar.
+// When the foreground process is ssh, the value is "ssh\n<user@host>" — the SSH
+// host is extracted and stored in Bar.SSHHost; Bar.ForegroundProc is set to "ssh".
 func (g *Game) drainForeground() {
 	if !g.cfg.StatusBar.ShowProcess {
 		return
@@ -340,12 +342,18 @@ func (g *Game) drainForeground() {
 	for _, leaf := range g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Layout.Leaves() {
 		p := leaf.Pane
 		select {
-		case name := <-p.Term.ForegroundProcCh:
+		case raw := <-p.Term.ForegroundProcCh:
+			name, sshHost := raw, ""
+			if idx := strings.IndexByte(raw, '\n'); idx >= 0 {
+				name = raw[:idx]
+				sshHost = raw[idx+1:]
+			}
 			if name != p.ProcName {
 				p.ProcName = name
 				g.render.Dirty = true
 				if p == g.activeFocused() {
 					g.status.Bar.ForegroundProc = name
+					g.status.Bar.SSHHost = sshHost
 				}
 			}
 		default:
@@ -369,12 +377,13 @@ func (g *Game) drainShellIntegration() {
 		case kind := <-p.Term.ShellIntCh:
 			switch kind {
 			case 'A', 'D':
-				// Shell at prompt — clear foreground process.
+				// Shell at prompt — clear foreground process and SSH host.
 				if p.ProcName != "" {
 					p.ProcName = ""
 					g.render.Dirty = true
 					if p == g.activeFocused() {
 						g.status.Bar.ForegroundProc = ""
+						g.status.Bar.SSHHost = ""
 					}
 				}
 			case 'C':

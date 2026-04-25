@@ -31,6 +31,7 @@ type RenderColorConfig struct {
 	Red           string
 	Blue          string
 	Cyan          string
+	Green         string
 	Separator     string
 	MdBold        string
 	MdHeading     string

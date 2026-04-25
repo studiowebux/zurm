@@ -157,6 +157,7 @@ func buildRenderConfig(cfg *config.Config) *renderer.RenderConfig {
 			Red:           cfg.Colors.Red,
 			Blue:          cfg.Colors.Blue,
 			Cyan:          cfg.Colors.Cyan,
+			Green:         cfg.Colors.Green,
 			Separator:     cfg.Colors.Separator,
 			MdBold:        cfg.Colors.MdBold,
 			MdHeading:     cfg.Colors.MdHeading,

@@ -69,6 +69,13 @@ func (r *Renderer) drawStatusBar(state *StatusBarState) {
 	if state.ScrollOffset > 0 {
 		rightSegs = append(rightSegs, seg{fmt.Sprintf("↑ %d", state.ScrollOffset), accentFg})
 	}
+	if state.SSHHost != "" {
+		sshColor := parseHexColor(r.cfg.Colors.Green)
+		if r.cfg.Colors.Green == "" {
+			sshColor = parseHexColor(r.cfg.Colors.Cyan)
+		}
+		rightSegs = append(rightSegs, seg{"[SSH] " + state.SSHHost, sshColor})
+	}
 	if state.ServerSession {
 		rightSegs = append(rightSegs, seg{"[SERVER]", parseHexColor(r.cfg.Colors.Cyan)})
 	}
