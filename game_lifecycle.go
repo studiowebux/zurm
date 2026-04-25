@@ -11,10 +11,24 @@ import (
 )
 
 func (g *Game) handleFocus() {
-	// NSWorkspaceDidWakeNotification: macOS fires this exactly once on system wake.
-	// Trigger unsuspend and full repaint immediately, before any focus-state
-	// transition, which is unreliable after sleep/wake on some macOS configurations.
+	// screenWakeFlag: set by sleepWatcher goroutine after it restored TPS from 0
+	// following a WillSleep/DidWake cycle. Trigger full repaint before focus-state
+	// transitions, which are unreliable after screen-sleep on some configurations.
+	if consumeScreenWake() {
+		g.unsuspendAndRedraw()
+	}
+
+	// NSWorkspaceDidWakeNotification (non-screen-sleep path): sleepWatcher only
+	// consumes wakeFlag when screenSleeping=1, so this handles cases where the
+	// system woke without the display having been halted by sleepWatcher.
 	if consumeWake() {
+		g.unsuspendAndRedraw()
+	}
+
+	// NSApplicationDidChangeScreenParametersNotification: display configuration
+	// changed (HDMI connect/disconnect, resolution change, lid open/close).
+	// Zero g.winW so handleResize re-applies layout with new geometry and DPI.
+	if consumeScreenChange() {
 		g.unsuspendAndRedraw()
 	}
 
@@ -93,8 +107,11 @@ func (g *Game) handleFocus() {
 // unsuspendAndRedraw lifts idle suspension (if active) and forces a full repaint.
 // Called from handleFocus (focus-gain, wake notification, and emergency recovery).
 func (g *Game) unsuspendAndRedraw() {
+	// Always restore the configured TPS. This covers the screen-sleep path where
+	// sleepWatcher set TPS=0 but g.wfocus.Suspended was never set (the window was
+	// focused when sleep happened, so idle suspension never triggered).
+	ebiten.SetTPS(g.cfg.Performance.TPS)
 	if g.wfocus.Suspended {
-		ebiten.SetTPS(g.cfg.Performance.TPS)
 		g.wfocus.Suspended = false
 		for _, t := range g.tabMgr.Tabs {
 			for _, leaf := range t.Layout.Leaves() {
