@@ -180,13 +180,19 @@ func (g *Game) handleInput() {
 			lines := int(g.input.ScrollAccum)
 			if lines != 0 {
 				g.input.ScrollAccum -= float64(lines)
-				g.activeFocused().Term.Buf.Lock()
-				if lines > 0 {
-					g.activeFocused().Term.Buf.ScrollViewUp(lines)
+				if g.cfg.Scroll.Smooth {
+					// Smooth mode: accumulate into the animation target; the
+					// ease-out step runs in tickSmoothScroll every frame.
+					g.smoothScrollTarget += float64(lines)
 				} else {
-					g.activeFocused().Term.Buf.ScrollViewDown(-lines)
+					g.activeFocused().Term.Buf.Lock()
+					if lines > 0 {
+						g.activeFocused().Term.Buf.ScrollViewUp(lines)
+					} else {
+						g.activeFocused().Term.Buf.ScrollViewDown(-lines)
+					}
+					g.activeFocused().Term.Buf.Unlock()
 				}
-				g.activeFocused().Term.Buf.Unlock()
 				// Do NOT set keyScrolled here. Trackpad momentum keeps wy non-zero
 				// for several frames after the finger lifts; suppressing keyboard input
 				// during that window causes keystrokes to be silently dropped.
@@ -211,6 +217,8 @@ func (g *Game) handleInput() {
 		g.activeFocused().Term.Buf.ResetView() // snap back to live output on keystroke
 		g.activeFocused().Term.Buf.ClearSelection()
 		g.activeFocused().Term.Buf.Unlock()
+		g.smoothScrollPos = 0
+		g.smoothScrollTarget = 0
 		g.render.Dirty = true
 	}
 

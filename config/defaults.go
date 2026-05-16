@@ -95,6 +95,8 @@ var Defaults = Config{
 	},
 	Scroll: ScrollConfig{
 		WheelLinesPerTick: 3,
+		Smooth:            false,
+		SmoothFactor:      0.25,
 	},
 	Performance: PerformanceConfig{
 		TPS:           30,

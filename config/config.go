@@ -57,7 +57,9 @@ args    = ["-l"]
 lines = 10000
 
 [scroll]
-wheel_lines_per_tick = 3   # lines scrolled per mouse wheel tick
+wheel_lines_per_tick = 3      # lines scrolled per mouse wheel tick
+smooth                = false  # animate scrollback with ease-out instead of jumping
+smooth_factor         = 0.25   # fraction of remaining distance closed per frame (0.1 slow … 0.5 fast)
 
 [performance]
 tps             = 30     # Ebitengine tick rate (Update calls/sec); lower = less idle CPU
@@ -322,6 +324,12 @@ type InputConfig struct {
 type ScrollConfig struct {
 	// WheelLinesPerTick is the number of lines scrolled per mouse wheel tick.
 	WheelLinesPerTick int `toml:"wheel_lines_per_tick"`
+	// Smooth enables ease-out animation for wheel scroll. Keyboard scroll
+	// (PageUp/Down) is always instant.
+	Smooth bool `toml:"smooth"`
+	// SmoothFactor controls animation speed: fraction of remaining distance
+	// closed per frame. 0.1 = slow glide, 0.5 = near-instant.
+	SmoothFactor float64 `toml:"smooth_factor"`
 }
 
 type PerformanceConfig struct {

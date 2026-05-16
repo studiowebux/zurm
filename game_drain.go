@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"math"
 	"os"
 	"os/exec"
 	"strings"
@@ -13,6 +14,39 @@ import (
 	"github.com/studiowebux/zurm/renderer"
 	"github.com/studiowebux/zurm/terminal"
 )
+
+// tickSmoothScroll advances the ease-out scroll animation one frame.
+// No-op when cfg.Scroll.Smooth is false. Called every Update() after
+// handleInput so the target is already updated for this frame.
+func (g *Game) tickSmoothScroll() {
+	if !g.cfg.Scroll.Smooth || g.activeFocused() == nil {
+		return
+	}
+	buf := g.activeFocused().Term.Buf
+	buf.Lock()
+	defer buf.Unlock()
+
+	maxTarget := float64(buf.ScrollbackLen())
+	if g.smoothScrollTarget < 0 {
+		g.smoothScrollTarget = 0
+	}
+	if g.smoothScrollTarget > maxTarget {
+		g.smoothScrollTarget = maxTarget
+	}
+
+	diff := g.smoothScrollTarget - g.smoothScrollPos
+	if math.Abs(diff) < 0.5 {
+		g.smoothScrollPos = g.smoothScrollTarget
+	} else {
+		g.smoothScrollPos += diff * g.cfg.Scroll.SmoothFactor
+	}
+
+	newVO := int(math.Round(g.smoothScrollPos))
+	if newVO != buf.ViewOffset {
+		buf.SetViewOffset(newVO)
+		g.render.Dirty = true
+	}
+}
 
 func (g *Game) handleResize() {
 	// Stability-based settle after display-change notifications.
