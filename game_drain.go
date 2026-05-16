@@ -15,6 +15,18 @@ import (
 )
 
 func (g *Game) handleResize() {
+	// Drain settle counter set by display-change notifications. While non-zero,
+	// skip layout commit to let macOS finish EDID negotiation and report the
+	// final geometry. When the counter expires, zero winW so the next call
+	// re-applies layout with the settled dimensions.
+	if g.screenSettleFrames > 0 {
+		g.screenSettleFrames--
+		if g.screenSettleFrames == 0 {
+			g.winW = 0
+		}
+		return
+	}
+
 	w, h := ebiten.WindowSize()
 	dpi := ebiten.Monitor().DeviceScaleFactor()
 	dpiChanged := dpi != g.dpi
