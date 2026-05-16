@@ -545,26 +545,13 @@ func (g *Game) handleMousePTY(mx, my, mouseMode int, sgrMouse bool) {
 
 	_, wy := ebiten.Wheel()
 	if wy != 0 {
-		// Shift+scroll bypasses PTY mouse mode and scrolls the terminal's own
-		// scrollback buffer (standard behaviour in iTerm2, kitty, etc.).
-		// Blocked in alt screen — TUI apps own the viewport.
 		g.activeFocused().Term.Buf.RLock()
-		altShift := g.activeFocused().Term.Buf.IsAltActive()
+		mouseMode := g.activeFocused().Term.Buf.MouseMode
 		g.activeFocused().Term.Buf.RUnlock()
-		if ebiten.IsKeyPressed(ebiten.KeyShift) && !altShift {
-			g.input.ScrollAccum += wy * float64(g.cfg.Scroll.WheelLinesPerTick)
-			lines := int(g.input.ScrollAccum)
-			if lines != 0 {
-				g.input.ScrollAccum -= float64(lines)
-				g.activeFocused().Term.Buf.Lock()
-				if lines > 0 {
-					g.activeFocused().Term.Buf.ScrollViewUp(lines)
-				} else {
-					g.activeFocused().Term.Buf.ScrollViewDown(-lines)
-				}
-				g.activeFocused().Term.Buf.Unlock()
-			}
-		} else {
+		// Forward to PTY only when the app has mouse mode active and Shift is not
+		// held. Shift always bypasses PTY mouse mode — that path is handled in
+		// handleInput so the accumulator is only touched once per frame.
+		if mouseMode != 0 && !ebiten.IsKeyPressed(ebiten.KeyShift) {
 			btn := mouseScrollUp
 			if wy < 0 {
 				btn = mouseScrollDown
