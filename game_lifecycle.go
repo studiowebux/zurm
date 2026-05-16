@@ -27,9 +27,16 @@ func (g *Game) handleFocus() {
 
 	// NSApplicationDidChangeScreenParametersNotification: display configuration
 	// changed (HDMI connect/disconnect, resolution change, lid open/close).
-	// Zero g.winW so handleResize re-applies layout with new geometry and DPI.
+	// Unsuspend and mark dirty immediately, but defer the winW=0 trigger by
+	// 2 frames so macOS can finish EDID negotiation and report the final
+	// geometry before zurm commits pane rects and sends SIGWINCH.
 	if consumeScreenChange() {
 		g.unsuspendAndRedraw()
+		// unsuspendAndRedraw zeroed winW — restore current size and let the
+		// settle counter in handleResize zero it again once it expires.
+		w, _ := ebiten.WindowSize()
+		g.winW = w
+		g.screenSettleFrames = 2
 	}
 
 	focused := ebiten.IsFocused()

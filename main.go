@@ -141,6 +141,12 @@ type Game struct {
 
 	// Feature toggles.
 	blocksEnabled bool // command block rendering (Cmd+B)
+
+	// screenSettleFrames is set to a small count when a display-change notification
+	// fires. handleResize skips layout commit while the counter is non-zero,
+	// giving macOS time to stabilise the reported geometry after EDID negotiation
+	// before zurm commits pane rects and sends SIGWINCH.
+	screenSettleFrames int
 }
 
 // buildRenderConfig extracts the subset of config the renderer needs,
