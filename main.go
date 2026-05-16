@@ -142,11 +142,16 @@ type Game struct {
 	// Feature toggles.
 	blocksEnabled bool // command block rendering (Cmd+B)
 
-	// screenSettleFrames is set to a small count when a display-change notification
-	// fires. handleResize skips layout commit while the counter is non-zero,
-	// giving macOS time to stabilise the reported geometry after EDID negotiation
-	// before zurm commits pane rects and sends SIGWINCH.
-	screenSettleFrames int
+	// screenSettle* tracks display-change stabilisation.
+	// When NSApplicationDidChangeScreenParametersNotification fires, zurm must
+	// wait for macOS to finish EDID negotiation / window repositioning before
+	// committing pane rects and sending SIGWINCH. The strategy: snapshot the
+	// current geometry and count consecutive frames where it is unchanged.
+	// Any change resets the counter so zurm waits exactly as long as needed.
+	screenSettleFrames int     // frames remaining where geometry has been stable
+	screenSettleW      int     // last observed window width during settle
+	screenSettleH      int     // last observed window height during settle
+	screenSettleDPI    float64 // last observed DPI during settle
 }
 
 // buildRenderConfig extracts the subset of config the renderer needs,
