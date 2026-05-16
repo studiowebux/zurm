@@ -173,7 +173,11 @@ func (g *Game) handleInput() {
 		g.activeFocused().Term.Buf.RLock()
 		mouseMode := g.activeFocused().Term.Buf.MouseMode
 		g.activeFocused().Term.Buf.RUnlock()
-		if mouseMode == 0 && !altActive {
+		shiftHeld := ebiten.IsKeyPressed(ebiten.KeyShift)
+		// Scroll the view when: (a) no PTY mouse mode, or (b) Shift bypasses PTY
+		// mouse mode. Both paths use the same accumulator — handleMouse no longer
+		// touches ScrollAccum, so there is no double-fire on Shift+scroll.
+		if (mouseMode == 0 || shiftHeld) && !altActive {
 			// Accumulate fractional trackpad deltas — int truncation drops sub-pixel
 			// input and makes smooth-scroll feel janky.
 			g.input.ScrollAccum += wy * float64(g.cfg.Scroll.WheelLinesPerTick)
