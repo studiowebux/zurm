@@ -31,7 +31,9 @@ args    = ["-l"]   # arguments passed to the shell
 lines = 10000   # scrollback buffer size per pane
 
 [scroll]
-wheel_lines_per_tick = 3   # lines scrolled per mouse wheel tick
+wheel_lines_per_tick = 3      # lines scrolled per mouse wheel tick
+smooth                = false  # ease-out animation instead of instant jump (wheel only)
+smooth_factor         = 0.25   # animation speed: fraction of distance closed per frame (0.1 slow … 0.5 fast)
 
 [performance]
 tps             = 30     # Ebitengine tick rate (Update calls/sec); lower = less idle CPU

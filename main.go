@@ -142,6 +142,11 @@ type Game struct {
 	// Feature toggles.
 	blocksEnabled bool // command block rendering (Cmd+B)
 
+	// smoothScroll* tracks the ease-out animation for wheel scroll.
+	// Only active when cfg.Scroll.Smooth is true.
+	smoothScrollPos    float64 // current animated ViewOffset (fractional)
+	smoothScrollTarget float64 // destination ViewOffset
+
 	// screenSettle* tracks display-change stabilisation.
 	// When NSApplicationDidChangeScreenParametersNotification fires, zurm must
 	// wait for macOS to finish EDID negotiation / window repositioning before
@@ -673,6 +678,7 @@ func (g *Game) Update() error {
 	if len(g.tabMgr.Tabs) == 0 {
 		return ebiten.Termination
 	}
+	g.tickSmoothScroll()
 	g.handleDroppedFiles()
 	g.handleResize()
 	g.handleFocus()
