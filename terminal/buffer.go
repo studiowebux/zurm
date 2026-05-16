@@ -364,9 +364,7 @@ func (sb *ScreenBuffer) ScrollUp(n int) {
 		// scrolling from the very top (top==0). Application scroll regions
 		// (top>0) do not contribute to scrollback history.
 		if top == 0 && !sb.altActive && sb.maxScrollback > 0 {
-			evicted := make([]Cell, sb.Cols)
-			copy(evicted, cells[top])
-			sb.scrollbackPush(evicted, sb.wrapped[top])
+			sb.scrollbackPushFrom(cells[top], sb.wrapped[top])
 		}
 		copy(cells[top:bot], cells[top+1:bot+1])
 		copy(sb.wrapped[top:bot], sb.wrapped[top+1:bot+1])
@@ -928,6 +926,41 @@ func (sb *ScreenBuffer) ScrollbackLen() int {
 // Caller must ensure 0 <= i < scrollCount.
 func (sb *ScreenBuffer) scrollbackGet(i int) []Cell {
 	return sb.scrollback[(sb.scrollHead+i)%sb.maxScrollback]
+}
+
+// scrollbackPushFrom copies src into the ring buffer without a heap allocation
+// in the steady-state (full) case. When the ring is full the slot being evicted
+// is reused: its cells are overwritten with src rather than discarded and a new
+// slice allocated. This eliminates one []Cell alloc per scrolled line for busy
+// terminals (heavy compiler output, streaming tools), materially reducing GC pressure.
+// When the ring is still growing a fresh slice is allocated as usual.
+func (sb *ScreenBuffer) scrollbackPushFrom(src []Cell, wrapped bool) {
+	if sb.maxScrollback <= 0 {
+		return
+	}
+	if sb.scrollCount < sb.maxScrollback {
+		// Ring not full yet — allocate a new row and copy in.
+		row := make([]Cell, sb.Cols)
+		copy(row, src)
+		sb.scrollbackPush(row, wrapped)
+		return
+	}
+	// Ring is full: reuse the slot about to be evicted instead of allocating.
+	// Overwrite its cells directly from src (no zeroing needed — every cell is
+	// written), then advance the head. SEC-002 zeroing is not required here
+	// because we are writing all cells before the slice escapes to any reader.
+	slot := sb.scrollback[sb.scrollHead]
+	if cap(slot) == sb.Cols {
+		slot = slot[:sb.Cols]
+		copy(slot, src)
+	} else {
+		// Capacity mismatch (cols changed mid-session) — allocate a fresh slice.
+		slot = make([]Cell, sb.Cols)
+		copy(slot, src)
+	}
+	sb.scrollback[sb.scrollHead] = slot
+	sb.scrollbackWrapped[sb.scrollHead] = wrapped
+	sb.scrollHead = (sb.scrollHead + 1) % sb.maxScrollback
 }
 
 // scrollbackPush appends a row to the ring buffer, evicting the oldest entry
