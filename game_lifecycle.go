@@ -56,17 +56,25 @@ func (g *Game) handleFocus() {
 			// Unsuspend, zero unfocusedAt, and force full repaint.
 			g.unsuspendAndRedraw()
 
-			// Reset edge-detection state: only snapshot modifier keys so that
-			// Cmd held from Cmd+Tab doesn't appear as a stale press. Non-modifier
-			// keys start as "not pressed" so the first real keystroke or paste
+			// Reset edge-detection state on focus gain.
+			// Modifier keys are seeded from the hardware state (NSEvent.modifierFlags)
+			// rather than GLFW's cached IsKeyPressed. GLFW can miss key-up events that
+			// fire while another window owns focus (e.g. CMD released in the App Switcher
+			// during CMD+Tab), leaving the key "stuck" as pressed in GLFW's cache
+			// indefinitely. Reading hardware state directly corrects this stale value.
+			// Non-modifier keys always start as "not pressed" so the first real keystroke
 			// after focus regain fires its leading edge correctly.
+			hwCmd, hwCtrl, hwShift, hwAlt := hardwareModifiers()
 			for k := ebiten.Key(0); k <= ebiten.KeyMax; k++ {
 				switch k {
-				case ebiten.KeyMeta, ebiten.KeyMetaLeft, ebiten.KeyMetaRight,
-					ebiten.KeyControl, ebiten.KeyControlLeft, ebiten.KeyControlRight,
-					ebiten.KeyShift, ebiten.KeyShiftLeft, ebiten.KeyShiftRight,
-					ebiten.KeyAlt, ebiten.KeyAltLeft, ebiten.KeyAltRight:
-					g.input.PrevKeys[k] = ebiten.IsKeyPressed(k)
+				case ebiten.KeyMeta, ebiten.KeyMetaLeft, ebiten.KeyMetaRight:
+					g.input.PrevKeys[k] = hwCmd
+				case ebiten.KeyControl, ebiten.KeyControlLeft, ebiten.KeyControlRight:
+					g.input.PrevKeys[k] = hwCtrl
+				case ebiten.KeyShift, ebiten.KeyShiftLeft, ebiten.KeyShiftRight:
+					g.input.PrevKeys[k] = hwShift
+				case ebiten.KeyAlt, ebiten.KeyAltLeft, ebiten.KeyAltRight:
+					g.input.PrevKeys[k] = hwAlt
 				default:
 					g.input.PrevKeys[k] = false
 				}
