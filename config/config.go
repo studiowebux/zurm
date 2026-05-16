@@ -60,10 +60,11 @@ lines = 10000
 wheel_lines_per_tick = 3   # lines scrolled per mouse wheel tick
 
 [performance]
-tps        = 30     # Ebitengine tick rate (Update calls/sec); lower = less idle CPU
-auto_idle  = true   # reduce TPS when unfocused to save CPU; false = keep rendering
-pprof      = false  # enable net/http/pprof endpoint on localhost for profiling
-pprof_port = 6060   # port for pprof HTTP server (localhost only)
+tps             = 30     # Ebitengine tick rate (Update calls/sec); lower = less idle CPU
+auto_idle       = true   # reduce TPS when unfocused to save CPU; false = keep rendering
+memory_limit_mb = 1536   # soft memory ceiling (MB); GC runs harder near this limit; 0 = unlimited
+pprof           = false  # enable net/http/pprof endpoint on localhost for profiling
+pprof_port      = 6060   # port for pprof HTTP server (localhost only)
 
 [input]
 double_click_ms = 300   # max ms between clicks to register as double-click
@@ -331,6 +332,10 @@ type PerformanceConfig struct {
 	// for more than 5 seconds. Saves CPU/memory when zurm is in the background.
 	// Disable if you need zurm to keep rendering while unfocused.
 	AutoIdle bool `toml:"auto_idle"`
+	// MemoryLimitMB sets Go's soft memory limit (GOMEMLIMIT) in megabytes.
+	// The GC runs more aggressively as the heap approaches this value, preventing
+	// runaway growth to 3-4 GB under heavy terminal output. Set to 0 to disable.
+	MemoryLimitMB int `toml:"memory_limit_mb"`
 	// Pprof enables the net/http/pprof endpoint on localhost for runtime
 	// memory and goroutine profiling. Access via:
 	//   go tool pprof http://localhost:<pprof_port>/debug/pprof/heap

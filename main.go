@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -466,6 +467,12 @@ func main() {
 	// Seed focus history with the initial tab so Cmd+; can return to it.
 	game.tabMgr.FocusHistory = []focusEntry{{tabIdx: initialActive, pane: initialTabs[initialActive].Focused}}
 	initialTabs[initialActive].SnapshotGen()
+
+	// Apply soft memory ceiling so the GC runs aggressively before the heap
+	// balloons to 3-4 GB under heavy terminal output. 0 means unlimited.
+	if cfg.Performance.MemoryLimitMB > 0 {
+		debug.SetMemoryLimit(int64(cfg.Performance.MemoryLimitMB) * 1024 * 1024)
+	}
 
 	// Start pprof server for runtime memory profiling when enabled.
 	if cfg.Performance.Pprof {
