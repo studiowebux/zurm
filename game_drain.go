@@ -25,7 +25,7 @@ func (g *Game) handleResize() {
 	// time that a fixed frame count cannot safely bound.
 	if g.screenSettleFrames > 0 {
 		w, h := ebiten.WindowSize()
-		dpi := ebiten.Monitor().DeviceScaleFactor()
+		dpi := g.monitorDPI()
 		if w != g.screenSettleW || h != g.screenSettleH || dpi != g.screenSettleDPI {
 			// Geometry still changing — restart the wait.
 			g.screenSettleW = w
@@ -42,7 +42,7 @@ func (g *Game) handleResize() {
 	}
 
 	w, h := ebiten.WindowSize()
-	dpi := ebiten.Monitor().DeviceScaleFactor()
+	dpi := g.monitorDPI()
 	dpiChanged := dpi != g.dpi
 	if w == g.winW && h == g.winH && !dpiChanged {
 		return

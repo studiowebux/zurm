@@ -37,7 +37,7 @@ func (g *Game) handleFocus() {
 		// only commit layout once they have been unchanged for 3 consecutive
 		// frames, so zurm adapts to however long EDID negotiation actually takes.
 		w, h := ebiten.WindowSize()
-		dpi := ebiten.Monitor().DeviceScaleFactor()
+		dpi := g.monitorDPI()
 		g.winW = w
 		g.screenSettleW = w
 		g.screenSettleH = h
@@ -161,6 +161,16 @@ func (g *Game) unsuspendAndRedraw() {
 			leaf.Pane.Term.Buf.Unlock()
 		}
 	}
+}
+
+// monitorDPI returns the device scale factor of the current monitor.
+// Falls back to the last known g.dpi when ebiten.Monitor() is nil, which
+// can happen transiently during HDMI disconnect / display reconfiguration.
+func (g *Game) monitorDPI() float64 {
+	if m := ebiten.Monitor(); m != nil {
+		return m.DeviceScaleFactor()
+	}
+	return g.dpi
 }
 
 // physSize returns the physical pixel dimensions of the window.
