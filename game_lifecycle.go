@@ -32,11 +32,17 @@ func (g *Game) handleFocus() {
 	// geometry before zurm commits pane rects and sends SIGWINCH.
 	if consumeScreenChange() {
 		g.unsuspendAndRedraw()
-		// unsuspendAndRedraw zeroed winW — restore current size and let the
-		// settle counter in handleResize zero it again once it expires.
-		w, _ := ebiten.WindowSize()
+		// unsuspendAndRedraw zeroed winW — restore it and start the stability
+		// wait. handleResize will keep sampling window size/DPI each frame and
+		// only commit layout once they have been unchanged for 3 consecutive
+		// frames, so zurm adapts to however long EDID negotiation actually takes.
+		w, h := ebiten.WindowSize()
+		dpi := ebiten.Monitor().DeviceScaleFactor()
 		g.winW = w
-		g.screenSettleFrames = 2
+		g.screenSettleW = w
+		g.screenSettleH = h
+		g.screenSettleDPI = dpi
+		g.screenSettleFrames = 3
 	}
 
 	focused := ebiten.IsFocused()

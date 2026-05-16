@@ -15,14 +15,28 @@ import (
 )
 
 func (g *Game) handleResize() {
-	// Drain settle counter set by display-change notifications. While non-zero,
-	// skip layout commit to let macOS finish EDID negotiation and report the
-	// final geometry. When the counter expires, zero winW so the next call
-	// re-applies layout with the settled dimensions.
+	// Stability-based settle after display-change notifications.
+	// Each frame, compare current geometry against the last observed snapshot.
+	// If it changed, macOS is still negotiating — reset the counter and update
+	// the snapshot. If it has been stable for 3 consecutive frames, zero winW
+	// so the next call commits layout with the final settled dimensions.
+	// This adapts to slow HDMI docks, sleep/wake without display, resolution
+	// switches, and multi-monitor DPI transitions — all of which take variable
+	// time that a fixed frame count cannot safely bound.
 	if g.screenSettleFrames > 0 {
-		g.screenSettleFrames--
-		if g.screenSettleFrames == 0 {
-			g.winW = 0
+		w, h := ebiten.WindowSize()
+		dpi := ebiten.Monitor().DeviceScaleFactor()
+		if w != g.screenSettleW || h != g.screenSettleH || dpi != g.screenSettleDPI {
+			// Geometry still changing — restart the wait.
+			g.screenSettleW = w
+			g.screenSettleH = h
+			g.screenSettleDPI = dpi
+			g.screenSettleFrames = 3
+		} else {
+			g.screenSettleFrames--
+			if g.screenSettleFrames == 0 {
+				g.winW = 0 // stable — commit layout next call
+			}
 		}
 		return
 	}
