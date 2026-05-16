@@ -43,6 +43,14 @@ int consumeWakeFlag(void) {
 	return atomic_exchange_explicit(&wakeFlag, 0, memory_order_relaxed);
 }
 
+// modifierFlagsHardware returns the current hardware modifier key state as a
+// bitmask of NSEventModifierFlags. Using NSEvent.modifierFlags queries the actual
+// physical key state from the kernel, bypassing GLFW's event-driven cache which
+// can get stuck if a key-up event fires while another window owns focus.
+unsigned long modifierFlagsHardware(void) {
+	return (unsigned long)[NSEvent modifierFlags];
+}
+
 int consumeWillSleepFlag(void) {
 	return atomic_exchange_explicit(&willSleepFlag, 0, memory_order_relaxed);
 }
@@ -103,6 +111,25 @@ func sleepWatcher() {
 			screenWakeFlag.Store(1)
 		}
 	}
+}
+
+// NSEventModifierFlags bitmasks (from NSEvent.h).
+const (
+	nsModShift   = 0x020000 // NSEventModifierFlagShift
+	nsModControl = 0x040000 // NSEventModifierFlagControl
+	nsModOption  = 0x080000 // NSEventModifierFlagOption  (Alt/Option)
+	nsModCommand = 0x100000 // NSEventModifierFlagCommand (Meta/Cmd)
+)
+
+// hardwareModifiers returns the physical modifier key state by querying
+// NSEvent.modifierFlags directly from the kernel. This is immune to GLFW's
+// event-cache getting stuck when key-up events fire while another window owns focus.
+func hardwareModifiers() (cmd, ctrl, shift, alt bool) {
+	flags := uint(C.modifierFlagsHardware())
+	return flags&nsModCommand != 0,
+		flags&nsModControl != 0,
+		flags&nsModShift != 0,
+		flags&nsModOption != 0
 }
 
 // consumeWake returns true once after each system wake event (non-screen-sleep
