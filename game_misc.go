@@ -811,7 +811,7 @@ func (g *Game) reloadRuntimeSettings(cfg *config.Config) {
 	if cfg.Keyboard.RepeatIntervalMs > 0 {
 		keyRepeatInterval = time.Duration(cfg.Keyboard.RepeatIntervalMs) * time.Millisecond
 	}
-	ebiten.SetTPS(cfg.Performance.TPS)
+	applyTPS(cfg.Performance.TPS)
 	g.blocksEnabled = cfg.Blocks.Enabled
 	g.renderer.BlocksEnabled = g.blocksEnabled
 
