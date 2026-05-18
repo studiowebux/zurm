@@ -76,6 +76,13 @@ func (g *Game) handleResize() {
 	}
 
 	w, h := ebiten.WindowSize()
+	// A sleeping or disconnected display reports a 0-sized window (glfw logs
+	// "Cannot query content scale without screen"). Committing 0×0 would panic
+	// in ebiten.NewImage via Renderer.SetSize. Skip the resize — geometry
+	// recommits naturally once a real display is back.
+	if w <= 0 || h <= 0 {
+		return
+	}
 	dpi := g.monitorDPI()
 	dpiChanged := dpi != g.dpi
 	if w == g.winW && h == g.winH && !dpiChanged {
