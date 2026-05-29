@@ -18,7 +18,7 @@ const configTemplate = `# zurm configuration
 
 [font]
 family = "JetBrains Mono"
-size   = 15
+size   = 15  # points, clamped to 6–72
 # file = "/Users/you/Library/Fonts/JetBrainsMonoNerdFont-Regular.ttf"  # overrides embedded font
 #
 # Font fallback chain — tried in order for missing glyphs.
@@ -45,9 +45,9 @@ size   = 15
 #     -o ~/Library/Fonts/NotoSansSymbols2-Regular.ttf
 
 [window]
-columns = 120
-rows    = 35
-padding = 4    # pixels inside each pane edge
+columns = 120  # min 1
+rows    = 35   # min 1
+padding = 4    # pixels inside each pane edge (min 0)
 
 [shell]
 program = ""   # empty = read from $SHELL, fallback /bin/zsh
@@ -190,6 +190,15 @@ md_match_current_bg = "#FFCC00"   # current search match highlight
 md_badge_bg         = "#FFCC00"   # badge/label background (e.g. line count)
 md_badge_fg         = "#000000"   # badge/label text color
 `
+
+// Renderable font-size bounds, in points. A size at or below zero collapses the
+// glyph cell to 0×0, which divides by zero throughout the layout math; an absurd
+// size wastes memory. These are the single source of truth for the valid range —
+// enforced on every config load and by the interactive font resize.
+const (
+	MinFontSize = 6.0
+	MaxFontSize = 72.0
+)
 
 type FontConfig struct {
 	Family    string   `toml:"family"`
@@ -505,6 +514,7 @@ func Load() (*Config, error) {
 	}
 
 	meta, err := toml.DecodeFile(path, &cfg)
+	normalize(&cfg)
 	if err != nil {
 		return &cfg, err
 	}
@@ -527,11 +537,51 @@ func LoadWithMeta() (*Config, toml.MetaData, error) {
 
 	cfg := Defaults
 	meta, err := toml.DecodeFile(path, &cfg)
+	normalize(&cfg)
 	if err != nil {
 		return &cfg, meta, fmt.Errorf("config: %w", err)
 	}
 	resolveShell(&cfg)
 	return &cfg, meta, nil
+}
+
+// normalize enforces config invariants after decode so every consumer can trust
+// the values without re-checking them. Applied on every load (startup and
+// hot-reload). Each clamp logs so a user with a bad config gets a hint.
+func normalize(cfg *Config) {
+	clampFontSize(cfg)
+	clampWindow(cfg)
+}
+
+// clampWindow bounds window geometry. Columns/Rows seed the initial buffer
+// allocation (NewScreenBuffer) — a value below 1 panics there; padding below 0
+// is meaningless. (NewScreenBuffer floors dims too, as defense in depth.)
+func clampWindow(cfg *Config) {
+	if cfg.Window.Columns < 1 {
+		log.Printf("config: window.columns %d invalid, clamping to 1", cfg.Window.Columns)
+		cfg.Window.Columns = 1
+	}
+	if cfg.Window.Rows < 1 {
+		log.Printf("config: window.rows %d invalid, clamping to 1", cfg.Window.Rows)
+		cfg.Window.Rows = 1
+	}
+	if cfg.Window.Padding < 0 {
+		log.Printf("config: window.padding %d invalid, clamping to 0", cfg.Window.Padding)
+		cfg.Window.Padding = 0
+	}
+}
+
+// clampFontSize bounds Font.Size to the renderable range. Applied on every load
+// so all consumers (startup, hot-reload, interactive resize) can trust the value
+// without re-checking it. A clamp is logged so a user with a bad config gets a hint.
+func clampFontSize(cfg *Config) {
+	if cfg.Font.Size < MinFontSize {
+		log.Printf("config: font.size %.1f below minimum, clamping to %.0f", cfg.Font.Size, MinFontSize)
+		cfg.Font.Size = MinFontSize
+	} else if cfg.Font.Size > MaxFontSize {
+		log.Printf("config: font.size %.1f above maximum, clamping to %.0f", cfg.Font.Size, MaxFontSize)
+		cfg.Font.Size = MaxFontSize
+	}
 }
 
 // resolveShell fills in Shell.Program from $SHELL if not set.

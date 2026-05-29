@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"runtime"
 	"sync/atomic"
+	"time"
 
 	"github.com/studiowebux/zurm/zserver"
 )
@@ -134,8 +134,11 @@ func (b *ServerBackend) StartReader(parser *Parser, buf *ScreenBuffer, paused *a
 			}
 			switch msg.Type {
 			case zserver.MsgOutput:
+				// Poll with a short sleep rather than a tight spin: idle
+				// suspension can hold the pause for a long time, and busy-spinning
+				// there burns CPU. No lock is held here.
 				for paused.Load() {
-					runtime.Gosched()
+					time.Sleep(2 * time.Millisecond)
 				}
 				buf.Lock()
 				parser.Feed(msg.Payload)

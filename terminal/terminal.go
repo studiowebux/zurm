@@ -70,6 +70,13 @@ type Terminal struct {
 	// ShellIntCh receives OSC 133 event codes (A/C/D) from the parser.
 	// Drained by the game loop to update the foreground process name.
 	ShellIntCh chan byte
+
+	// ctx is the terminal's lifecycle context, cancelled by Close(). Background
+	// query goroutines (CWD/foreground via lsof/ps) derive from it so closing a
+	// pane promptly kills its in-flight query subprocesses and unblocks any
+	// pending channel sends, instead of lingering until the whole app exits.
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // New creates a Terminal from the given config.
@@ -82,6 +89,7 @@ func New(tc TerminalConfig) *Terminal {
 		cur.EnableBlink()
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Terminal{
 		Buf:              buf,
 		Cursor:           cur,
@@ -91,6 +99,8 @@ func New(tc TerminalConfig) *Terminal {
 		BellCh:           make(chan struct{}, 4),
 		ForegroundProcCh: make(chan string, 4),
 		ShellIntCh:       make(chan byte, 4),
+		ctx:              ctx,
+		cancel:           cancel,
 	}
 }
 
@@ -353,6 +363,9 @@ func (t *Terminal) Dead() <-chan struct{} {
 
 // Close cleans up the PTY.
 func (t *Terminal) Close() {
+	if t.cancel != nil {
+		t.cancel() // cancel in-flight CWD/foreground query subprocesses
+	}
 	if t.pty != nil {
 		t.pty.Close()
 	}
@@ -392,10 +405,11 @@ func (t *Terminal) HasOSC133() bool { return t.osc133Active.Load() }
 // QueryCWD performs a one-shot CWD query via lsof and sends the result
 // to CwdCh. No-op when the shell already delivers CWD via OSC 7 (osc7Active)
 // or when the terminal is idle-suspended.
-func (t *Terminal) QueryCWD(ctx context.Context) {
+func (t *Terminal) QueryCWD() {
 	if t.paused.Load() || t.osc7Active.Load() {
 		return
 	}
+	ctx := t.ctx
 	pid := t.Pid()
 	if pid <= 0 {
 		return
@@ -427,14 +441,14 @@ func (t *Terminal) QueryCWD(ctx context.Context) {
 
 // QueryForeground performs a one-shot foreground process query and sends
 // the result to ForegroundProcCh if it changed. Safe to call from a goroutine.
-func (t *Terminal) QueryForeground(ctx context.Context) {
+func (t *Terminal) QueryForeground() {
 	if t.paused.Load() {
 		return
 	}
-	name := t.foregroundProcessName(ctx)
+	name := t.foregroundProcessName()
 	select {
 	case t.ForegroundProcCh <- name:
-	case <-ctx.Done():
+	case <-t.ctx.Done():
 	}
 }
 
@@ -442,10 +456,11 @@ func (t *Terminal) QueryForeground(ctx context.Context) {
 // Returns an empty string when the shell itself is the foreground process or on error.
 // When the foreground process is ssh, returns "ssh\n<user@host>" so the caller
 // can extract the SSH destination from the second newline-delimited field.
-func (t *Terminal) foregroundProcessName(ctx context.Context) string {
+func (t *Terminal) foregroundProcessName() string {
 	if t.pty == nil {
 		return ""
 	}
+	ctx := t.ctx
 	pgid, err := t.pty.ForegroundPgid()
 	if err != nil || pgid <= 0 {
 		return ""
@@ -518,15 +533,15 @@ func parseSSHHost(args string) string {
 // RefreshForeground immediately queries the foreground process and sends the
 // result to ForegroundProcCh. Called on focus switch so the status bar updates
 // right away without waiting for the next 1-second poll tick.
-func (t *Terminal) RefreshForeground(ctx context.Context) {
+func (t *Terminal) RefreshForeground() {
 	if !t.tcfg.ShowProcess {
 		return
 	}
 	go func() {
-		name := t.foregroundProcessName(ctx)
+		name := t.foregroundProcessName()
 		select {
 		case t.ForegroundProcCh <- name:
-		case <-ctx.Done():
+		case <-t.ctx.Done():
 		}
 	}()
 }

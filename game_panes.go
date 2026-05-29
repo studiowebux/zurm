@@ -225,8 +225,14 @@ func (g *Game) setFocusNoHistory(p *pane.Pane) {
 	g.input.MouseHeldBtn = -1
 	g.input.LastMouseCol = 0
 	g.input.LastMouseRow = 0
+	// Reset click-count tracking so a click in the previous pane cannot combine
+	// with the first click in the newly focused pane into a false double/triple
+	// click. The sentinel cell guarantees the next click is never "same cell".
+	g.input.LastClickRow = -1
+	g.input.LastClickCol = -1
+	g.input.ClickCount = 0
 	g.status.Bar.ForegroundProc = ""
-	p.Term.RefreshForeground(g.ctx)
+	p.Term.RefreshForeground()
 	if g.search.State.Open {
 		g.closeSearchOverlay()
 	}

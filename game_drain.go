@@ -19,12 +19,28 @@ import (
 // No-op when cfg.Scroll.Smooth is false. Called every Update() after
 // handleInput so the target is already updated for this frame.
 func (g *Game) tickSmoothScroll() {
-	if !g.cfg.Scroll.Smooth || g.activeFocused() == nil {
+	if !g.cfg.Scroll.Smooth {
 		return
 	}
-	buf := g.activeFocused().Term.Buf
+	p := g.activeFocused()
+	if p == nil {
+		return
+	}
+	buf := p.Term.Buf
 	buf.Lock()
 	defer buf.Unlock()
+
+	// Focus or tab changed since the last tick. The animation state is global
+	// to the gesture, but each pane owns its own ViewOffset — so re-sync to the
+	// newly focused pane instead of forcing the previous pane's scroll position
+	// onto it. Without this, clicking/switching to another pane snaps it to
+	// wherever the last pane was scrolled (random up/down jump).
+	if p != g.smoothScrollPane {
+		g.smoothScrollPane = p
+		g.smoothScrollPos = float64(buf.ViewOffset)
+		g.smoothScrollTarget = g.smoothScrollPos
+		return
+	}
 
 	maxTarget := float64(buf.ScrollbackLen())
 	if g.smoothScrollTarget < 0 {
@@ -58,7 +74,7 @@ func (g *Game) handleResize() {
 	// switches, and multi-monitor DPI transitions — all of which take variable
 	// time that a fixed frame count cannot safely bound.
 	if g.screenSettleFrames > 0 {
-		w, h := ebiten.WindowSize()
+		w, h := g.logicalSize()
 		dpi := g.monitorDPI()
 		if w != g.screenSettleW || h != g.screenSettleH || dpi != g.screenSettleDPI {
 			// Geometry still changing — restart the wait.
@@ -75,7 +91,16 @@ func (g *Game) handleResize() {
 		return
 	}
 
-	w, h := ebiten.WindowSize()
+	w, h := g.logicalSize()
+	// A sleeping or disconnected display reports a 0-sized window (glfw logs
+	// "Cannot query content scale without screen"). Committing 0×0 would panic
+	// in ebiten.NewImage via Renderer.SetSize. Guard on the live window size
+	// (the authoritative "screen attached" signal — it can't go stale) as well
+	// as the Layout-derived commit dims, which can briefly lag a disconnect.
+	// Geometry recommits naturally once a real display is back.
+	if lw, lh := ebiten.WindowSize(); lw <= 0 || lh <= 0 || w <= 0 || h <= 0 {
+		return
+	}
 	dpi := g.monitorDPI()
 	dpiChanged := dpi != g.dpi
 	if w == g.winW && h == g.winH && !dpiChanged {
@@ -448,7 +473,7 @@ func (g *Game) drainShellIntegration() {
 				}
 			case 'C':
 				// Command about to execute — one-shot query for foreground name.
-				go p.Term.QueryForeground(g.ctx)
+				go p.Term.QueryForeground()
 			}
 		default:
 		}
@@ -462,14 +487,14 @@ func (g *Game) pollStatusOnOutput() {
 
 	if g.status.Poller.ShouldPollCwd(seq) {
 		if g.activeFocused() != nil {
-			go g.activeFocused().Term.QueryCWD(g.ctx)
+			go g.activeFocused().Term.QueryCWD()
 		}
 	}
 
 	if g.cfg.StatusBar.ShowProcess && g.status.Poller.ShouldPollFg(seq) && g.tabMgr.ActiveIdx < len(g.tabMgr.Tabs) {
 		for _, leaf := range g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Layout.Leaves() {
 			if !leaf.Pane.Term.HasOSC133() {
-				go leaf.Pane.Term.QueryForeground(g.ctx)
+				go leaf.Pane.Term.QueryForeground()
 			}
 		}
 	}

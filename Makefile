@@ -1,4 +1,4 @@
-VERSION ?= dev
+VERSION ?= v1.5.4
 LDFLAGS := -trimpath -ldflags "-s -w -X main.version=$(VERSION)"
 
 .PHONY: build build-server bundle dmg install clean

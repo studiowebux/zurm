@@ -104,10 +104,10 @@ func sleepWatcher() {
 		// Only intervene on wake when we were the ones who zeroed TPS.
 		if screenSleeping.Load() != 0 && C.consumeWakeFlag() != 0 {
 			screenSleeping.Store(0)
-			// Restore a baseline TPS so the Ebiten loop starts running again.
-			// handleFocus will correct it to the user-configured value via
-			// unsuspendAndRedraw() as soon as it processes screenWakeFlag.
-			ebiten.SetTPS(60)
+			// Restore the user-configured TPS so the Ebiten loop starts running
+			// again. handleFocus re-applies it via unsuspendAndRedraw() as soon
+			// as it processes screenWakeFlag — this just unfreezes the loop.
+			restoreConfiguredTPS()
 			screenWakeFlag.Store(1)
 		}
 	}

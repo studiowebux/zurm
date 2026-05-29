@@ -256,9 +256,22 @@ func (r *Renderer) ClearPaneCache() {
 	r.paneCache = make(map[*pane.Pane]*paneCacheEntry)
 }
 
-// Offscreen returns the last rendered image. Used by Draw() to re-blit
-// without a full redraw when the frame is not dirty.
-func (r *Renderer) Offscreen() *ebiten.Image { return r.offscreen }
+// Recompose re-composites the last rendered frame onto screen without redrawing
+// any content. The offscreen, block, and modal layers are all retained between
+// frames, so this reproduces the previous frame exactly.
+//
+// Draw() calls this on frames where nothing changed. Ebitengine skips the GPU
+// present entirely when Draw() leaves screen untouched; on macOS 14+ that
+// strands the CAMetalDisplayLink callback thread (it blocks forever waiting for
+// nextDrawable), which deadlocks the main thread inside QuartzCore's update_link
+// on the next display reconfiguration — i.e. every wake from display sleep.
+// Compositing every frame keeps the present loop alive and avoids the hang.
+func (r *Renderer) Recompose(screen *ebiten.Image) {
+	if r.offscreen == nil {
+		return
+	}
+	r.composeFinal(screen)
+}
 
 // SetSize (re)allocates the offscreen and blocks layer images when the window resizes.
 func (r *Renderer) SetSize(w, h int) {

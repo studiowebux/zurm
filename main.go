@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -32,6 +33,34 @@ import (
 // version is set at build time via -ldflags "-X main.version=vX.Y.Z".
 // Defaults to "dev" for local builds.
 var version = "dev"
+
+// configuredTPS records the user-configured Ebiten tick rate so the
+// sleepWatcher goroutine can restore it after a sleep/wake cycle. Stored
+// atomically because sleepWatcher runs off the game loop.
+var configuredTPS atomic.Int32
+
+// applyTPS sets the Ebiten tick rate and records the configured value for
+// sleepWatcher to restore on wake. Use this for the user-configured rate
+// only — transient rates (idle TPS=5, sleep TPS=0) call ebiten.SetTPS directly.
+func applyTPS(tps int) {
+	if tps <= 0 {
+		tps = config.Defaults.Performance.TPS
+	}
+	configuredTPS.Store(int32(tps)) // #nosec G115 — tps is a small positive TPS value
+	ebiten.SetTPS(tps)
+}
+
+// restoreConfiguredTPS resets the Ebiten tick rate to the value recorded by
+// applyTPS. Called from the sleepWatcher goroutine to unfreeze the loop after
+// a sleep/wake cycle. Lives here (not in the cgo file wake_darwin.go) so the
+// int32→int widening stays out of cgo's line-remapped source.
+func restoreConfiguredTPS() {
+	tps := int(configuredTPS.Load())
+	if tps <= 0 {
+		tps = config.Defaults.Performance.TPS
+	}
+	ebiten.SetTPS(tps)
+}
 
 // Internal timing constants — not user-configurable.
 const (
@@ -116,6 +145,11 @@ type Game struct {
 	cfg      *config.Config
 	winW, winH int
 	dpi        float64 // device pixel ratio (2.0 on Retina)
+	// layoutW/H is the logical window size ebiten last passed to Layout.
+	// ebiten.WindowSize() can lag the framebuffer that drives Layout when the
+	// window moves between displays, so this is the authoritative logical size
+	// for committing render geometry.
+	layoutW, layoutH int
 	zoomed     bool    // focused pane temporarily fullscreened (Cmd+Z)
 
 	// Grouped state — each sub-struct owns a clear concern.
@@ -144,8 +178,9 @@ type Game struct {
 
 	// smoothScroll* tracks the ease-out animation for wheel scroll.
 	// Only active when cfg.Scroll.Smooth is true.
-	smoothScrollPos    float64 // current animated ViewOffset (fractional)
-	smoothScrollTarget float64 // destination ViewOffset
+	smoothScrollPos    float64    // current animated ViewOffset (fractional)
+	smoothScrollTarget float64    // destination ViewOffset
+	smoothScrollPane   *pane.Pane // pane the animation last drove; resync on change
 
 	// screenSettle* tracks display-change stabilisation.
 	// When NSApplicationDidChangeScreenParametersNotification fires, zurm must
@@ -358,7 +393,12 @@ func main() {
 		}
 		if len(initialTabs) > 0 {
 			initialActive = sess.ActiveTab
-			if initialActive >= len(initialTabs) {
+			// Clamp to a valid index — a corrupt or hand-edited session file can
+			// carry a negative or out-of-range active_tab, which would panic when
+			// initialTabs[initialActive] is dereferenced below.
+			if initialActive < 0 {
+				initialActive = 0
+			} else if initialActive >= len(initialTabs) {
 				initialActive = len(initialTabs) - 1
 			}
 		}
@@ -510,7 +550,7 @@ func main() {
 	ebiten.SetWindowTitle("zurm")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetScreenClearedEveryFrame(false) // we manage redraws via dirty flag
-	ebiten.SetTPS(cfg.Performance.TPS)
+	applyTPS(cfg.Performance.TPS)
 	ebiten.SetWindowClosingHandled(true) // intercept red X — handled in Update
 
 	if err := ebiten.RunGame(game); err != nil && err != ebiten.Termination {
@@ -764,6 +804,13 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 
 	if !g.needsRender() {
+		// Nothing changed — but still re-present the last frame. Ebitengine
+		// skips the GPU present when Draw() leaves screen untouched, which on
+		// macOS 14+ strands its CAMetalDisplayLink callback thread and
+		// deadlocks the main thread in QuartzCore update_link on the next
+		// display reconfiguration (wake from display sleep). Compositing every
+		// frame keeps the present loop alive. See [investigation] note.
+		g.renderer.Recompose(screen)
 		return
 	}
 	// Sync transient status bar fields from live game state before rendering.
@@ -856,6 +903,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 // Layout returns the physical screen size for HiDPI rendering.
 func (g *Game) Layout(outsideW, outsideH int) (int, int) {
+	// Record the logical size ebiten is rendering against so handleResize can
+	// commit render geometry from the same source — ebiten.WindowSize() lags
+	// this when the window crosses displays, which strands the render surface
+	// at the old size (content top-left, black gap).
+	g.layoutW, g.layoutH = outsideW, outsideH
 	return int(float64(outsideW) * g.dpi), int(float64(outsideH) * g.dpi)
 }
 

@@ -58,6 +58,15 @@ func NewFontRenderer(ttfData []byte, size float64, fallbackData ...[]byte) (*Fon
 	if cellH < 1 {
 		cellH = int(size + 0.5)
 	}
+	// Floor: a glyph cell must never be zero-sized. Callers clamp font size at
+	// the config boundary, but guard here too — every layout calculation divides
+	// by these, so a 0 would panic with integer divide-by-zero.
+	if cellW < 1 {
+		cellW = 1
+	}
+	if cellH < 1 {
+		cellH = 1
+	}
 
 	// Baseline: approximately 80% of cell height is a reasonable default.
 	baseline := int(float64(cellH)*0.80 + 0.5)
