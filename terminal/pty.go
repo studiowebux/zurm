@@ -5,9 +5,9 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"runtime"
 	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/creack/pty"
@@ -83,10 +83,13 @@ func (m *PTYManager) StartReader(parser *Parser, buf *ScreenBuffer, paused *atom
 		for {
 			n, err := m.ptmx.Read(scratch)
 			if n > 0 {
-				// Spin-wait while paused so resize can acquire the buffer lock
-				// without contention from the reader goroutine.
+				// Wait while paused so resize can acquire the buffer lock without
+				// contention from the reader goroutine. Poll with a short sleep
+				// rather than a tight spin — idle suspension can hold the pause
+				// for a long time, and busy-spinning there burns CPU. No lock is
+				// held here, so resize lock-handoff is unaffected.
 				for paused.Load() {
-					runtime.Gosched()
+					time.Sleep(2 * time.Millisecond)
 				}
 				buf.Lock()
 				parser.Feed(scratch[:n])
