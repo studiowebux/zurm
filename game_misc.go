@@ -874,24 +874,20 @@ func (g *Game) switchTheme(name string) {
 	g.flashStatus("Theme: " + name)
 }
 
-const (
-	minFontSizePt = 6  // smallest allowed font size in points
-	maxFontSizePt = 72 // largest allowed font size in points
-)
-
 // adjustFontSize changes the font size by delta points and reloads the font.
-// Clamped to [minFontSizePt, maxFontSizePt]. Skipped when recording is active.
+// Clamped to the renderable range (config.MinFontSize..MaxFontSize). Skipped
+// when recording is active.
 func (g *Game) adjustFontSize(delta float64) {
 	if g.rec.Recorder != nil && g.rec.Recorder.Active() {
 		g.flashStatus("Cannot resize font while recording")
 		return
 	}
 	newSize := g.cfg.Font.Size + delta
-	if newSize < minFontSizePt {
-		newSize = minFontSizePt
+	if newSize < config.MinFontSize {
+		newSize = config.MinFontSize
 	}
-	if newSize > maxFontSizePt {
-		newSize = maxFontSizePt
+	if newSize > config.MaxFontSize {
+		newSize = config.MaxFontSize
 	}
 	if newSize == g.cfg.Font.Size {
 		return

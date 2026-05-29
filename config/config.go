@@ -18,7 +18,7 @@ const configTemplate = `# zurm configuration
 
 [font]
 family = "JetBrains Mono"
-size   = 15
+size   = 15  # points, clamped to 6–72
 # file = "/Users/you/Library/Fonts/JetBrainsMonoNerdFont-Regular.ttf"  # overrides embedded font
 #
 # Font fallback chain — tried in order for missing glyphs.
@@ -190,6 +190,15 @@ md_match_current_bg = "#FFCC00"   # current search match highlight
 md_badge_bg         = "#FFCC00"   # badge/label background (e.g. line count)
 md_badge_fg         = "#000000"   # badge/label text color
 `
+
+// Renderable font-size bounds, in points. A size at or below zero collapses the
+// glyph cell to 0×0, which divides by zero throughout the layout math; an absurd
+// size wastes memory. These are the single source of truth for the valid range —
+// enforced on every config load and by the interactive font resize.
+const (
+	MinFontSize = 6.0
+	MaxFontSize = 72.0
+)
 
 type FontConfig struct {
 	Family    string   `toml:"family"`
@@ -505,6 +514,7 @@ func Load() (*Config, error) {
 	}
 
 	meta, err := toml.DecodeFile(path, &cfg)
+	clampFontSize(&cfg)
 	if err != nil {
 		return &cfg, err
 	}
@@ -527,11 +537,25 @@ func LoadWithMeta() (*Config, toml.MetaData, error) {
 
 	cfg := Defaults
 	meta, err := toml.DecodeFile(path, &cfg)
+	clampFontSize(&cfg)
 	if err != nil {
 		return &cfg, meta, fmt.Errorf("config: %w", err)
 	}
 	resolveShell(&cfg)
 	return &cfg, meta, nil
+}
+
+// clampFontSize bounds Font.Size to the renderable range. Applied on every load
+// so all consumers (startup, hot-reload, interactive resize) can trust the value
+// without re-checking it. A clamp is logged so a user with a bad config gets a hint.
+func clampFontSize(cfg *Config) {
+	if cfg.Font.Size < MinFontSize {
+		log.Printf("config: font.size %.1f below minimum, clamping to %.0f", cfg.Font.Size, MinFontSize)
+		cfg.Font.Size = MinFontSize
+	} else if cfg.Font.Size > MaxFontSize {
+		log.Printf("config: font.size %.1f above maximum, clamping to %.0f", cfg.Font.Size, MaxFontSize)
+		cfg.Font.Size = MaxFontSize
+	}
 }
 
 // resolveShell fills in Shell.Program from $SHELL if not set.

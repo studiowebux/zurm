@@ -14,7 +14,7 @@ Hot-reload with `Cmd+,` — no restart needed.
 ```toml
 [font]
 family = "JetBrains Mono"    # font family name (informational)
-size   = 15                   # font size in points
+size   = 15                   # font size in points (clamped to 6–72)
 # file = "/path/to/Font.ttf" # custom TTF/OTF; overrides embedded JetBrains Mono
 # fallbacks = [...]           # see Optional Fonts page
 
