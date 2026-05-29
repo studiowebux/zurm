@@ -393,7 +393,12 @@ func main() {
 		}
 		if len(initialTabs) > 0 {
 			initialActive = sess.ActiveTab
-			if initialActive >= len(initialTabs) {
+			// Clamp to a valid index — a corrupt or hand-edited session file can
+			// carry a negative or out-of-range active_tab, which would panic when
+			// initialTabs[initialActive] is dereferenced below.
+			if initialActive < 0 {
+				initialActive = 0
+			} else if initialActive >= len(initialTabs) {
 				initialActive = len(initialTabs) - 1
 			}
 		}
