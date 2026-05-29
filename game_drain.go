@@ -19,12 +19,28 @@ import (
 // No-op when cfg.Scroll.Smooth is false. Called every Update() after
 // handleInput so the target is already updated for this frame.
 func (g *Game) tickSmoothScroll() {
-	if !g.cfg.Scroll.Smooth || g.activeFocused() == nil {
+	if !g.cfg.Scroll.Smooth {
 		return
 	}
-	buf := g.activeFocused().Term.Buf
+	p := g.activeFocused()
+	if p == nil {
+		return
+	}
+	buf := p.Term.Buf
 	buf.Lock()
 	defer buf.Unlock()
+
+	// Focus or tab changed since the last tick. The animation state is global
+	// to the gesture, but each pane owns its own ViewOffset — so re-sync to the
+	// newly focused pane instead of forcing the previous pane's scroll position
+	// onto it. Without this, clicking/switching to another pane snaps it to
+	// wherever the last pane was scrolled (random up/down jump).
+	if p != g.smoothScrollPane {
+		g.smoothScrollPane = p
+		g.smoothScrollPos = float64(buf.ViewOffset)
+		g.smoothScrollTarget = g.smoothScrollPos
+		return
+	}
 
 	maxTarget := float64(buf.ScrollbackLen())
 	if g.smoothScrollTarget < 0 {

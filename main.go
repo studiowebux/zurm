@@ -173,8 +173,9 @@ type Game struct {
 
 	// smoothScroll* tracks the ease-out animation for wheel scroll.
 	// Only active when cfg.Scroll.Smooth is true.
-	smoothScrollPos    float64 // current animated ViewOffset (fractional)
-	smoothScrollTarget float64 // destination ViewOffset
+	smoothScrollPos    float64    // current animated ViewOffset (fractional)
+	smoothScrollTarget float64    // destination ViewOffset
+	smoothScrollPane   *pane.Pane // pane the animation last drove; resync on change
 
 	// screenSettle* tracks display-change stabilisation.
 	// When NSApplicationDidChangeScreenParametersNotification fires, zurm must
