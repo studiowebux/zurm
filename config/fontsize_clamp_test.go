@@ -26,3 +26,28 @@ func TestClampFontSize(t *testing.T) {
 		})
 	}
 }
+
+func TestClampWindow(t *testing.T) {
+	cases := []struct {
+		name                            string
+		cols, rows, pad                 int
+		wantCols, wantRows, wantPadding int
+	}{
+		{"negative cols/rows", -1, -1, 4, 1, 1, 4},
+		{"zero cols/rows", 0, 0, 4, 1, 1, 4},
+		{"negative padding", 80, 24, -5, 80, 24, 0},
+		{"valid values untouched", 120, 35, 4, 120, 35, 4},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := Config{Window: WindowConfig{Columns: c.cols, Rows: c.rows, Padding: c.pad}}
+			clampWindow(&cfg)
+			if cfg.Window.Columns != c.wantCols || cfg.Window.Rows != c.wantRows || cfg.Window.Padding != c.wantPadding {
+				t.Errorf("clampWindow(cols=%d,rows=%d,pad=%d) = (%d,%d,%d), want (%d,%d,%d)",
+					c.cols, c.rows, c.pad,
+					cfg.Window.Columns, cfg.Window.Rows, cfg.Window.Padding,
+					c.wantCols, c.wantRows, c.wantPadding)
+			}
+		})
+	}
+}

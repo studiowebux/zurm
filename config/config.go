@@ -45,9 +45,9 @@ size   = 15  # points, clamped to 6–72
 #     -o ~/Library/Fonts/NotoSansSymbols2-Regular.ttf
 
 [window]
-columns = 120
-rows    = 35
-padding = 4    # pixels inside each pane edge
+columns = 120  # min 1
+rows    = 35   # min 1
+padding = 4    # pixels inside each pane edge (min 0)
 
 [shell]
 program = ""   # empty = read from $SHELL, fallback /bin/zsh
@@ -514,7 +514,7 @@ func Load() (*Config, error) {
 	}
 
 	meta, err := toml.DecodeFile(path, &cfg)
-	clampFontSize(&cfg)
+	normalize(&cfg)
 	if err != nil {
 		return &cfg, err
 	}
@@ -537,12 +537,38 @@ func LoadWithMeta() (*Config, toml.MetaData, error) {
 
 	cfg := Defaults
 	meta, err := toml.DecodeFile(path, &cfg)
-	clampFontSize(&cfg)
+	normalize(&cfg)
 	if err != nil {
 		return &cfg, meta, fmt.Errorf("config: %w", err)
 	}
 	resolveShell(&cfg)
 	return &cfg, meta, nil
+}
+
+// normalize enforces config invariants after decode so every consumer can trust
+// the values without re-checking them. Applied on every load (startup and
+// hot-reload). Each clamp logs so a user with a bad config gets a hint.
+func normalize(cfg *Config) {
+	clampFontSize(cfg)
+	clampWindow(cfg)
+}
+
+// clampWindow bounds window geometry. Columns/Rows seed the initial buffer
+// allocation (NewScreenBuffer) — a value below 1 panics there; padding below 0
+// is meaningless. (NewScreenBuffer floors dims too, as defense in depth.)
+func clampWindow(cfg *Config) {
+	if cfg.Window.Columns < 1 {
+		log.Printf("config: window.columns %d invalid, clamping to 1", cfg.Window.Columns)
+		cfg.Window.Columns = 1
+	}
+	if cfg.Window.Rows < 1 {
+		log.Printf("config: window.rows %d invalid, clamping to 1", cfg.Window.Rows)
+		cfg.Window.Rows = 1
+	}
+	if cfg.Window.Padding < 0 {
+		log.Printf("config: window.padding %d invalid, clamping to 0", cfg.Window.Padding)
+		cfg.Window.Padding = 0
+	}
 }
 
 // clampFontSize bounds Font.Size to the renderable range. Applied on every load

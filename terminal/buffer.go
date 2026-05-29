@@ -175,6 +175,15 @@ type ScreenBuffer struct {
 // maxScrollback is the maximum number of lines to keep in scrollback history.
 // maxBlocks caps the number of completed command blocks retained (0 = unlimited).
 func NewScreenBuffer(rows, cols, maxScrollback, maxBlocks int, fg, bg color.RGBA, palette [16]color.RGBA) *ScreenBuffer {
+	// A buffer with fewer than one row/col is nonsensical and makes the cell
+	// slice allocations below panic with a negative length. Floor at 1 so no
+	// caller (startup, session restore, resize) can produce a degenerate buffer.
+	if rows < 1 {
+		rows = 1
+	}
+	if cols < 1 {
+		cols = 1
+	}
 	sb := &ScreenBuffer{
 		Rows:          rows,
 		Cols:          cols,

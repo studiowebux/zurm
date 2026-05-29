@@ -19,9 +19,9 @@ size   = 15                   # font size in points (clamped to 6–72)
 # fallbacks = [...]           # see Optional Fonts page
 
 [window]
-columns = 120    # initial terminal width in character columns
-rows    = 35     # initial terminal height in character rows
-padding = 4      # pixels inside each pane edge
+columns = 120    # initial terminal width in character columns (min 1)
+rows    = 35     # initial terminal height in character rows (min 1)
+padding = 4      # pixels inside each pane edge (min 0)
 
 [shell]
 program = ""       # shell binary; empty = read from $SHELL, fallback /bin/zsh
