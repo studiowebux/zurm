@@ -756,8 +756,8 @@ func (g *Game) forceRefresh() {
 		g.flashStatus("Refreshed")
 		return
 	}
-	go g.activeFocused().Term.QueryCWD(g.ctx)
-	g.activeFocused().Term.RefreshForeground(g.ctx)
+	go g.activeFocused().Term.QueryCWD()
+	g.activeFocused().Term.RefreshForeground()
 	if g.cfg.StatusBar.ShowGit && g.status.Bar.Cwd != "" {
 		g.status.Poller.StartGitQuery(g.status.Bar.Cwd)
 	}

@@ -473,7 +473,7 @@ func (g *Game) drainShellIntegration() {
 				}
 			case 'C':
 				// Command about to execute — one-shot query for foreground name.
-				go p.Term.QueryForeground(g.ctx)
+				go p.Term.QueryForeground()
 			}
 		default:
 		}
@@ -487,14 +487,14 @@ func (g *Game) pollStatusOnOutput() {
 
 	if g.status.Poller.ShouldPollCwd(seq) {
 		if g.activeFocused() != nil {
-			go g.activeFocused().Term.QueryCWD(g.ctx)
+			go g.activeFocused().Term.QueryCWD()
 		}
 	}
 
 	if g.cfg.StatusBar.ShowProcess && g.status.Poller.ShouldPollFg(seq) && g.tabMgr.ActiveIdx < len(g.tabMgr.Tabs) {
 		for _, leaf := range g.tabMgr.Tabs[g.tabMgr.ActiveIdx].Layout.Leaves() {
 			if !leaf.Pane.Term.HasOSC133() {
-				go leaf.Pane.Term.QueryForeground(g.ctx)
+				go leaf.Pane.Term.QueryForeground()
 			}
 		}
 	}

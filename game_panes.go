@@ -232,7 +232,7 @@ func (g *Game) setFocusNoHistory(p *pane.Pane) {
 	g.input.LastClickCol = -1
 	g.input.ClickCount = 0
 	g.status.Bar.ForegroundProc = ""
-	p.Term.RefreshForeground(g.ctx)
+	p.Term.RefreshForeground()
 	if g.search.State.Open {
 		g.closeSearchOverlay()
 	}
