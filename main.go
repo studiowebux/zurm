@@ -145,6 +145,11 @@ type Game struct {
 	cfg      *config.Config
 	winW, winH int
 	dpi        float64 // device pixel ratio (2.0 on Retina)
+	// layoutW/H is the logical window size ebiten last passed to Layout.
+	// ebiten.WindowSize() can lag the framebuffer that drives Layout when the
+	// window moves between displays, so this is the authoritative logical size
+	// for committing render geometry.
+	layoutW, layoutH int
 	zoomed     bool    // focused pane temporarily fullscreened (Cmd+Z)
 
 	// Grouped state — each sub-struct owns a clear concern.
@@ -893,6 +898,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 // Layout returns the physical screen size for HiDPI rendering.
 func (g *Game) Layout(outsideW, outsideH int) (int, int) {
+	// Record the logical size ebiten is rendering against so handleResize can
+	// commit render geometry from the same source — ebiten.WindowSize() lags
+	// this when the window crosses displays, which strands the render surface
+	// at the old size (content top-left, black gap).
+	g.layoutW, g.layoutH = outsideW, outsideH
 	return int(float64(outsideW) * g.dpi), int(float64(outsideH) * g.dpi)
 }
 

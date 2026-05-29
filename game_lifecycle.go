@@ -36,7 +36,7 @@ func (g *Game) handleFocus() {
 		// wait. handleResize will keep sampling window size/DPI each frame and
 		// only commit layout once they have been unchanged for 3 consecutive
 		// frames, so zurm adapts to however long EDID negotiation actually takes.
-		w, h := ebiten.WindowSize()
+		w, h := g.logicalSize()
 		dpi := g.monitorDPI()
 		g.winW = w
 		g.screenSettleW = w
@@ -171,6 +171,18 @@ func (g *Game) monitorDPI() float64 {
 		return m.DeviceScaleFactor()
 	}
 	return g.dpi
+}
+
+// logicalSize returns the window's logical size as ebiten last reported it to
+// Layout. ebiten.WindowSize() can lag the framebuffer that drives Layout when
+// the window moves between displays, so the Layout-reported size is the
+// authoritative source for committing render geometry. Falls back to
+// ebiten.WindowSize() before the first Layout call.
+func (g *Game) logicalSize() (int, int) {
+	if g.layoutW > 0 && g.layoutH > 0 {
+		return g.layoutW, g.layoutH
+	}
+	return ebiten.WindowSize()
 }
 
 // physSize returns the physical pixel dimensions of the window.

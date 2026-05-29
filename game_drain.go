@@ -74,7 +74,7 @@ func (g *Game) handleResize() {
 	// switches, and multi-monitor DPI transitions — all of which take variable
 	// time that a fixed frame count cannot safely bound.
 	if g.screenSettleFrames > 0 {
-		w, h := ebiten.WindowSize()
+		w, h := g.logicalSize()
 		dpi := g.monitorDPI()
 		if w != g.screenSettleW || h != g.screenSettleH || dpi != g.screenSettleDPI {
 			// Geometry still changing — restart the wait.
@@ -91,7 +91,7 @@ func (g *Game) handleResize() {
 		return
 	}
 
-	w, h := ebiten.WindowSize()
+	w, h := g.logicalSize()
 	// A sleeping or disconnected display reports a 0-sized window (glfw logs
 	// "Cannot query content scale without screen"). Committing 0×0 would panic
 	// in ebiten.NewImage via Renderer.SetSize. Skip the resize — geometry
